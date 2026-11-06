@@ -37,13 +37,16 @@ enum Outcome {
 #[derive(Debug)]
 struct SyntheticState {
     owner: Owner,
+    owner_task_terminated: bool,
     handoff_offered: bool,
     handoff_accepted: bool,
     operation_cancelled: bool,
     refusal_closed: bool,
     participation_allowed: bool,
     publication: Publication,
-    outstanding: bool,
+    work_pending: bool,
+    worker_completed: bool,
+    effect_known: bool,
     outcomes: Vec<Outcome>,
     protected_mutations: usize,
 }
@@ -52,13 +55,16 @@ impl SyntheticState {
     fn new() -> Self {
         Self {
             owner: Owner::Initiator,
+            owner_task_terminated: false,
             handoff_offered: false,
             handoff_accepted: false,
             operation_cancelled: false,
             refusal_closed: true,
             participation_allowed: false,
             publication: Publication::None,
-            outstanding: false,
+            work_pending: false,
+            worker_completed: true,
+            effect_known: true,
             outcomes: Vec::new(),
             protected_mutations: 0,
         }
@@ -87,31 +93,96 @@ impl SyntheticState {
         self.participation_allowed = false;
     }
 
-    fn observe_publication(&mut self, publication: Publication) {
-        self.publication = match (self.publication, publication) {
-            (Publication::Uncertain, Publication::Visible | Publication::Acknowledged) => {
-                Publication::Uncertain
+    fn observe_publication(&mut self, publication: Publication) -> Result<(), &'static str> {
+        let next = match (self.publication, publication) {
+            (Publication::None, Publication::Pending) => Publication::Pending,
+            (Publication::Pending, Publication::Pending)
+            | (Publication::Visible, Publication::Visible)
+            | (Publication::Acknowledged, Publication::Acknowledged) => self.publication,
+            (Publication::Pending, Publication::Visible) => Publication::Visible,
+            (Publication::Visible, Publication::Acknowledged) => Publication::Acknowledged,
+            (Publication::Pending | Publication::Visible, Publication::Failed) => {
+                Publication::Failed
             }
-            (_, next) => next,
+            (
+                Publication::Pending | Publication::Visible | Publication::Acknowledged,
+                Publication::Uncertain,
+            ) => Publication::Uncertain,
+            (Publication::Acknowledged, Publication::Visible) => Publication::Acknowledged,
+            (Publication::Acknowledged, Publication::Failed) => Publication::Uncertain,
+            (Publication::Failed, _) => {
+                return Err("publication attempt failed and is terminal");
+            }
+            (Publication::Uncertain, _) => {
+                return Err("publication attempt is uncertain and terminal");
+            }
+            (_, Publication::Acknowledged) => {
+                return Err("acknowledgment requires known publication visibility");
+            }
+            (_, Publication::Visible) => {
+                return Err("visibility requires a pending publication attempt");
+            }
+            (_, Publication::Failed | Publication::Uncertain) => {
+                return Err("failure or uncertainty requires a pending attempt");
+            }
+            (Publication::None, Publication::None) => Publication::None,
+            (_, Publication::None | Publication::Pending) => {
+                return Err("publication observation cannot move backward");
+            }
         };
-        if publication == Publication::Acknowledged {
-            self.refusal_closed = true;
-        }
+        self.publication = next;
+        self.refusal_closed = true;
+        Ok(())
     }
 
-    fn observe_outcome(&mut self, outcome: Outcome) {
-        self.outstanding = false;
+    fn begin_work(&mut self) -> Result<(), &'static str> {
+        if self.work_pending || !self.effect_known {
+            return Err("cannot admit work while a prior effect is unresolved");
+        }
+        self.work_pending = true;
+        self.worker_completed = false;
+        self.effect_known = false;
+        Ok(())
+    }
+
+    fn observe_outcome(&mut self, outcome: Outcome) -> Result<(), &'static str> {
+        if !self.work_pending || self.worker_completed {
+            return Err("worker completion was already observed or not admitted");
+        }
+        self.work_pending = false;
+        self.worker_completed = true;
+        self.effect_known = outcome != Outcome::Unknown;
         self.outcomes.push(outcome);
         self.refusal_closed = true;
+        Ok(())
     }
 
-    fn lose_owner(&mut self) {
+    fn observe_owner_task_termination(&mut self) -> Result<(), &'static str> {
+        if !matches!(self.owner, Owner::Initiator | Owner::Supervisor) {
+            return Err("terminated task did not own refusal responsibility");
+        }
+        self.owner_task_terminated = true;
+        Ok(())
+    }
+
+    fn lose_owner(&mut self) -> Result<(), &'static str> {
+        if !self.owner_task_terminated {
+            return Err("ownership loss requires observed owner task termination");
+        }
         self.owner = Owner::Lost;
         if self.publication == Publication::Pending {
             self.publication = Publication::Uncertain;
         }
         self.refusal_closed = true;
         self.participation_allowed = false;
+        Ok(())
+    }
+
+    fn validate_refusal_closed(&self) -> Result<(), &'static str> {
+        if self.participation_allowed || !self.refusal_closed {
+            return Err("refusal latch reopened");
+        }
+        Ok(())
     }
 
     fn admit_protected_mutation(&mut self, actor: Owner) -> Result<(), &'static str> {
@@ -121,11 +192,17 @@ impl SyntheticState {
         if actor != self.owner || !matches!(actor, Owner::Initiator | Owner::Supervisor) {
             return Err("mutation actor does not own refusal responsibility");
         }
+        if self.owner_task_terminated {
+            return Err("ownership loss transition is missing after task termination");
+        }
         if self.publication != Publication::Acknowledged {
             return Err("protected mutation requires acknowledged publication");
         }
-        if self.outstanding {
+        if self.work_pending || !self.worker_completed {
             return Err("protected mutation blocked by outstanding work");
+        }
+        if !self.effect_known {
+            return Err("protected mutation blocked by unresolved external effect");
         }
         self.protected_mutations += 1;
         Ok(())
@@ -137,6 +214,12 @@ impl SyntheticState {
 }
 
 type TaskResult = Result<(), &'static str>;
+
+#[derive(Debug, PartialEq, Eq)]
+enum TaskTermination {
+    Cancelled,
+    Completed(TaskResult),
+}
 
 #[derive(Default)]
 struct Tasks {
@@ -170,23 +253,41 @@ impl Tasks {
         }
     }
 
-    async fn abort_and_observe(&mut self, name: &'static str) -> Result<(), String> {
+    async fn abort_and_observe(&mut self, name: &'static str) -> Result<TaskTermination, String> {
         let mut handle = self.handles.remove(name).ok_or("known task")?;
         handle.abort();
         match timeout(WATCHDOG, &mut handle).await {
             Err(_) => {
                 handle.abort();
                 match timeout(WATCHDOG, &mut handle).await {
-                    Ok(Err(error)) if error.is_cancelled() => Ok(()),
-                    Ok(Ok(_)) => Err("task completed after abort watchdog".into()),
+                    Ok(Err(error)) if error.is_cancelled() => Ok(TaskTermination::Cancelled),
+                    Ok(Ok(result)) => Ok(TaskTermination::Completed(result)),
                     Ok(Err(error)) => Err(format!("task join failed: {error}")),
                     Err(_) => Err("aborted task did not join after second watchdog".into()),
                 }
             }
-            Ok(Err(error)) if error.is_cancelled() => Ok(()),
+            Ok(Err(error)) if error.is_cancelled() => Ok(TaskTermination::Cancelled),
             Ok(Err(error)) => Err(format!("task join failed unexpectedly: {error}")),
-            Ok(Ok(_)) => Err("task completed before abort took effect".into()),
+            Ok(Ok(result)) => Ok(TaskTermination::Completed(result)),
         }
+    }
+
+    async fn abort_owner_and_observe_loss(
+        &mut self,
+        name: &'static str,
+        state: &Mutex<SyntheticState>,
+    ) -> Result<(), String> {
+        let termination = self.abort_and_observe(name).await?;
+        if termination != TaskTermination::Cancelled {
+            return Err(format!(
+                "{name} termination was not observed as cancellation: {termination:?}"
+            ));
+        }
+        let mut state = lock_state(state).await?;
+        state
+            .observe_owner_task_termination()
+            .map_err(str::to_owned)?;
+        state.lose_owner().map_err(str::to_owned)
     }
 
     async fn cleanup(&mut self) -> Result<(), String> {
@@ -277,12 +378,11 @@ async fn cancellation_before_acceptance_does_not_transfer_responsibility() {
         let mut ready = ready_rx;
         recv(&mut ready).await?;
         tasks
-            .abort_and_observe("initiator")
+            .abort_owner_and_observe_loss("initiator", &state)
             .await
             .map_err(|error| error.to_string())?;
         {
             let mut state = lock_state(&state).await?;
-            state.lose_owner();
             if state.handoff_accepted {
                 return Err("responsibility transferred without acceptance".into());
             }
@@ -314,7 +414,7 @@ async fn cancellation_before_acceptance_does_not_transfer_responsibility() {
 #[tokio::test]
 async fn accepted_supervisor_outlives_initiator_and_observes_outstanding_result() {
     let state = std::sync::Arc::new(Mutex::new(SyntheticState::new()));
-    state.lock().await.outstanding = true;
+    state.lock().await.begin_work().unwrap();
     state.lock().await.offer_handoff().unwrap();
     let (offer_tx, mut offer_rx) = mpsc::unbounded_channel::<()>();
     let (accept_tx, accept_rx) = oneshot::channel::<()>();
@@ -336,7 +436,7 @@ async fn accepted_supervisor_outlives_initiator_and_observes_outstanding_result(
             .send(())
             .map_err(|_| "test receiver unavailable")?;
         let outcome = result_rx.await.map_err(|_| "outstanding result missing")?;
-        supervisor_state.lock().await.observe_outcome(outcome);
+        supervisor_state.lock().await.observe_outcome(outcome)?;
         observed_tx
             .send(outcome)
             .map_err(|_| "test receiver unavailable")?;
@@ -367,7 +467,7 @@ async fn accepted_supervisor_outlives_initiator_and_observes_outstanding_result(
             .map_err(|error| format!("supervisor join failed: {error}"))?;
         supervisor.map_err(str::to_owned)?;
         let state = lock_state(&state).await?;
-        if state.owner != Owner::Supervisor || state.outstanding || !state.refusal_closed {
+        if state.owner != Owner::Supervisor || state.work_pending || !state.refusal_closed {
             return Err("supervisor did not retain and discharge responsibility".into());
         }
         if state.participation_allowed {
@@ -384,7 +484,11 @@ async fn accepted_supervisor_outlives_initiator_and_observes_outstanding_result(
 #[tokio::test]
 async fn operation_cancellation_after_handoff_blocks_supervisor_mutation() {
     let state = std::sync::Arc::new(Mutex::new(SyntheticState::new()));
-    state.lock().await.offer_handoff().unwrap();
+    {
+        let mut state = state.lock().await;
+        state.begin_work().unwrap();
+        state.offer_handoff().unwrap();
+    }
     let (offer_tx, mut offer_rx) = mpsc::unbounded_channel::<()>();
     let (accept_tx, accept_rx) = oneshot::channel::<()>();
     let (accepted_tx, accepted_rx) = mpsc::unbounded_channel::<()>();
@@ -405,7 +509,7 @@ async fn operation_cancellation_after_handoff_blocks_supervisor_mutation() {
             .send(())
             .map_err(|_| "test receiver unavailable")?;
         let outcome = result_rx.await.map_err(|_| "outcome missing")?;
-        supervisor_state.lock().await.observe_outcome(outcome);
+        supervisor_state.lock().await.observe_outcome(outcome)?;
         let result = supervisor_state
             .lock()
             .await
@@ -425,8 +529,9 @@ async fn operation_cancellation_after_handoff_blocks_supervisor_mutation() {
         {
             let mut state = lock_state(&state).await?;
             state.cancel_operation();
-            state.observe_publication(Publication::Visible);
-            state.observe_publication(Publication::Acknowledged);
+            state.observe_publication(Publication::Pending)?;
+            state.observe_publication(Publication::Visible)?;
+            state.observe_publication(Publication::Acknowledged)?;
         }
         let initiator = tasks
             .observe("initiator")
@@ -490,7 +595,11 @@ async fn publication_completion_before_and_after_cancellation_preserves_outcome(
         ),
     ] {
         let state = std::sync::Arc::new(Mutex::new(SyntheticState::new()));
-        state.lock().await.publication = Publication::Pending;
+        state
+            .lock()
+            .await
+            .observe_publication(Publication::Pending)
+            .unwrap();
         let (release_tx, release_rx) = oneshot::channel::<PublishResult>();
         let (done_tx, done_rx) = mpsc::unbounded_channel::<Publication>();
         let publisher_state = state.clone();
@@ -504,9 +613,9 @@ async fn publication_completion_before_and_after_cancellation_preserves_outcome(
             };
             let mut state = publisher_state.lock().await;
             if publication == Publication::Acknowledged {
-                state.observe_publication(Publication::Visible);
+                state.observe_publication(Publication::Visible)?;
             }
-            state.observe_publication(publication);
+            state.observe_publication(publication)?;
             drop(state);
             done_tx
                 .send(publication)
@@ -562,7 +671,11 @@ async fn publication_completion_before_and_after_cancellation_preserves_outcome(
     }
 
     let state = std::sync::Arc::new(Mutex::new(SyntheticState::new()));
-    state.lock().await.publication = Publication::Pending;
+    state
+        .lock()
+        .await
+        .observe_publication(Publication::Pending)
+        .unwrap();
     let (_release_tx, release_rx) = oneshot::channel::<PublishResult>();
     let mut tasks = Tasks::default();
     tasks.spawn("aborted-publisher", async move {
@@ -570,14 +683,17 @@ async fn publication_completion_before_and_after_cancellation_preserves_outcome(
         Ok(())
     });
     let scenario = async {
-        tasks
+        let termination = tasks
             .abort_and_observe("aborted-publisher")
             .await
             .map_err(|error| error.to_string())?;
+        if termination != TaskTermination::Cancelled {
+            return Err(format!("publisher was not cancelled: {termination:?}"));
+        }
         state
             .lock()
             .await
-            .observe_publication(Publication::Uncertain);
+            .observe_publication(Publication::Uncertain)?;
         let mut state = lock_state(&state).await?;
         if state.publication != Publication::Uncertain || !state.refusal_closed {
             return Err("aborted pending publication did not remain uncertain".into());
@@ -598,7 +714,7 @@ async fn supervisor_records_publication_after_initiator_task_ends() {
     let state = std::sync::Arc::new(Mutex::new(SyntheticState::new()));
     {
         let mut state = state.lock().await;
-        state.publication = Publication::Pending;
+        state.observe_publication(Publication::Pending).unwrap();
         state.offer_handoff().unwrap();
     }
     let (offer_tx, mut offer_rx) = mpsc::unbounded_channel::<()>();
@@ -626,7 +742,7 @@ async fn supervisor_records_publication_after_initiator_task_ends() {
         supervisor_state
             .lock()
             .await
-            .observe_publication(publication);
+            .observe_publication(publication)?;
         observed_tx
             .send(publication)
             .map_err(|_| "test receiver unavailable")?;
@@ -686,8 +802,11 @@ async fn supervisor_records_publication_after_initiator_task_ends() {
 #[tokio::test]
 async fn supervisor_abort_is_observed_and_late_external_result_stays_closed() {
     let state = std::sync::Arc::new(Mutex::new(SyntheticState::new()));
-    state.lock().await.outstanding = true;
-    state.lock().await.offer_handoff().unwrap();
+    {
+        let mut state = state.lock().await;
+        state.begin_work().unwrap();
+        state.offer_handoff().unwrap();
+    }
     let (release_tx, release_rx) = oneshot::channel::<Outcome>();
     let (observed_tx, observed_rx) = mpsc::unbounded_channel::<Outcome>();
     let (supervisor_started_tx, mut supervisor_started_rx) = mpsc::unbounded_channel::<()>();
@@ -698,7 +817,7 @@ async fn supervisor_abort_is_observed_and_late_external_result_stays_closed() {
         let outcome = release_rx
             .await
             .map_err(|_| "external result gate dropped")?;
-        result_state.lock().await.observe_outcome(outcome);
+        result_state.lock().await.observe_outcome(outcome)?;
         observed_tx
             .send(outcome)
             .map_err(|_| "test receiver unavailable")?;
@@ -717,15 +836,14 @@ async fn supervisor_abort_is_observed_and_late_external_result_stays_closed() {
     let scenario = async {
         recv(&mut supervisor_started_rx).await?;
         tasks
-            .abort_and_observe("supervisor")
+            .abort_owner_and_observe_loss("supervisor", &state)
             .await
             .map_err(|error| error.to_string())?;
         {
-            let mut state = lock_state(&state).await?;
-            if state.owner != Owner::Supervisor || !state.handoff_accepted {
+            let state = lock_state(&state).await?;
+            if state.owner != Owner::Lost || !state.handoff_accepted {
                 return Err("supervisor did not accept responsibility".into());
             }
-            state.lose_owner();
         }
         release_tx
             .send(Outcome::Unknown)
@@ -743,6 +861,9 @@ async fn supervisor_abort_is_observed_and_late_external_result_stays_closed() {
         if state.owner != Owner::Lost || state.outcomes != [Outcome::Unknown] {
             return Err("supervisor loss or late result erased state".into());
         }
+        if !state.worker_completed || state.effect_known {
+            return Err("unknown external effect was not retained as unresolved".into());
+        }
         if state.admit_protected_mutation(Owner::Supervisor).is_ok() {
             return Err("late completion reopened participation".into());
         }
@@ -759,20 +880,28 @@ async fn successful_application_and_cleanup_do_not_reopen_participation() {
     let state = std::sync::Arc::new(Mutex::new(SyntheticState::new()));
     let (apply_tx, apply_rx) = oneshot::channel::<()>();
     let (done_tx, done_rx) = mpsc::unbounded_channel::<()>();
+    let (_cleanup_release_tx, cleanup_release_rx) = oneshot::channel::<()>();
     let task_state = state.clone();
     let mut tasks = Tasks::default();
 
     tasks.spawn("application", async move {
         apply_rx.await.map_err(|_| "application gate dropped")?;
         let mut state = task_state.lock().await;
-        state.observe_publication(Publication::Visible);
-        state.observe_publication(Publication::Acknowledged);
+        state.observe_publication(Publication::Pending)?;
+        state.observe_publication(Publication::Visible)?;
+        state.observe_publication(Publication::Acknowledged)?;
+        state.begin_work()?;
+        state.observe_outcome(Outcome::Observed)?;
         state
             .admit_protected_mutation(Owner::Initiator)
             .map_err(|_| "application refused")?;
-        state.refusal_closed = true;
-        state.outcomes.push(Outcome::Observed);
         done_tx.send(()).map_err(|_| "test receiver unavailable")?;
+        Ok(())
+    });
+    tasks.spawn("cleanup-watcher", async move {
+        cleanup_release_rx
+            .await
+            .map_err(|_| "cleanup watcher released")?;
         Ok(())
     });
 
@@ -787,11 +916,6 @@ async fn successful_application_and_cleanup_do_not_reopen_participation() {
             .await
             .map_err(|error| format!("application join failed: {error}"))?;
         result.map_err(str::to_owned)?;
-        {
-            let mut state = lock_state(&state).await?;
-            state.refusal_closed = true;
-            state.participation_allowed = false;
-        }
         Ok::<(), String>(())
     }
     .await;
@@ -800,8 +924,163 @@ async fn successful_application_and_cleanup_do_not_reopen_participation() {
     assert!(scenario.is_ok(), "{scenario:?}");
     let state = state.lock().await;
     assert_eq!(state.protected_mutations, 1);
-    assert!(state.refusal_closed);
-    assert!(!state.participation_allowed);
+    state.validate_refusal_closed().unwrap();
+}
+
+#[tokio::test]
+async fn unknown_effect_blocks_mutation_but_known_disposition_allows_it() {
+    let unknown = std::sync::Arc::new(Mutex::new(SyntheticState::new()));
+    {
+        let mut state = unknown.lock().await;
+        state.observe_publication(Publication::Pending).unwrap();
+        state.observe_publication(Publication::Visible).unwrap();
+        state
+            .observe_publication(Publication::Acknowledged)
+            .unwrap();
+        state.begin_work().unwrap();
+        state.observe_outcome(Outcome::Unknown).unwrap();
+        assert!(state.worker_completed, "worker completion must be distinct");
+        assert!(!state.work_pending);
+        assert!(!state.effect_known, "Unknown must remain unresolved");
+        assert_eq!(
+            state.admit_protected_mutation(Owner::Initiator),
+            Err("protected mutation blocked by unresolved external effect"),
+            "valid publication/work prefix must reject mutation due to Unknown effect"
+        );
+        assert_eq!(
+            state.observe_outcome(Outcome::Observed),
+            Err("worker completion was already observed or not admitted"),
+            "duplicate known outcome must not resolve an Unknown effect"
+        );
+        assert!(!state.effect_known);
+    }
+
+    let known = std::sync::Arc::new(Mutex::new(SyntheticState::new()));
+    {
+        let mut state = known.lock().await;
+        state.observe_publication(Publication::Pending).unwrap();
+        state.observe_publication(Publication::Visible).unwrap();
+        state
+            .observe_publication(Publication::Acknowledged)
+            .unwrap();
+        state.begin_work().unwrap();
+        state.observe_outcome(Outcome::Observed).unwrap();
+        assert!(state.worker_completed);
+        assert!(state.effect_known);
+        assert_eq!(state.admit_protected_mutation(Owner::Initiator), Ok(()));
+        assert_eq!(state.protected_mutations, 1);
+    }
+}
+
+#[tokio::test]
+async fn failed_and_uncertain_publication_attempts_cannot_become_acknowledged() {
+    let mut failed = SyntheticState::new();
+    assert_eq!(
+        failed.observe_publication(Publication::Pending),
+        Ok(()),
+        "pending publication is a valid prefix"
+    );
+    assert_eq!(failed.observe_publication(Publication::Failed), Ok(()));
+    assert_eq!(failed.publication, Publication::Failed);
+    assert_eq!(
+        failed.observe_publication(Publication::Acknowledged),
+        Err("publication attempt failed and is terminal"),
+        "Failed -> Acknowledged must be rejected"
+    );
+    assert_eq!(failed.publication, Publication::Failed);
+    assert_eq!(
+        failed.admit_protected_mutation(Owner::Initiator),
+        Err("protected mutation requires acknowledged publication")
+    );
+
+    let mut uncertain = SyntheticState::new();
+    assert_eq!(uncertain.observe_publication(Publication::Pending), Ok(()));
+    assert_eq!(
+        uncertain.observe_publication(Publication::Uncertain),
+        Ok(()),
+        "pending -> uncertain is a valid prefix"
+    );
+    assert_eq!(uncertain.publication, Publication::Uncertain);
+    assert_eq!(
+        uncertain.observe_publication(Publication::Failed),
+        Err("publication attempt is uncertain and terminal"),
+        "Uncertain -> Failed must be rejected"
+    );
+    assert_eq!(
+        uncertain.observe_publication(Publication::Acknowledged),
+        Err("publication attempt is uncertain and terminal"),
+        "Uncertain -> Acknowledged must be rejected"
+    );
+    assert_eq!(uncertain.publication, Publication::Uncertain);
+    assert_eq!(
+        uncertain.admit_protected_mutation(Owner::Initiator),
+        Err("protected mutation requires acknowledged publication")
+    );
+}
+
+#[tokio::test]
+async fn missing_owner_loss_transition_after_observed_task_abort_is_rejected() {
+    let state = std::sync::Arc::new(Mutex::new(SyntheticState::new()));
+    {
+        let mut state = state.lock().await;
+        state.observe_publication(Publication::Pending).unwrap();
+        state.observe_publication(Publication::Visible).unwrap();
+        state
+            .observe_publication(Publication::Acknowledged)
+            .unwrap();
+        state.offer_handoff().unwrap();
+    }
+    let (started_tx, mut started_rx) = mpsc::unbounded_channel::<()>();
+    let (_gate_tx, gate_rx) = oneshot::channel::<()>();
+    let supervisor_state = state.clone();
+    let mut tasks = Tasks::default();
+    tasks.spawn("supervisor", async move {
+        supervisor_state.lock().await.accept_handoff()?;
+        started_tx
+            .send(())
+            .map_err(|_| "test receiver unavailable")?;
+        gate_rx.await.map_err(|_| "supervisor gate dropped")?;
+        Ok(())
+    });
+
+    let scenario = async {
+        recv(&mut started_rx).await?;
+        let termination = tasks
+            .abort_and_observe("supervisor")
+            .await
+            .map_err(|error| error.to_string())?;
+        if termination != TaskTermination::Cancelled {
+            return Err(format!("expected observed abort, got {termination:?}"));
+        }
+        {
+            let mut state = lock_state(&state).await?;
+            if state.owner != Owner::Supervisor || !state.handoff_accepted {
+                return Err("supervisor acceptance prefix was not established".into());
+            }
+            state
+                .observe_owner_task_termination()
+                .map_err(str::to_owned)?;
+            assert_eq!(
+                state.admit_protected_mutation(Owner::Supervisor),
+                Err("ownership loss transition is missing after task termination"),
+                "faulted prefix must detect omitted ownership-loss transition"
+            );
+            state.lose_owner().map_err(str::to_owned)?;
+            assert_eq!(state.owner, Owner::Lost);
+            assert!(state.validate_refusal_closed().is_ok());
+        }
+        Ok::<(), String>(())
+    }
+    .await;
+    let cleanup = tasks.cleanup().await;
+    assert!(
+        cleanup.is_ok(),
+        "missed-owner-loss sensitivity: {cleanup:?}"
+    );
+    assert!(
+        scenario.is_ok(),
+        "missed-owner-loss sensitivity: {scenario:?}"
+    );
 }
 
 #[tokio::test]
@@ -830,6 +1109,13 @@ async fn sensitivity_controls_reject_unauthorized_mutation_handoff_and_reopen() 
         unauthorized.reopen(),
         Err("no modeled transition may reopen participation")
     );
+    unauthorized.participation_allowed = true;
+    assert_eq!(
+        unauthorized.validate_refusal_closed(),
+        Err("refusal latch reopened"),
+        "faulted unauthorized reopening must be detected"
+    );
+    unauthorized.participation_allowed = false;
     assert!(unauthorized.refusal_closed);
     assert!(!unauthorized.participation_allowed);
 }

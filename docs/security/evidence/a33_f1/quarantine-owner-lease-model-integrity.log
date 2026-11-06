@@ -302,3 +302,86 @@ Final checks:
 Only the isolated harness and its append-only plan/evidence/checksum entries
 changed. No PR, merge, main push, force-push, live node/network, operational
 signing, deployment or activation was performed.
+
+Tokio harness review correction
+==============================
+
+Entry verification:
+  repository: /workspaces/QBIND/olivexo28/QBIND
+  branch: copilot/a33-f1-bounded-eviction
+  HEAD/task tip: de33ffaba23722026f1ffec3cf0541288b88bdd7
+  direct remote task tip: de33ffaba23722026f1ffec3cf0541288b88bdd7
+  local/direct remote protected main:
+    c9aaef40b045e896ddfa8b01bad230f6b680715e
+  worktree was clean before changes.
+
+Expected seven changed paths:
+  crates/qbind-node/tests/a33_f1_quarantine_tokio_owner_lease_tests.rs
+  docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+  docs/security/evidence/a33_f1/SHA256SUMS
+  docs/security/evidence/a33_f1/quarantine-owner-lease-model-integrity.log
+  docs/security/evidence/a33_f1/quarantine-owner-lease-tokio-correction.md
+  docs/security/evidence/a33_f1/quarantine-owner-lease-tokio-correction-raw.log
+  docs/security/evidence/a33_f1/quarantine-owner-lease-tokio-prior-raw.log
+
+The original committed focused log and substituted-snapshot model test are
+not edited. The prior focused raw output was available at
+`/tmp/a33-f1-tokio-owner-lease-tests.log`: 17125 bytes, SHA-256
+fe77714162dc5fb6311dc0c1070ed3721c3fab62024fdff769304c173c54a1c2.
+`cmp` confirmed the committed `quarantine-owner-lease-tokio-prior-raw.log`
+is byte-identical. That raw output says running 8, 8 passed, 0 failed,
+0 ignored, resolving the old focused-log count discrepancy without editing
+the historical log.
+
+The corrected target's captured output is preserved verbatim in
+`quarantine-owner-lease-tokio-correction-raw.log`: running 11, 11 passed,
+0 failed, 0 ignored. The new negative transition controls are assertions
+inside passing tests, not separately counted failed tests. The build emitted
+eight qbind-node library dead-code warnings; the test binary had none. The
+exact test and formatting commands are in the correction
+evidence.
+
+Starting byte prefixes:
+  plan: 438588 bytes
+  SHA256SUMS: 17668 bytes
+  this integrity log: 15060 bytes
+  substituted-snapshot test: unchanged from HEAD
+  historical Tokio focused log: unchanged from HEAD
+
+Final scope, formatting, whitespace, prefix, raw-output, ordinary checksum,
+and revision-aware checksum results are appended after verification.
+
+Final verification:
+  PASS exact seven-path scope; no production source, Cargo manifest, backend,
+       startup/CLI, gate, clear/resume, or substituted-snapshot test changes.
+  PASS append-only prefixes: plan 438588 bytes, SHA256SUMS 17668 bytes,
+       prior integrity log 15060 bytes.
+  PASS substituted-snapshot test and historical focused log are byte-identical
+       to HEAD.
+  PASS targeted rustfmt and whitespace checks for source and documentation;
+       `git diff --check` reports only the intentional blank final line in
+       each byte-preserved raw transcript (two newlines at EOF). The two raw
+       files are excluded from normalized whitespace checking to preserve
+       exact captured output.
+  PASS correction evidence links and Markdown fences.
+  PASS corrected target:
+       cargo test -p qbind-node --test a33_f1_quarantine_tokio_owner_lease_tests -- --nocapture --test-threads=1
+       11 passed, 0 failed, 0 ignored; exact raw output retained.
+  PASS prior raw output preserved byte-for-byte; actual old run was 8 passed,
+       0 failed, 0 ignored (not the committed log's erroneous "running 7").
+  Ordinary checksum before appending the current integrity hash:
+       (cd docs/security/evidence/a33_f1 && sha256sum --check SHA256SUMS)
+       exit=1; 164 entries; 138 OK; 26 historical FAILED.
+  Revision-aware checksum before appending the current integrity hash:
+       164 entries; 138 current; 26 verified at producing revisions;
+       zero unverified.
+
+The final integrity hash is appended as a new manifest row, preserving all
+previous manifest bytes. Final post-append checksum results are verified
+after that append. No production operation or activation occurred.
+
+Post-append verification:
+  Ordinary `sha256sum --check SHA256SUMS`: exit=1; 165 entries;
+  139 OK; 26 historical FAILED.
+  Revision-aware verification: 165 entries; 139 current; 26 verified
+  against producing Git revisions; zero unverified.

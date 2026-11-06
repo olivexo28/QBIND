@@ -5800,3 +5800,41 @@ storage, snapshot, callback or outbound work. No startup enforcement,
 signer exclusivity, currentness, durable marker, recovery, clear or resume
 authority is established. A33-F1 / E27 and all remaining obligations remain
 **OPEN**; activation **DISABLED**; public DevNet **NO-GO**.
+
+## 56. Correct Tokio harness outcome, publication, and owner-loss controls
+
+**TOKIO HARNESS CORRECTED — INDEPENDENT REVIEW PENDING.**
+Repository, branch, clean worktree, local main, and direct remote refs were
+verified at task entry. Branch `copilot/a33-f1-bounded-eviction` was at
+`de33ffaba23722026f1ffec3cf0541288b88bdd7`; local and remote protected main
+were `c9aaef40b045e896ddfa8b01bad230f6b680715e`, and direct remote task tip
+matched the expected commit.
+
+The test-only Tokio harness now tracks worker completion separately from
+effect knowledge; `Unknown` remains unresolved and blocks mutation, while a
+completed known disposition permits the next modeled step when its other
+guards hold. A single publication attempt has monotonic visible,
+acknowledged, failed, and uncertain states. Failed and uncertain attempts
+cannot later become acknowledged; retries are not modeled. Ownership loss
+is applied only after an abort result is observed as `JoinError::is_cancelled`
+on the `JoinHandle`; an abort request or completed-before-abort result does
+not imply cancellation. A sensitivity case demonstrates that omission of
+the loss transition is refused. Ordinary cleanup no longer writes expected
+latch values immediately before checking them.
+
+The historical focused-results log and substituted-snapshot model test were
+left byte-for-byte unchanged. The previously available original captured
+output resolves the old log discrepancy: the committed text said
+`running 7 tests`, but the raw run reported 8 passing tests, 0 failures, and
+0 ignored. Both that exact output and the corrected focused run are retained
+as raw artifacts, separate from explanatory documentation. The corrected
+target reports **11 passed, 0 failed, 0 ignored**. Exact command and result
+are recorded in
+[the correction evidence](evidence/a33_f1/quarantine-owner-lease-tokio-correction.md).
+
+No production path, backend, startup/CLI gate, clear/resume path, or
+substituted-snapshot model test changed. The harness does not establish
+filesystem or crash durability, OS resource reclamation, supervisor survival
+across process/runtime loss, or fencing of production signer, storage,
+snapshot, callback, or outbound work. A33-F1 / E27 and remaining obligations
+remain **OPEN**; activation **DISABLED**; public DevNet **NO-GO**.
