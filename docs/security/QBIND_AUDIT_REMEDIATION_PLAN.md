@@ -6163,3 +6163,28 @@ unchanged. This is test-support-only evidence and establishes no production
 capacity, durable evidence, worker reclamation, startup enforcement, signer
 fencing, or activation. A33-F1 / E27 remain **OPEN**; activation **DISABLED**;
 public DevNet **NO-GO**.
+
+## 63. E1 worker-result capacity evidence reconciliation
+
+**E1 EVIDENCE RECONCILIATION — INDEPENDENT REVIEW PENDING.**
+The separate append-only record
+`evidence/a33_f1/quarantine-owner-lease-worker-result-capacity-reconciliation.md`
+is pinned to `e950c437acba6012614f1e369f1a0d68bd588229`.
+Its final manifest has 209 entries, distinct from the preserved earlier
+207-entry intermediate report. Independent checks reproduce ordinary
+checksum exit 1 (160 OK, 49 FAILED) and verify the two intermediate
+integrity-log digests as exact 46,704-byte and 48,188-byte prefixes of the
+committed log. Prefix recoverability does not establish a producing Git
+revision or a current-file checksum pass. Both producing revisions remain
+unestablished. The author's reported 47 historical producing-revision
+matches were not fully reverified in this documentation-only follow-up.
+
+The user-supplied PASS WITH LIMITATIONS review closes the capacity controls
+and bounded meaning of Recorded; W1/W2, P1/P2 and earlier accepted controls
+remain closed within their reviewed scopes. The reviewer did not rerun
+Rust tests or complete historical checksum verification. Existing source,
+tests, integrity log and raw evidence are unchanged; plan and manifest
+updates are append-only. Later manifest totals are reported separately
+from the pinned 209-entry result. No production capacity or recovery
+assurance follows. A33-F1 / E27 remain **OPEN**; activation **DISABLED**;
+public DevNet **NO-GO**.
