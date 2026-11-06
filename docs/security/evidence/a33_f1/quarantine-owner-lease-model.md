@@ -187,3 +187,90 @@ drain/fence, and outcome reporting for every external effect domain. The
 engine lease must not be presented as a process-wide or deployment-wide
 fence. A33-F1 / E27 and remaining obligations remain **OPEN**; activation
 **DISABLED**; public DevNet **NO-GO**.
+
+## User-supplied review correction — revalidation, cancellation, and late work
+
+This append-only correction records the user-supplied review. No reviewer
+identity or raw review artifact was provided. It supersedes earlier model
+descriptions where they conflate initiating-task termination with operation
+cancellation or imply that mutation can proceed without a fresh post-ack
+revalidation.
+
+### Event semantics and mutation gate
+
+`InitiatorTaskEnded` models loss of the initiating task, not cancellation of
+the operation. Before an accepted handoff, ending the initiator loses the
+engine lease and leaves the operation closed/unknown. After the supervisor
+accepts the handoff, ending the initiator leaves the supervisor as refusal
+owner with the lease, able to observe publication and outstanding outcomes.
+`OperationCancelled` is a distinct, monotonic event. It blocks all later
+protected mutations—including supervisor mutations—and new admissions, but
+does not undo visible/acknowledged publication or known effects. Task
+completion, cleanup, accepted handoff, late publication observation, and
+publication acknowledgment do not clear operation cancellation. A modeled
+restart does not reset it.
+
+The checker tracks `revalidated_after_ack`. A protected mutation requires a
+successful tuple equality check after acknowledged Applying publication,
+while the same initiator/supervisor still owns the continuous engine lease;
+the revalidation event must be immediately before the mutation in this
+conservative trace model. Any intervening event makes it stale. A changed
+tuple is rejected. Lease drop, task loss before handoff, supervisor loss, or
+intervening engine mutation invalidates the lease; a matching tuple cannot
+restore it. Tuple equality is only a changed-value check between
+observations, not a complete event-history or production fencing mechanism.
+
+### Pre-existing work and late observations
+
+`OperationAdmitted` can occur under an accepted external-domain owner before
+the quarantine operation starts, or during its Applying publication before
+acknowledgment. Each admission is tracked as pending and unresolved. Pending
+work blocks protected mutation until a known disposition is observed and the
+domain is fenced; `Unknown`, cancellation, owner loss, duplicate or
+out-of-order outcomes preserve unresolved obligations/conflicts and known
+effects. An engine lease does not establish ownership of signer, storage,
+snapshot, callback, or outbound domains.
+
+`LatePublicationObserved` records visibility/uncertainty after the original
+publisher or lease is lost. An accepted supervisor can observe the late
+result while retaining responsibility. With no active owner (or during the
+modeled restart coordinator state), visibility is retained but marked
+uncertain and cannot be acknowledged as a mutation permit. A supervisor may
+record a late visible result and even the Applying acknowledgment after
+operation cancellation; cancellation still forbids mutation. Late and
+duplicate completion events preserve observed effects and cannot erase
+Unknown or conflicts, including across modeled restart.
+
+Loss of the last owner or modeled restart while publication is started but
+not acknowledged immediately marks publication uncertain. A later visibility
+observation may add a known-visible fact, but cannot clear that uncertainty
+or restore a live lease.
+
+### Corrected focused result
+
+The corrected target was formatted and tested with:
+
+```sh
+rustfmt --edition 2021 crates/qbind-node/tests/a33_f1_quarantine_owner_lease_model_tests.rs
+rustfmt --edition 2021 --check crates/qbind-node/tests/a33_f1_quarantine_owner_lease_model_tests.rs
+cargo test -p qbind-node --test a33_f1_quarantine_owner_lease_model_tests -- --nocapture --test-threads=1
+```
+
+Final result: **16 passed, 0 failed, 9 ignored**. The 16 passing tests
+include valid post-ack revalidation/mutation, rejection when revalidation is
+missing/stale/pre-ack, accepted handoff followed by initiator task end,
+operation cancellation after handoff, pre-existing pending/Unknown work,
+supervisor and unowned late publication, late outcomes and restart. The nine
+ignored child fixtures are deliberately defective sensitivity controls and
+are not counted as passing security tests. Their parent launched each child;
+all nine exited 101 with the intended checker diagnostic after the parent
+first verified that each prefix was accepted and the defective transition
+was rejected for the expected reason. Exact command and result details are
+appended to the focused log.
+
+The model remains deterministic and test-only. It does not prove Tokio
+cancellation or supervision, filesystem/crash durability, startup
+enforcement, signer fencing, or network delivery. No production backend,
+gate, allow/clear/resume path, or generation mechanism is selected.
+A33-F1 / E27 and remaining obligations remain **OPEN**; activation
+**DISABLED**; public DevNet **NO-GO**.

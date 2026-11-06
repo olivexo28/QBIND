@@ -5688,3 +5688,48 @@ cancellation-safe owner lease, durable publisher, startup refusal, and
 external-domain fence; these remain implementation blockers. No production
 path was changed or wired. A33-F1 / E27 and remaining obligations remain
 **OPEN**; activation **DISABLED**; public DevNet **NO-GO**.
+
+## 53. Correct test-only owner/lease lifecycle from supplied review
+
+**TEST-ONLY OWNER/LEASE MODEL CORRECTED — INDEPENDENT REVIEW PENDING.**
+Entry checks matched repository `olivexo28/QBIND`, branch
+`copilot/a33-f1-bounded-eviction`, clean worktree, expected HEAD and direct
+remote task tip `b956d7af1af198dac5350dfa4645f085625a53c5`, and protected
+local/remote main `c9aaef40b045e896ddfa8b01bad230f6b680715e`.
+
+The user-supplied correction is appended to the
+[test-only model contract](evidence/a33_f1/quarantine-owner-lease-model.md)
+and attributed without inventing a reviewer identity or raw artifact.
+`InitiatorTaskEnded` now models task loss separately from monotonic
+`OperationCancelled`; an accepted supervisor retains responsibility after
+initiator task end, while operation cancellation forbids subsequent
+protected mutation even after visibility or acknowledgment. Pre-existing
+external operations are represented before acquisition or Applying
+acknowledgment and remain pending/Unknown until observed and fenced.
+
+The shared checker requires successful post-ack tuple revalidation under the
+same continuous engine lease immediately before mutation; intervening trace
+events stale that check. Loss/invalidity of the lease cannot be repaired by
+tuple equality. Late visibility is recorded by the responsible supervisor
+or as uncertain without an active owner. Late/duplicate outcomes and
+conflicts remain conservative across cancellation and modeled restart.
+External effect-domain ownership remains separate from the engine lease.
+
+Focused command:
+`cargo test -p qbind-node --test
+a33_f1_quarantine_owner_lease_model_tests -- --nocapture --test-threads=1`;
+final result **16 passed, 0 failed, 9 ignored**. The parent test verified
+accepted prefixes and intended rejection reasons, then launched all nine
+deliberately defective child controls; all nine exited 101. Ignored children
+are not counted as passing security tests. Exact results, formatting,
+scope, append-only prefix and revision-aware checksum checks are recorded in
+[the appended integrity evidence](evidence/a33_f1/quarantine-owner-lease-model-integrity.log).
+Ordinary checksum failures are historical and reported separately there.
+
+Only the model, its documentation/evidence, this append-only plan entry, and
+the evidence checksum manifest changed. No production path or audit register
+changed. Mocked cancellation, handoff, publication and restart do not prove
+Tokio behavior, filesystem durability, startup enforcement, signer fencing,
+or network delivery. No backend, gate, allow/clear/resume path, or generation
+mechanism is selected. A33-F1 / E27 and remaining obligations remain
+**OPEN**; activation **DISABLED**; public DevNet **NO-GO**.

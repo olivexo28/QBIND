@@ -451,3 +451,45 @@ Observed result: 11 passed, 0 failed, 5 ignored, 0 measured. The parent
 launcher again rejected all five defective child controls with status 101
 and their expected diagnostics. The ignored child fixtures are not counted
 as passing tests; the passing count is the 11 non-ignored tests only.
+
+## User-supplied review correction — final rerun
+
+The following exact commands ran after the lifecycle correction:
+
+```sh
+rustfmt --edition 2021 crates/qbind-node/tests/a33_f1_quarantine_owner_lease_model_tests.rs
+rustfmt --edition 2021 --check crates/qbind-node/tests/a33_f1_quarantine_owner_lease_model_tests.rs
+cargo test -p qbind-node --test a33_f1_quarantine_owner_lease_model_tests -- --nocapture --test-threads=1
+```
+
+Final focused result: **16 passed, 0 failed, 9 ignored, 0 measured**. The
+passing count excludes ignored child fixtures. The parent first checked
+each valid prefix and the exact checker rejection for its defective next
+transition, then launched each deliberately defective child. All nine child
+processes exited with status 101 and the intended diagnostic:
+
+  dropped lease reopens participation:
+    no modeled transition may reopen participation
+  handoff before receiver acceptance:
+    supervisor ownership transferred before acceptance
+  ABA tuple equality after lease loss:
+    tuple equality cannot restore a lost or invalidated lease
+  late completion clears Unknown:
+    completion cleared unresolved or conflicting obligation
+  duplicate completion clears conflict:
+    completion cleared unresolved or conflicting obligation
+  mutation without post-ack revalidation:
+    protected mutation requires post-ack tuple revalidation
+  operation cancellation after accepted handoff:
+    operation cancellation forbids protected mutation
+  pre-existing pending work omitted:
+    protected mutation lacks live owner lease or resolved obligations
+  late visible publication after cancellation:
+    operation cancellation forbids protected mutation
+
+Positive traces include valid revalidation immediately before mutation,
+accepted supervisor ownership after initiator task end, pre-existing work
+resolved before mutation, publication visibility observed after cancellation
+without gaining authority, uncertain publication after owner loss, and
+pending/known outcomes retained through modeled restart. These are
+deterministic test-model traces only, not process or deployment evidence.

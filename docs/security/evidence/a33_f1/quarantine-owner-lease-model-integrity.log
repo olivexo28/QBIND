@@ -102,3 +102,69 @@ This is test-only deterministic model evidence. No production path, task
 scheduler, filesystem, crash/power-loss, startup, signer, node, network, or
 deployment behavior was tested. A33-F1 / E27 and remaining obligations
 remain OPEN; activation DISABLED; public DevNet NO-GO.
+
+## User-supplied review correction — final verification
+
+Starting commit: `b956d7af1af198dac5350dfa4645f085625a53c5`; protected
+main: `c9aaef40b045e896ddfa8b01bad230f6b680715e`. Direct `git ls-remote
+origin` matched both expected task tip and main; no fetch/fast-forward was
+needed. Worktree was clean before edits. The following exact starting bytes
+are preserved as prefixes:
+
+  plan: 431858 bytes
+  SHA256SUMS: 15907 bytes
+  owner/lease model document: 11756 bytes
+  focused log: 19977 bytes
+  this integrity log: 4871 bytes
+
+The test target is an edited model source, not historical evidence; no other
+source file is in scope. Final expected path set:
+
+  crates/qbind-node/tests/a33_f1_quarantine_owner_lease_model_tests.rs
+  docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+  docs/security/evidence/a33_f1/SHA256SUMS
+  docs/security/evidence/a33_f1/quarantine-owner-lease-model.md
+  docs/security/evidence/a33_f1/quarantine-owner-lease-model-focused.log
+  docs/security/evidence/a33_f1/quarantine-owner-lease-model-integrity.log
+
+The focused command was rerun after the final model edit:
+
+  cargo test -p qbind-node --test a33_f1_quarantine_owner_lease_model_tests -- --nocapture --test-threads=1
+
+Result: **16 passed, 0 failed, 9 ignored, 0 measured**. The parent test
+verified all nine valid prefixes and exact intended checker rejections,
+then launched all nine intentionally defective child processes; each exited
+101. Ignored children are not included in the passing count. Exact
+diagnostics are in `quarantine-owner-lease-model-focused.log`.
+
+The state model now distinguishes operation cancellation from initiating
+task termination. It requires a successful post-ack tuple revalidation
+under the same live lease immediately before mutation; any intervening
+event stales the revalidation. Admissions before the operation or Applying
+ack are retained as pending work. Accepted supervision survives initiator
+task end, while operation cancellation remains monotonic. Late publication
+visibility with a supervisor is recorded but cannot override cancellation;
+without an owner it remains uncertain. Known effects, Unknown and conflicts
+are retained through cancellation and modeled restart.
+
+Final scope, formatting, whitespace, documentation-link/fence, source-range
+and append-only-prefix checks passed. Ordinary `sha256sum --check` was run
+after appending updated artifact hashes. Its actual entry counts and the
+revision-aware verification of every historical mismatch are recorded in
+the final task report. The old checksum lines remain unchanged; each old
+hash for an edited artifact is checked against its producing Git revision.
+
+No Tokio scheduling, filesystem/crash durability, startup, signer fencing,
+network delivery, production gate/backend, or deployment behavior was
+tested. No production source, audit register, backend, gate, allow/clear/
+resume path, or generation mechanism was changed or selected.
+
+Pre-manifest revision-aware verification found 16 stale historical entries:
+the previously recorded 11 plus the prior-at-`b956d7a` checksums for the
+five artifacts updated in this correction (model test, plan, model document,
+focused log, and integrity log). All 16 expected digests matched bytes from
+their producing Git revisions; no prior checksum line was changed. Five
+current artifact hashes are appended for those edited artifacts. The final
+ordinary check is expected to report 149 entries, 133 current-byte matches,
+and 16 preserved historical mismatches; the command is rerun after the
+append and its observed counts are reported separately.
