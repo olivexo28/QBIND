@@ -669,3 +669,77 @@ Component limitations remain as stated in the correction evidence: no
 crash/runtime durability, OS reclamation, production work fencing, or
 activation claim. A33-F1 / E27 and all other unresolved obligations remain
 OPEN; activation DISABLED; public DevNet NO-GO.
+
+Worker-observation investigation:
+  Baseline tip: 8521941968953a5149d7811616182acbd68e3bc0, detached temporary
+  worktree; focused target 19 passed, 0 failed, 0 ignored.
+  Baseline command:
+    CARGO_TARGET_DIR=/workspaces/QBIND/olivexo28/QBIND/target cargo test -p qbind-node --test a33_f1_inprocess_owner_prototype_tests
+  Corrected focused command:
+    cargo test -p qbind-node --test a33_f1_inprocess_owner_prototype_tests
+    exit=0; 24 passed, 0 failed, 0 ignored.
+  Direct regression:
+    cargo test -p qbind-node --test a33_f1_quarantine_tokio_owner_lease_tests
+    exit=0; 12 passed, 0 failed, 0 ignored.
+  Raw outputs are preserved in
+    quarantine-owner-lease-worker-observation-baseline.log
+    quarantine-owner-lease-worker-observation-focused.log
+    quarantine-owner-lease-worker-observation-regression.log
+  The sensitivity control expects the common checker to reject a missing
+  `worker_result_unobserved` marker; it is an assertion within the 24 passing
+  tests, not a separately passing security test.
+
+The worker's abort request, test-only worker-future Drop notification,
+JoinHandle result observation, synthetic publication, and owner-recorded
+effect are distinct. Coordinator loss drops the worker JoinHandle, so its
+actual result is not observed and no observer survives in this prototype.
+Pre-effect controls show no mock publication and no recorded outcome;
+post-publication control shows acknowledged mock publication but no
+coordinator-observed worker result. Admission refuses with `SupervisorLost`
+without incrementing the synthetic admission counter. The `StateReader`
+remains alive in shutdown controls and holds a command sender, so no
+channel-closure inference is made. The normal control observes both actual
+join results.
+
+Intermediate compilation failure: the test-only marker clearer was added
+to the wrong handle, and `WorkerDropNotify::drop` attempted to move its
+sender from `&mut self`. Both were corrected. The intermediate raw compiler
+output was not retained; it is not counted as test evidence. Targeted
+formatting and `git diff --check` completed successfully.
+
+This is test-support-only evidence. The test-specific future-drop signal is
+not OS/runtime reclamation, and no external-effect absence, process/runtime
+durability, production ownership, startup, signer, network, or recovery
+assurance is established. A33-F1 / E27 and all other unresolved obligations
+remain OPEN; activation DISABLED; public DevNet NO-GO.
+
+Append-only and scope checks:
+  Plan exact prefix from task tip: 449527 bytes; PASS.
+  SHA256SUMS exact prefix from task tip: 20737 bytes; PASS.
+  Integrity log exact prefix from task tip: 34334 bytes; PASS.
+  Changed scope is the test-support source, its focused tests, appended
+  remediation plan/evidence, three new raw focused-test outputs, this
+  integrity log, and append-only checksum rows. Accepted prior test files,
+  prior raw outputs, production source, authentication, signing, crypto,
+  operational gates, and main are unchanged.
+  Targeted rustfmt --check and git diff --check: PASS.
+
+Before final integrity-log checksum refresh:
+  Ordinary (cd docs/security/evidence/a33_f1 && sha256sum --check SHA256SUMS):
+  exit=1; 192 entries; 153 OK; 39 FAILED. All 39 mismatches are prior
+  revision/historical entries and each matched a producing Git revision.
+  This is not an ordinary full checksum pass.
+  Revision-aware: 192 entries; 153 current; 39 matched producing Git
+  revisions; 0 unverified.
+
+The newest integrity-log checksum row is refreshed after the final append.
+No prior manifest rows are rewritten. The three raw focused outputs remain
+byte-for-byte as captured. The earlier failed compile attempt has no retained
+raw output, as noted above; no failed test run is being omitted from the
+passing counts.
+
+Post-refresh verification:
+  Ordinary `sha256sum --check SHA256SUMS`: exit=1; 192 entries; 153 OK;
+  39 FAILED, all matching producing Git revisions; not an ordinary full pass.
+  Revision-aware: 192 entries; 153 current; 39 matched producing Git
+  revisions; 0 unverified.

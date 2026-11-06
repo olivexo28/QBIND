@@ -5983,3 +5983,49 @@ storage, consensus, snapshot, callback, or outbound work. The accepted
 substituted-snapshot model, retirement correction, and historical raw logs
 remain unchanged. A33-F1 / E27 and all other unresolved obligations remain
 **OPEN**; activation **DISABLED**; public DevNet **NO-GO**.
+
+## 60. Investigate worker observation after coordinator loss
+
+**TEST-ONLY WORKER-OBSERVATION INVESTIGATION — INDEPENDENT REVIEW
+PENDING.** The current harness is closed to further protected-operation
+admission after coordinator loss, but its coordinator-owned worker
+`JoinHandle` is dropped by `WorkerJoin::drop` after an abort request. There
+is no surviving worker-result observer. The harness therefore records an
+unobserved/unavailable result and retains refusal; it does not claim that an
+abort request proves worker termination or absence of external effects.
+
+At the exact task-tip baseline
+`8521941968953a5149d7811616182acbd68e3bc0`, the focused prototype target
+reported **19 passed, 0 failed, 0 ignored**. New deterministic controls
+cover coordinator abort while the worker is pending before mock effects,
+coordinator panic after mock publication acknowledgment while a worker
+result is held behind a barrier, dropping the outer coordinator guard,
+actual coordinator/worker observation in the normal path, and a
+same-checker sensitivity control for omission of the unobserved-result
+marker. The pre-effect case observes the instrumented worker future's Drop
+notification but not a worker JoinHandle result; its status remains
+`Running` to avoid treating a dropped handle as an observed join. The
+post-effect case records acknowledged mock publication but no worker result
+or effect observation in the owner. Every shutdown case retains a
+`StateReader` (and its command sender), so channel closure is not inferred.
+The common checker verifies real admission refusal and unchanged admission
+count.
+
+After correction, the focused prototype target reports **24 passed, 0
+failed, 0 ignored**; the directly affected Tokio owner/lease regression
+target reports **12 passed, 0 failed, 0 ignored**. Exact commands, raw
+outputs, the sensitivity rejection, and the observed-versus-unknown
+boundary are recorded in
+`evidence/a33_f1/quarantine-owner-lease-worker-observation.md` and its
+baseline, focused, and regression raw logs. An intermediate compile attempt
+reported a misplaced test-only marker method and moving a oneshot sender
+from `Drop`; both were corrected. Its diagnostic output was not retained as
+a raw artifact and is not represented as a passing test.
+
+This remains a test-support-only, in-process investigation. No worker
+reclamation, external-effect reconciliation, process/runtime durability,
+production ownership, startup enforcement, signer fencing, network
+delivery, or recovery claim is made. The coordinator/worker observation
+boundary remains open beyond what the test prototype can observe. A33-F1 /
+E27 and all other unresolved obligations remain **OPEN**; activation
+**DISABLED**; public DevNet **NO-GO**.

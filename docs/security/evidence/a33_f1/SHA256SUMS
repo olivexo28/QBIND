@@ -182,3 +182,11 @@ e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  quarantine-own
 c62ff5a644491f480a485c879c8afb5f1e2a2e58a155757dbda55c1a9023e436  quarantine-owner-lease-tokio-cancellation-correction.md
 bccb76b1d98e71b2b6a76d38c5c45c3f811dd991a2fd6343d51740f716909f22  quarantine-owner-lease-tokio-cancellation-correction-raw.log
 5c0dcf8b3a968d14de62f9b22f18f6e7137ca70f14e130ca993a745ed45ef71c  quarantine-owner-lease-model-integrity.log
+de2395086194410d4d2a33c99153048fa1115f9ed4ff7ecef6b396e7c2669d33  ../../../../crates/qbind-node/tests/support/a33_f1_inprocess_owner.rs
+67988c0620142da59afeb236de5ad17992dc8cddfe194173c41db9bb2f078d34  ../../../../crates/qbind-node/tests/a33_f1_inprocess_owner_prototype_tests.rs
+951a04efba9d091bb5a148c01944fbdcc21c68f96325e4fbde9f4b3894444491  ../../../../docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+db6533d2f91bf5dea9f5d6a9b23fd4bb109f770b727b98a5b08f2b858f792ac6  quarantine-owner-lease-worker-observation.md
+699beec0d7dec18212db87bb7752824f130518fd6ef88c1ab25a8b689631bb2d  quarantine-owner-lease-worker-observation-baseline.log
+6cda2f256dfed4163352f5056a685c8daf92a812900ab66af19c686bc687f85a  quarantine-owner-lease-worker-observation-focused.log
+c53b4c6dc22b677a9a22a82e4c595ceb27c66b6ace53c810a917d813e0a65c12  quarantine-owner-lease-worker-observation-regression.log
+80bb50e867f2450db5280d84f8e737d33134e374ccce33ffc2da82bdd3a917f9  quarantine-owner-lease-model-integrity.log
