@@ -5882,3 +5882,48 @@ does not survive process/runtime loss; and the harness does not fence
 production signer, storage, snapshot, callback, or outbound work. A33-F1 /
 E27 and other unresolved obligations remain **OPEN**; activation
 **DISABLED**; public DevNet **NO-GO**.
+
+## 58. Non-wired in-process owner/lease component prototype
+
+**NON-WIRED OWNERSHIP COMPONENT PROTOTYPE — INDEPENDENT REVIEW PENDING.**
+At task entry, repository `olivexo28/QBIND`, branch
+`copilot/a33-f1-bounded-eviction`, and clean worktree were verified. HEAD and
+the direct remote task tip both matched
+`b4b48e76948ed4e81a0b3dbb979414cbea182440`; protected local and direct remote
+main matched `c9aaef40b045e896ddfa8b01bad230f6b680715e`.
+
+The test-support-only component at
+`crates/qbind-node/tests/support/a33_f1_inprocess_owner.rs` models one
+in-memory operation and its supervised async task. Transfer requires receiver
+acceptance processed by the supervisor; the initiating waiter ending after
+acceptance is distinct from operation cancellation. The supervisor owns and
+observes the worker `JoinHandle`; worker completion is independent of known,
+unknown, or conflicting effect observations. Bounded command and outcome
+capacity fail closed, retaining refused observations with the caller rather
+than silently dropping them. Mock publication records one monotonic attempt;
+retry policy is not modeled. Only a synthetic admission counter is exposed,
+and cancellation and retirement remain closed/refusal-only.
+
+The focused target
+`crates/qbind-node/tests/a33_f1_inprocess_owner_prototype_tests.rs` reports
+**11 passed, 0 failed, 0 ignored**. It covers handoff acceptance and waiter
+loss, operation cancellation after handoff, worker completion/cancellation/
+panic, supervisor cancellation and panic, publication failure/uncertainty,
+late Unknown/conflicting outcomes, both command and outcome capacity refusal,
+retirement with late uncertainty retained without reopening, and supervisor
+termination with actual join results observed.
+Sensitivity assertions exercise
+premature transfer, unobserved work, cancellation/retirement reopening, and
+refusal invariant defects; they are expected negative assertions inside
+passing tests, not separately passing exploit tests.
+
+This is not production wiring. Mock publication is not filesystem or
+crash/power-loss evidence; task abort/join does not prove OS reclamation;
+in-memory state does not survive process/runtime loss. No actual signer,
+storage, consensus, snapshot, callback, outbound, startup, or restore work is
+fenced, and no durable marker, currentness, recovery, clear, resume, or
+activation authority is established. The exact focused output, contract,
+scope, and limitations are recorded in
+`evidence/a33_f1/quarantine-owner-lease-component-prototype.md`. A33-F1 /
+E27 and all other unresolved obligations remain **OPEN**; activation
+**DISABLED**; public DevNet **NO-GO**.

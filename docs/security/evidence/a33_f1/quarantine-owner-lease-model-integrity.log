@@ -490,3 +490,109 @@ artifact, final checksum verification is:
   142 OK; 29 FAILED.
   Revision-aware verification: 171 entries; 142 current, 29 verified
   against producing Git revisions; zero unverified.
+
+## Non-wired in-process ownership component prototype
+
+Entry verification:
+  Repository: olivexo28/QBIND
+  Branch: copilot/a33-f1-bounded-eviction
+  Expected and actual task HEAD: b4b48e76948ed4e81a0b3dbb979414cbea182440
+  Expected protected local/remote main:
+    c9aaef40b045e896ddfa8b01bad230f6b680715e
+  Direct `git ls-remote origin refs/heads/copilot/a33-f1-bounded-eviction
+  refs/heads/main` returned the expected task tip and main. Worktree was
+  clean before this prototype; only the two Rust test-support files were
+  initially untracked.
+
+The prototype is deliberately isolated to the test-support file
+`crates/qbind-node/tests/support/a33_f1_inprocess_owner.rs` and focused
+integration test `crates/qbind-node/tests/a33_f1_inprocess_owner_prototype_tests.rs`.
+It does not alter production source, dependencies, the accepted
+substituted-snapshot model, or previous owner/lease test targets. Contract,
+test inventory, scope, and evidence limits are documented in
+`quarantine-owner-lease-component-prototype.md`.
+
+Exact focused command:
+  `cargo test -p qbind-node --test a33_f1_inprocess_owner_prototype_tests`
+
+Actual result, retained byte-for-byte in
+`quarantine-owner-lease-component-prototype-focused.log`:
+  exit 0; 11 passed; 0 failed; 0 ignored.
+  The worker-panic test's panic is captured by Tokio, its JoinError is
+  observed, and the passing test output does not print the captured panic.
+  Sensitivity checks are expected rejection assertions within passing
+  tests; there are no deliberately failing test cases.
+
+Exact formatting command:
+  `rustfmt --edition 2021 --check crates/qbind-node/tests/support/a33_f1_inprocess_owner.rs crates/qbind-node/tests/a33_f1_inprocess_owner_prototype_tests.rs`
+Actual result: exit 0; no output, retained in
+`quarantine-owner-lease-component-prototype-format.log`.
+
+The tests demonstrate explicit receiver acceptance; initiator task
+completion after acceptance without operation cancellation; operation
+cancellation after accepted handoff; worker success/cancellation/panic
+observed through its actual JoinHandle; publication terminal-state refusal;
+late Unknown/conflicting outcomes; command and observation capacity
+refusals; live-operation admission and retirement; and coordinator abort
+and panic with actual JoinHandle results observed. Sensitivity checks
+assert valid prefixes and the intended reasons for premature owner state,
+unobserved work, cancellation/retirement reopening, and refusal-state
+reopening.
+
+The coordinator-abort test observes the worker result before aborting the
+coordinator. This does not establish that an outstanding worker can be
+observed after coordinator loss. If the coordinator is cancelled while
+holding an outstanding worker, it can only request task abort as its future
+drops; no in-memory state survives process/runtime loss. No test establishes
+OS resource reclamation, crash durability, signer/storage/network fencing,
+production startup or recovery, or deployment behavior. No operational
+signing, live node/network, or activation occurred.
+
+The prior plan, manifest, and integrity-log bytes are appended to; prior raw
+logs and the substituted-snapshot test are untouched. Final exact allowlist,
+prefix, whitespace, and checksum results are recorded after those checks.
+
+Pre-final verification:
+  PASS exact 8-path allowlist:
+    crates/qbind-node/tests/a33_f1_inprocess_owner_prototype_tests.rs
+    crates/qbind-node/tests/support/a33_f1_inprocess_owner.rs
+    docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+    docs/security/evidence/a33_f1/SHA256SUMS
+    docs/security/evidence/a33_f1/quarantine-owner-lease-component-prototype.md
+    docs/security/evidence/a33_f1/quarantine-owner-lease-component-prototype-focused.log
+    docs/security/evidence/a33_f1/quarantine-owner-lease-component-prototype-format.log
+    docs/security/evidence/a33_f1/quarantine-owner-lease-model-integrity.log
+  PASS append-only prefixes from task HEAD:
+    plan: 443464 bytes
+    SHA256SUMS: 19109 bytes
+    this integrity log: 24839 bytes
+  PASS no trailing spaces in source, docs, or evidence. The captured Cargo
+  stdout ends in one blank line; it is retained byte-for-byte as command
+  output. Full staged `git diff --check` reports only that terminal blank
+  line; the check excluding that raw transcript passes.
+  PASS targeted rustfmt command recorded above.
+  PASS focused target: 11 passed, 0 failed, 0 ignored.
+  Ordinary check before appending this integrity revision:
+    `(cd docs/security/evidence/a33_f1 && sha256sum --check SHA256SUMS)`
+    exit=1; 177 entries; 146 OK; 31 FAILED (historical or prior-revision
+    hashes; this is not a full ordinary-checksum pass).
+  Revision-aware check before this integrity revision:
+    177 entries; 146 current; 31 resolved to producing Git revisions;
+    0 unverified.
+
+Final post-append counts are recorded after adding the current integrity-log
+hash to SHA256SUMS. The ordinary checksum result remains distinct from the
+revision-aware historical verification.
+
+Final post-manifest verification:
+  Ordinary `(cd docs/security/evidence/a33_f1 && sha256sum --check SHA256SUMS)`:
+    exit=1; 178 entries; 147 OK; 31 FAILED.
+  The ordinary failures are preserved historical/prior-revision entries and
+  do not represent a full ordinary-checksum pass.
+  Revision-aware verification: 178 entries; 147 current; 31 matched against
+  producing Git revisions; 0 unverified.
+  Exact scope, append-only-prefix, targeted rustfmt, and whitespace
+  validations passed. Full staged `git diff --check` reports only the
+  preserved terminal blank line in the exact Cargo stdout transcript; the
+  check excluding that raw log passes. The focused run was 11 passed,
+  0 failed, 0 ignored.
