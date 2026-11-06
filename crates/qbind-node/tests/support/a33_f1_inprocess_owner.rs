@@ -6,7 +6,7 @@
 
 use std::future::Future;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU8, Ordering},
     Arc,
 };
 use std::time::Duration;
@@ -22,6 +22,16 @@ pub(crate) enum OwnerRole {
     Initiator,
     Supervisor,
     Lost,
+}
+
+impl OwnerRole {
+    fn code(self) -> u8 {
+        match self {
+            Self::Initiator => 0,
+            Self::Supervisor => 1,
+            Self::Lost => 2,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -64,6 +74,8 @@ pub(crate) struct Snapshot {
     pub(crate) outcome_overflow: bool,
     pub(crate) control_overflow: bool,
     pub(crate) supervisor_lost: bool,
+    pub(crate) coordinator_abort_requested: bool,
+    pub(crate) coordinator_join_observed: bool,
     pub(crate) protected_admissions: usize,
 }
 
@@ -84,6 +96,8 @@ impl Snapshot {
             outcome_overflow: false,
             control_overflow: false,
             supervisor_lost: false,
+            coordinator_abort_requested: false,
+            coordinator_join_observed: false,
             protected_admissions: 0,
         }
     }
@@ -179,6 +193,9 @@ struct Shared {
     state_updates: watch::Sender<Snapshot>,
     overflow: Arc<AtomicBool>,
     supervisor_lost: Arc<AtomicBool>,
+    coordinator_abort_requested: Arc<AtomicBool>,
+    coordinator_join_observed: Arc<AtomicBool>,
+    current_owner: Arc<AtomicU8>,
 }
 
 #[derive(Clone)]
@@ -187,6 +204,9 @@ struct ReadShared {
     state_updates: watch::Sender<Snapshot>,
     overflow: Arc<AtomicBool>,
     supervisor_lost: Arc<AtomicBool>,
+    coordinator_abort_requested: Arc<AtomicBool>,
+    coordinator_join_observed: Arc<AtomicBool>,
+    current_owner: Arc<AtomicU8>,
 }
 
 impl Shared {
@@ -196,6 +216,9 @@ impl Shared {
             state_updates: self.state_updates.clone(),
             overflow: self.overflow.clone(),
             supervisor_lost: self.supervisor_lost.clone(),
+            coordinator_abort_requested: self.coordinator_abort_requested.clone(),
+            coordinator_join_observed: self.coordinator_join_observed.clone(),
+            current_owner: self.current_owner.clone(),
         }
     }
 }
@@ -204,6 +227,7 @@ pub(crate) struct OperationOwner {
     commands: mpsc::Sender<Command>,
     shared: Shared,
     role: OwnerRole,
+    report_owner_loss: bool,
 }
 
 impl OperationOwner {
@@ -215,6 +239,8 @@ impl OperationOwner {
         StateReader {
             updates: self.shared.state_updates.subscribe(),
             shared: self.shared.read_shared(),
+            #[cfg(test)]
+            commands: self.commands.clone(),
         }
     }
 
@@ -264,6 +290,48 @@ impl OperationOwner {
             .send(Command::PanicForTest)
             .await
             .expect("supervisor remains available for panic sensitivity test");
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn pause_coordinator_for_test(
+        &self,
+    ) -> (oneshot::Receiver<()>, oneshot::Sender<()>) {
+        let (entered_tx, entered_rx) = oneshot::channel();
+        let (release_tx, release_rx) = oneshot::channel();
+        self.commands
+            .send(Command::PauseCoordinator {
+                entered: entered_tx,
+                release: release_rx,
+            })
+            .await
+            .expect("coordinator command loop is running");
+        (entered_rx, release_tx)
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn admit_as_for_test(&self, role: OwnerRole) -> Result<(), Refusal> {
+        let (reply, result) = oneshot::channel();
+        self.commands
+            .send(Command::Admit { role, reply })
+            .await
+            .map_err(|_| Refusal::SupervisorLost)?;
+        result.await.unwrap_or(Err(Refusal::SupervisorLost))
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn mark_owner_lost_for_test(&self, role: OwnerRole) {
+        self.shared
+            .current_owner
+            .store(OwnerRole::Lost.code(), Ordering::SeqCst);
+        self.shared.state_updates.send_modify(|state| {
+            state.owner = OwnerRole::Lost;
+            state.refusal_closed = true;
+            state.participation_allowed = false;
+        });
+        self.commands
+            .send(Command::OwnerDropped { role })
+            .await
+            .expect("coordinator remains available for sensitivity cleanup");
     }
 
     pub(crate) async fn record_outcome(
@@ -353,10 +421,35 @@ impl Drop for OperationOwner {
         if self.role == OwnerRole::Lost {
             return;
         }
-        if self
-            .commands
-            .try_send(Command::OwnerDropped { role: self.role })
-            .is_err()
+        let current_owner = &self.shared.current_owner;
+        let lost = if !self.report_owner_loss
+            || self.shared.state_updates.borrow().operation_retired
+        {
+            false
+        } else if self.role == OwnerRole::Initiator {
+            current_owner
+                .compare_exchange(
+                    OwnerRole::Initiator.code(),
+                    OwnerRole::Lost.code(),
+                    Ordering::SeqCst,
+                    Ordering::SeqCst,
+                )
+                .is_ok()
+        } else {
+            current_owner.swap(OwnerRole::Lost.code(), Ordering::SeqCst) != OwnerRole::Lost.code()
+        };
+        if lost {
+            self.shared.state_updates.send_modify(|state| {
+                state.owner = OwnerRole::Lost;
+                state.refusal_closed = true;
+                state.participation_allowed = false;
+            });
+        }
+        if lost
+            && self
+                .commands
+                .try_send(Command::OwnerDropped { role: self.role })
+                .is_err()
         {
             self.shared.overflow.store(true, Ordering::SeqCst);
         }
@@ -371,26 +464,84 @@ pub(crate) struct HandoffOffer {
 
 impl HandoffOffer {
     pub(crate) async fn accept(mut self) -> Result<OperationOwner, Refusal> {
+        self.accept_inner(None, None).await
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn accept_paused_for_test(
+        mut self,
+        request_sent: oneshot::Sender<()>,
+        reply_sent: oneshot::Sender<()>,
+        continue_accept: oneshot::Receiver<()>,
+    ) -> Result<OperationOwner, Refusal> {
+        self.accept_inner(Some(request_sent), Some((reply_sent, continue_accept)))
+            .await
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn accept_without_loss_guard_for_test(
+        mut self,
+        request_sent: oneshot::Sender<()>,
+        reply_sent: oneshot::Sender<()>,
+        continue_accept: oneshot::Receiver<()>,
+    ) -> Result<OperationOwner, Refusal> {
+        self.accept_inner_with_loss(
+            Some(request_sent),
+            Some((reply_sent, continue_accept)),
+            false,
+        )
+        .await
+    }
+
+    async fn accept_inner(
+        &mut self,
+        request_sent: Option<oneshot::Sender<()>>,
+        pause: Option<(oneshot::Sender<()>, oneshot::Receiver<()>)>,
+    ) -> Result<OperationOwner, Refusal> {
+        self.accept_inner_with_loss(request_sent, pause, true).await
+    }
+
+    async fn accept_inner_with_loss(
+        &mut self,
+        request_sent: Option<oneshot::Sender<()>>,
+        pause: Option<(oneshot::Sender<()>, oneshot::Receiver<()>)>,
+        report_owner_loss: bool,
+    ) -> Result<OperationOwner, Refusal> {
+        let (reply_sent, continue_accept) = match pause {
+            Some((reply_sent, continue_accept)) => (Some(reply_sent), Some(continue_accept)),
+            None => (None, None),
+        };
+        let owner = OperationOwner {
+            commands: self.commands.clone(),
+            shared: self.shared.clone(),
+            role: OwnerRole::Supervisor,
+            report_owner_loss,
+        };
         let (reply, result) = oneshot::channel();
         self.commands
             .send(Command::AcceptHandoff {
                 reply,
                 initiator_ack: self.ack.take(),
+                reply_sent,
             })
             .await
             .map_err(|_| Refusal::SupervisorLost)?;
+        if let Some(sent) = request_sent {
+            let _ = sent.send(());
+        }
+        if let Some(continue_accept) = continue_accept {
+            let _ = continue_accept.await;
+        }
         result.await.unwrap_or(Err(Refusal::SupervisorLost))?;
-        Ok(OperationOwner {
-            commands: self.commands.clone(),
-            shared: self.shared.clone(),
-            role: OwnerRole::Supervisor,
-        })
+        Ok(owner)
     }
 }
 
 pub(crate) struct StateReader {
     updates: watch::Receiver<Snapshot>,
     shared: ReadShared,
+    #[cfg(test)]
+    commands: mpsc::Sender<Command>,
 }
 
 impl StateReader {
@@ -398,6 +549,17 @@ impl StateReader {
         let mut state = self.shared.state.lock().await.clone();
         state.control_overflow |= self.shared.overflow.load(Ordering::SeqCst);
         state.supervisor_lost |= self.shared.supervisor_lost.load(Ordering::SeqCst);
+        state.coordinator_abort_requested |= self
+            .shared
+            .coordinator_abort_requested
+            .load(Ordering::SeqCst);
+        state.coordinator_join_observed |=
+            self.shared.coordinator_join_observed.load(Ordering::SeqCst);
+        if self.shared.current_owner.load(Ordering::SeqCst) == OwnerRole::Lost.code() {
+            state.owner = OwnerRole::Lost;
+            state.refusal_closed = true;
+            state.participation_allowed = false;
+        }
         if state.supervisor_lost {
             state.refusal_closed = true;
             state.participation_allowed = false;
@@ -424,6 +586,44 @@ impl StateReader {
         })
         .await
         .map_err(|_| "state watchdog expired")?
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn admit_as(&self, role: OwnerRole) -> Result<(), Refusal> {
+        let (reply, result) = oneshot::channel();
+        self.commands
+            .send(Command::Admit { role, reply })
+            .await
+            .map_err(|_| Refusal::SupervisorLost)?;
+        result.await.unwrap_or(Err(Refusal::SupervisorLost))
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn mark_owner_lost_for_test(&self, role: OwnerRole) {
+        self.shared
+            .current_owner
+            .store(OwnerRole::Lost.code(), Ordering::SeqCst);
+        self.shared.state_updates.send_modify(|state| {
+            state.owner = OwnerRole::Lost;
+            state.refusal_closed = true;
+            state.participation_allowed = false;
+        });
+        self.commands
+            .send(Command::OwnerDropped { role })
+            .await
+            .expect("coordinator remains available for sensitivity cleanup");
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fill_command_queue_for_test(&self) -> Result<(), ()> {
+        let (reply, result) = oneshot::channel();
+        drop(result);
+        self.commands
+            .try_send(Command::Admit {
+                role: OwnerRole::Supervisor,
+                reply,
+            })
+            .map_err(|_| ())
     }
 }
 
@@ -457,48 +657,155 @@ impl MockPublisher {
 
 pub(crate) struct SupervisorTask {
     join: Option<JoinHandle<()>>,
+    abort: tokio::task::AbortHandle,
     shared: ReadShared,
 }
 
 impl SupervisorTask {
-    pub(crate) async fn join(mut self) -> Result<(), SupervisorJoinError> {
-        let mut join = self.join.take().expect("supervisor join handle present");
-        match timeout(WATCHDOG, &mut join).await {
+    pub(crate) async fn join(&mut self) -> Result<(), SupervisorJoinError> {
+        let join = self.join.as_mut().expect("supervisor join handle retained");
+        match timeout(WATCHDOG, join).await {
             Ok(result) => {
+                self.shared
+                    .coordinator_join_observed
+                    .store(true, Ordering::SeqCst);
                 if result.is_err() {
                     self.shared.supervisor_lost.store(true, Ordering::SeqCst);
                 }
                 result.map_err(SupervisorJoinError::Task)
             }
             Err(_) => {
-                join.abort();
+                self.request_abort();
+                let join = self.join.as_mut().expect("supervisor join handle retained");
                 self.shared.supervisor_lost.store(true, Ordering::SeqCst);
-                match timeout(WATCHDOG, &mut join).await {
-                    Ok(Err(error)) => Err(SupervisorJoinError::WatchdogAborted(error)),
-                    Ok(Ok(())) => Err(SupervisorJoinError::CompletedAfterWatchdog),
+                match timeout(WATCHDOG, join).await {
+                    Ok(result) => {
+                        self.shared
+                            .coordinator_join_observed
+                            .store(true, Ordering::SeqCst);
+                        match result {
+                            Err(error) => Err(SupervisorJoinError::WatchdogAborted(error)),
+                            Ok(()) => Err(SupervisorJoinError::CompletedAfterWatchdog),
+                        }
+                    }
                     Err(_) => Err(SupervisorJoinError::WatchdogUnresolved),
                 }
             }
         }
     }
 
-    pub(crate) async fn abort_and_join(mut self) -> Result<(), SupervisorJoinError> {
-        let mut join = self.join.take().expect("supervisor join handle present");
-        join.abort();
-        self.shared.supervisor_lost.store(true, Ordering::SeqCst);
-        match timeout(WATCHDOG, &mut join).await {
-            Ok(Err(error)) => Err(SupervisorJoinError::Task(error)),
-            Ok(Ok(())) => Ok(()),
+    #[cfg(test)]
+    pub(crate) async fn join_started_for_test(
+        &mut self,
+        started: oneshot::Sender<()>,
+    ) -> Result<(), SupervisorJoinError> {
+        let _ = started.send(());
+        self.join().await
+    }
+
+    pub(crate) async fn abort_and_join(&mut self) -> Result<(), SupervisorJoinError> {
+        self.request_abort();
+        match self.wait_after_abort(WATCHDOG).await {
+            Ok(result) => self.observe_join_result(result),
+            Err(error) => Err(error),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn abort_and_join_paused_for_test(
+        &mut self,
+        entered: oneshot::Sender<()>,
+        release: oneshot::Receiver<()>,
+    ) -> Result<(), SupervisorJoinError> {
+        self.request_abort();
+        let _ = entered.send(());
+        let join = self.join.as_mut().expect("supervisor join handle retained");
+        match timeout(WATCHDOG, async {
+            let _ = release.await;
+            join.await
+        })
+        .await
+        {
+            Ok(result) => self.observe_join_result(result),
             Err(_) => Err(SupervisorJoinError::WatchdogUnresolved),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn abort_and_join_watchdog_for_test(
+        &mut self,
+        watchdog: Duration,
+        entered: oneshot::Sender<()>,
+        release: oneshot::Receiver<()>,
+    ) -> Result<(), SupervisorJoinError> {
+        self.request_abort();
+        let _ = entered.send(());
+        let join = self.join.as_mut().expect("supervisor join handle retained");
+        match timeout(watchdog, async {
+            let _ = release.await;
+            join.await
+        })
+        .await
+        {
+            Ok(result) => self.observe_join_result(result),
+            Err(_) => Err(SupervisorJoinError::WatchdogUnresolved),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn join_detached_for_test(&mut self) -> Result<(), SupervisorJoinError> {
+        let mut detached = self.join.take().expect("supervisor join handle present");
+        timeout(WATCHDOG, &mut detached)
+            .await
+            .map_err(|_| SupervisorJoinError::WatchdogUnresolved)?
+            .map_err(SupervisorJoinError::Task)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn join_observation_is_owned_for_test(&self) -> bool {
+        self.join.is_some() || self.shared.coordinator_join_observed.load(Ordering::SeqCst)
+    }
+
+    async fn wait_after_abort(
+        &mut self,
+        watchdog: Duration,
+    ) -> Result<Result<(), JoinError>, SupervisorJoinError> {
+        let join = self.join.as_mut().expect("supervisor join handle retained");
+        timeout(watchdog, join)
+            .await
+            .map_err(|_| SupervisorJoinError::WatchdogUnresolved)
+    }
+
+    fn request_abort(&self) {
+        self.shared
+            .coordinator_abort_requested
+            .store(true, Ordering::SeqCst);
+        self.shared.supervisor_lost.store(true, Ordering::SeqCst);
+        self.abort.abort();
+    }
+
+    fn observe_join_result(
+        &self,
+        result: Result<(), JoinError>,
+    ) -> Result<(), SupervisorJoinError> {
+        self.shared
+            .coordinator_join_observed
+            .store(true, Ordering::SeqCst);
+        if result.is_err() {
+            self.shared.supervisor_lost.store(true, Ordering::SeqCst);
+        }
+        result.map_err(SupervisorJoinError::Task)
     }
 }
 
 impl Drop for SupervisorTask {
     fn drop(&mut self) {
-        if let Some(join) = self.join.take() {
+        if !self.shared.coordinator_join_observed.load(Ordering::SeqCst) {
+            self.shared
+                .coordinator_abort_requested
+                .store(true, Ordering::SeqCst);
             self.shared.supervisor_lost.store(true, Ordering::SeqCst);
-            join.abort();
+            self.abort.abort();
         }
     }
 }
@@ -523,11 +830,17 @@ where
     let (state_updates, _) = watch::channel(Snapshot::initial());
     let overflow = Arc::new(AtomicBool::new(false));
     let supervisor_lost = Arc::new(AtomicBool::new(false));
+    let coordinator_abort_requested = Arc::new(AtomicBool::new(false));
+    let coordinator_join_observed = Arc::new(AtomicBool::new(false));
+    let current_owner = Arc::new(AtomicU8::new(OwnerRole::Initiator.code()));
     let shared = Shared {
         state,
         state_updates,
         overflow,
         supervisor_lost,
+        coordinator_abort_requested,
+        coordinator_join_observed,
+        current_owner,
     };
 
     let publisher = MockPublisher {
@@ -539,15 +852,18 @@ where
     let join = tokio::spawn(async move {
         run_supervisor(receiver, worker, supervisor_shared, outcome_capacity).await;
     });
+    let abort = join.abort_handle();
 
     (
         OperationOwner {
             commands,
             shared: shared.clone(),
             role: OwnerRole::Initiator,
+            report_owner_loss: true,
         },
         SupervisorTask {
             join: Some(join),
+            abort,
             shared: shared.read_shared(),
         },
     )
@@ -561,6 +877,7 @@ enum Command {
     AcceptHandoff {
         reply: oneshot::Sender<Result<(), Refusal>>,
         initiator_ack: Option<oneshot::Sender<Result<(), Refusal>>>,
+        reply_sent: Option<oneshot::Sender<()>>,
     },
     Cancel {
         role: OwnerRole,
@@ -582,6 +899,10 @@ enum Command {
     },
     OwnerDropped {
         role: OwnerRole,
+    },
+    PauseCoordinator {
+        entered: oneshot::Sender<()>,
+        release: oneshot::Receiver<()>,
     },
     PanicForTest,
 }
@@ -636,11 +957,34 @@ async fn process_command(
     worker_abort: &tokio::task::AbortHandle,
     outcome_capacity: usize,
 ) {
+    if let Command::PauseCoordinator { entered, release } = command {
+        let _ = entered.send(());
+        let _ = release.await;
+        return;
+    }
+
     let mut state = shared.state.lock().await;
     state.control_overflow |= shared.overflow.load(Ordering::SeqCst);
+    if shared.current_owner.load(Ordering::SeqCst) == OwnerRole::Lost.code() {
+        state.owner = OwnerRole::Lost;
+        state.refusal_closed = true;
+        state.participation_allowed = false;
+    }
     match command {
         Command::Admit { role, reply } => {
-            let result = state.refuse(role);
+            let result = if shared
+                .current_owner
+                .compare_exchange(role.code(), role.code(), Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+            {
+                state.refuse(role)
+            } else {
+                Err(if state.control_overflow {
+                    Refusal::CapacityUncertain
+                } else {
+                    Refusal::NotCurrentOwner
+                })
+            };
             if result.is_ok() {
                 state.protected_admissions = state.protected_admissions.saturating_add(1);
             }
@@ -649,10 +993,20 @@ async fn process_command(
         Command::AcceptHandoff {
             reply,
             initiator_ack,
+            reply_sent,
         } => {
             let result = if state.owner == OwnerRole::Initiator
                 && !state.operation_cancelled
                 && !state.operation_retired
+                && shared
+                    .current_owner
+                    .compare_exchange(
+                        OwnerRole::Initiator.code(),
+                        OwnerRole::Supervisor.code(),
+                        Ordering::SeqCst,
+                        Ordering::SeqCst,
+                    )
+                    .is_ok()
             {
                 state.owner = OwnerRole::Supervisor;
                 Ok(())
@@ -664,11 +1018,19 @@ async fn process_command(
                     state.owner = OwnerRole::Lost;
                     state.refusal_closed = true;
                     state.participation_allowed = false;
+                    shared
+                        .current_owner
+                        .store(OwnerRole::Lost.code(), Ordering::SeqCst);
                     if let Some(ack) = initiator_ack {
                         let _ = ack.send(Err(Refusal::SupervisorLost));
                     }
                 } else if let Some(ack) = initiator_ack {
+                    if let Some(reply_sent) = reply_sent {
+                        let _ = reply_sent.send(());
+                    }
                     let _ = ack.send(Ok(()));
+                } else if let Some(reply_sent) = reply_sent {
+                    let _ = reply_sent.send(());
                 }
             } else {
                 let _ = reply.send(result);
@@ -749,9 +1111,13 @@ async fn process_command(
                 state.owner = OwnerRole::Lost;
                 state.refusal_closed = true;
                 state.participation_allowed = false;
+                shared
+                    .current_owner
+                    .store(OwnerRole::Lost.code(), Ordering::SeqCst);
             }
         }
         Command::PanicForTest => panic!("synthetic supervisor panic"),
+        Command::PauseCoordinator { .. } => unreachable!(),
     }
     state.control_overflow |= shared.overflow.load(Ordering::SeqCst);
     publish(shared, &state);
@@ -857,6 +1223,11 @@ fn publish(shared: &Shared, state: &Snapshot) {
     let mut snapshot = state.clone();
     snapshot.control_overflow |= shared.overflow.load(Ordering::SeqCst);
     snapshot.supervisor_lost |= shared.supervisor_lost.load(Ordering::SeqCst);
+    if shared.current_owner.load(Ordering::SeqCst) == OwnerRole::Lost.code() {
+        snapshot.owner = OwnerRole::Lost;
+        snapshot.refusal_closed = true;
+        snapshot.participation_allowed = false;
+    }
     let _ = shared.state_updates.send(snapshot);
 }
 

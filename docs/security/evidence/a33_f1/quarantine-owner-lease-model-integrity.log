@@ -596,3 +596,76 @@ Final post-manifest verification:
   preserved terminal blank line in the exact Cargo stdout transcript; the
   check excluding that raw log passes. The focused run was 11 passed,
   0 failed, 0 ignored.
+
+## Test-only ownership cancellation correction
+
+Source change is limited to the non-wired component prototype and its
+focused integration tests. The supplied reviewer report is the source of
+the two findings; it is not represented as a runtime reproduction or as
+reviewer-run test evidence. The accepted substituted-snapshot test,
+retirement correction, and prior raw artifacts were verified unchanged.
+
+Exact final focused command:
+  `cargo test -p qbind-node --test a33_f1_inprocess_owner_prototype_tests`
+Raw output: `quarantine-owner-lease-tokio-cancellation-correction-raw.log`
+  exit=0; 19 passed; 0 failed; 0 ignored.
+The test target includes expected defect rejections for an omitted handoff
+loss guard and a detached coordinator JoinHandle. Those controls are
+assertions inside passing tests and are not counted as separately passing
+security tests. An independent full-control-queue test verifies that
+synchronous lost-owner state and the capacity-uncertain refusal remain in
+effect when the bounded loss notification cannot be queued.
+
+Targeted formatting:
+  `rustfmt --edition 2021 --check crates/qbind-node/tests/support/a33_f1_inprocess_owner.rs crates/qbind-node/tests/a33_f1_inprocess_owner_prototype_tests.rs`
+  exit=0; no output.
+Whitespace:
+  targeted `git diff --check` for changed tracked code and documentation
+  passed; a byte scan found no trailing whitespace in non-raw changed paths.
+  The raw Cargo capture is retained byte-for-byte and ends with the normal
+  extra blank line (`b' 0.01s\n\n'`); it is excluded from normalized
+  whitespace checks.
+Scope and preservation:
+  exactly the two test-support Rust paths, plan, checksum manifest,
+  correction evidence, raw focused output, and this integrity log are in
+  scope. The accepted substituted-snapshot and prior Tokio regression test
+  files and earlier raw logs are unchanged. Staging was empty during checks.
+Append-only:
+  plan prefix from task HEAD: 446100 bytes;
+  SHA256SUMS prefix from task HEAD: 19975 bytes;
+  integrity-log prefix from task HEAD: 30545 bytes.
+
+Intermediate iteration notes: compilation and test-fixture errors were
+corrected. One focused diagnostic run was stopped at the 20-second outer
+timeout while investigating a pause hook that held the state mutex. A later
+full run found one capacity-control expectation mismatch; its asserted
+refusal was corrected to preserve `CapacityUncertain` precedence. These
+attempts are not counted as passing. The final focused run above completed
+normally.
+
+Before adding the current integrity-log row:
+  Ordinary `sha256sum --check SHA256SUMS`: exit=1; 183 entries;
+  149 OK; 34 FAILED (historical or prior-revision checksums).
+  Revision-aware: 183 entries; 149 current; 34 matched to producing Git
+  revisions; 0 unverified.
+
+Checksum results observed after the initial integrity append and manifest
+refresh:
+  Ordinary `sha256sum --check SHA256SUMS`: exit=1; 184 entries;
+  149 OK; 35 FAILED (historical or prior-revision checksums, including the
+  previous integrity-log revision).
+  Revision-aware: 184 entries; 149 current; 35 matched to producing Git
+  revisions; 0 unverified.
+
+After appending these final results, the newest integrity-log checksum row
+was refreshed in place. Final post-refresh verification returned:
+  Ordinary `sha256sum --check SHA256SUMS`: exit=1; 184 entries;
+  149 OK; 35 FAILED (historical or prior-revision checksums; not an
+  ordinary full pass).
+  Revision-aware: 184 entries; 149 current; 35 matched to producing Git
+  revisions; 0 unverified.
+
+Component limitations remain as stated in the correction evidence: no
+crash/runtime durability, OS reclamation, production work fencing, or
+activation claim. A33-F1 / E27 and all other unresolved obligations remain
+OPEN; activation DISABLED; public DevNet NO-GO.

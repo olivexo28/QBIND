@@ -4,11 +4,11 @@
 mod candidate;
 
 use candidate::{
-    EffectObservation, OwnerRole, Publication, RecordError, Refusal, SupervisorJoinError,
-    WorkerStatus,
+    EffectObservation, HandoffError, OwnerRole, Publication, RecordError, Refusal,
+    SupervisorJoinError, WorkerStatus,
 };
 use std::sync::Arc;
-use tokio::sync::{mpsc, oneshot, Barrier};
+use tokio::sync::{mpsc, oneshot, Barrier, Mutex as AsyncMutex};
 
 async fn ready_snapshot(reader: &candidate::StateReader) -> candidate::Snapshot {
     reader
@@ -17,10 +17,34 @@ async fn ready_snapshot(reader: &candidate::StateReader) -> candidate::Snapshot 
         .expect("worker completion observed before watchdog")
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum HandoffLifecycleError {
+    UnexpectedlyAdmitted,
+    UnexpectedRefusal(Refusal),
+}
+
+fn require_join_observer(supervisor: &candidate::SupervisorTask) -> Result<(), &'static str> {
+    if supervisor.join_observation_is_owned_for_test() {
+        Ok(())
+    } else {
+        Err("coordinator JoinHandle has no retained observer")
+    }
+}
+
+async fn require_no_supervisor_admission(
+    reader: &candidate::StateReader,
+) -> Result<(), HandoffLifecycleError> {
+    match reader.admit_as(OwnerRole::Supervisor).await {
+        Err(Refusal::NotCurrentOwner) => Ok(()),
+        Err(reason) => Err(HandoffLifecycleError::UnexpectedRefusal(reason)),
+        Ok(()) => Err(HandoffLifecycleError::UnexpectedlyAdmitted),
+    }
+}
+
 #[tokio::test]
 async fn handoff_requires_acceptance_and_lost_initiator_cannot_admit() {
     let (release, wait) = oneshot::channel::<()>();
-    let (owner, supervisor_task) = candidate::spawn_operation(8, 2, move |_| async move {
+    let (owner, mut supervisor_task) = candidate::spawn_operation(8, 2, move |_| async move {
         let _ = wait.await;
         EffectObservation::Known(7)
     });
@@ -61,14 +85,199 @@ async fn handoff_requires_acceptance_and_lost_initiator_cannot_admit() {
 }
 
 #[tokio::test]
-async fn accepted_handoff_survives_initiator_completion_and_allows_live_operation() {
-    let (release, wait) = oneshot::channel::<()>();
-    let (owner, supervisor_task) = candidate::spawn_operation(8, 4, move |publisher| async move {
+async fn receiver_cancelled_after_acceptance_reply_loses_guarded_ownership() {
+    let (owner, mut supervisor_task) = candidate::spawn_operation(8, 3, |publisher| async move {
         publisher.observe(Publication::Visible).await.unwrap();
         publisher.observe(Publication::Acknowledged).await.unwrap();
-        let _ = wait.await;
-        EffectObservation::Known(11)
+        EffectObservation::Known(31)
     });
+    let reader = owner.reader();
+    let (handoff_tx, mut handoff_rx) = mpsc::channel(1);
+    let initiator_task = tokio::spawn(async move { owner.offer_handoff(&handoff_tx).await });
+    let offer = tokio::time::timeout(candidate::WATCHDOG, handoff_rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let (request_sent_tx, request_sent_rx) = oneshot::channel();
+    let (reply_sent_tx, reply_sent_rx) = oneshot::channel();
+    let (continue_tx, continue_rx) = oneshot::channel();
+    let receiver_task = tokio::spawn(async move {
+        offer
+            .accept_paused_for_test(request_sent_tx, reply_sent_tx, continue_rx)
+            .await
+    });
+
+    tokio::time::timeout(candidate::WATCHDOG, request_sent_rx)
+        .await
+        .expect("acceptance request sent")
+        .expect("request signal");
+    tokio::time::timeout(candidate::WATCHDOG, reply_sent_rx)
+        .await
+        .expect("coordinator sent acceptance reply")
+        .expect("reply signal");
+    assert_eq!(
+        tokio::time::timeout(candidate::WATCHDOG, initiator_task)
+            .await
+            .expect("initiator acknowledgment")
+            .expect("initiator task joined"),
+        Ok(())
+    );
+
+    receiver_task.abort();
+    assert!(matches!(
+        receiver_task.await,
+        Err(error) if error.is_cancelled()
+    ));
+    let lost = reader
+        .wait_for(|state| state.owner == OwnerRole::Lost)
+        .await
+        .expect("drop guard loss recorded");
+    assert!(lost.refusal_closed);
+    assert_eq!(require_no_supervisor_admission(&reader).await, Ok(()));
+
+    drop(reader);
+    assert!(supervisor_task.join().await.is_ok());
+    let _ = continue_tx;
+}
+
+#[tokio::test]
+async fn handoff_delivery_failure_and_acquired_handle_loss_are_closed() {
+    let (owner, mut supervisor_task) = candidate::spawn_operation(8, 3, |publisher| async move {
+        publisher.observe(Publication::Visible).await.unwrap();
+        publisher.observe(Publication::Acknowledged).await.unwrap();
+        EffectObservation::Known(32)
+    });
+    let reader = owner.reader();
+    let (closed_tx, closed_rx) = mpsc::channel(1);
+    drop(closed_rx);
+    assert!(matches!(
+        owner.offer_handoff(&closed_tx).await,
+        Err(HandoffError::ReceiverUnavailable)
+    ));
+    reader
+        .wait_for(|state| state.owner == OwnerRole::Lost)
+        .await
+        .expect("failed delivery loses initiating responsibility");
+    assert_eq!(require_no_supervisor_admission(&reader).await, Ok(()));
+    drop(reader);
+    assert!(supervisor_task.join().await.is_ok());
+
+    let (owner, mut supervisor_task) = candidate::spawn_operation(8, 3, |publisher| async move {
+        publisher.observe(Publication::Visible).await.unwrap();
+        publisher.observe(Publication::Acknowledged).await.unwrap();
+        EffectObservation::Known(33)
+    });
+    let reader = owner.reader();
+    let (handoff_tx, mut handoff_rx) = mpsc::channel(1);
+    let initiator_task = tokio::spawn(async move { owner.offer_handoff(&handoff_tx).await });
+    let offer = tokio::time::timeout(candidate::WATCHDOG, handoff_rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let supervisor_owner = offer.accept().await.unwrap();
+    assert_eq!(initiator_task.await.unwrap(), Ok(()));
+    drop(supervisor_owner);
+    reader
+        .wait_for(|state| state.owner == OwnerRole::Lost)
+        .await
+        .expect("acquired handle drop reports ownership loss");
+    assert_eq!(require_no_supervisor_admission(&reader).await, Ok(()));
+    drop(reader);
+    assert!(supervisor_task.join().await.is_ok());
+}
+
+#[tokio::test]
+async fn full_control_queue_still_records_handoff_owner_loss_synchronously() {
+    let (owner, mut supervisor_task) =
+        candidate::spawn_operation(1, 2, |_| async move { EffectObservation::Known(35) });
+    let reader = owner.reader();
+    let (handoff_tx, mut handoff_rx) = mpsc::channel(1);
+    let initiator_task = tokio::spawn(async move { owner.offer_handoff(&handoff_tx).await });
+    let offer = tokio::time::timeout(candidate::WATCHDOG, handoff_rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let supervisor_owner = offer.accept().await.unwrap();
+    assert_eq!(initiator_task.await.unwrap(), Ok(()));
+
+    let (coordinator_entered, release_coordinator) =
+        supervisor_owner.pause_coordinator_for_test().await;
+    coordinator_entered.await.unwrap();
+    reader
+        .fill_command_queue_for_test()
+        .expect("one command fills the bounded control channel");
+    drop(supervisor_owner);
+
+    let lost = reader.snapshot().await;
+    assert_eq!(lost.owner, OwnerRole::Lost);
+    assert!(lost.control_overflow);
+    assert!(lost.refusal_closed);
+    assert_eq!(
+        lost.refuse(OwnerRole::Supervisor),
+        Err(Refusal::CapacityUncertain)
+    );
+    let _ = release_coordinator.send(());
+    assert_eq!(
+        reader.admit_as(OwnerRole::Supervisor).await,
+        Err(Refusal::CapacityUncertain)
+    );
+    drop(reader);
+    assert!(supervisor_task.join().await.is_ok());
+}
+
+#[tokio::test]
+async fn omitted_handoff_loss_guard_is_detected_by_same_lifecycle_check() {
+    let (owner, mut supervisor_task) = candidate::spawn_operation(8, 3, |publisher| async move {
+        publisher.observe(Publication::Visible).await.unwrap();
+        publisher.observe(Publication::Acknowledged).await.unwrap();
+        EffectObservation::Known(34)
+    });
+    let reader = owner.reader();
+    let (handoff_tx, mut handoff_rx) = mpsc::channel(1);
+    let initiator_task = tokio::spawn(async move { owner.offer_handoff(&handoff_tx).await });
+    let offer = tokio::time::timeout(candidate::WATCHDOG, handoff_rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let (request_sent_tx, request_sent_rx) = oneshot::channel();
+    let (reply_sent_tx, reply_sent_rx) = oneshot::channel();
+    let (continue_tx, continue_rx) = oneshot::channel();
+    let receiver_task = tokio::spawn(async move {
+        offer
+            .accept_without_loss_guard_for_test(request_sent_tx, reply_sent_tx, continue_rx)
+            .await
+    });
+    request_sent_rx.await.unwrap();
+    reply_sent_rx.await.unwrap();
+    assert_eq!(initiator_task.await.unwrap(), Ok(()));
+    receiver_task.abort();
+    assert!(matches!(
+        receiver_task.await,
+        Err(error) if error.is_cancelled()
+    ));
+
+    let defect = require_no_supervisor_admission(&reader).await;
+    assert_eq!(defect, Err(HandoffLifecycleError::UnexpectedlyAdmitted));
+    reader.mark_owner_lost_for_test(OwnerRole::Supervisor).await;
+    reader
+        .wait_for(|state| state.owner == OwnerRole::Lost)
+        .await
+        .expect("sensitivity fixture cleanup recorded");
+    drop(reader);
+    assert!(supervisor_task.join().await.is_ok());
+    let _ = continue_tx;
+}
+
+#[tokio::test]
+async fn accepted_handoff_survives_initiator_completion_and_allows_live_operation() {
+    let (release, wait) = oneshot::channel::<()>();
+    let (owner, mut supervisor_task) =
+        candidate::spawn_operation(8, 4, move |publisher| async move {
+            publisher.observe(Publication::Visible).await.unwrap();
+            publisher.observe(Publication::Acknowledged).await.unwrap();
+            let _ = wait.await;
+            EffectObservation::Known(11)
+        });
     let reader = owner.reader();
     let (handoff_tx, mut handoff_rx) = mpsc::channel(1);
     let initiator_task = tokio::spawn(async move { owner.offer_handoff(&handoff_tx).await });
@@ -106,7 +315,7 @@ async fn accepted_handoff_survives_initiator_completion_and_allows_live_operatio
 #[tokio::test]
 async fn operation_cancellation_is_observed_and_never_reopens_admission() {
     let (_release, wait) = oneshot::channel::<()>();
-    let (owner, supervisor_task) = candidate::spawn_operation(8, 3, move |_| async move {
+    let (owner, mut supervisor_task) = candidate::spawn_operation(8, 3, move |_| async move {
         let _ = wait.await;
         EffectObservation::Known(3)
     });
@@ -138,7 +347,7 @@ async fn operation_cancellation_is_observed_and_never_reopens_admission() {
 
 #[tokio::test]
 async fn worker_panic_is_observed_as_unknown_and_blocks_admission() {
-    let (owner, supervisor_task) =
+    let (owner, mut supervisor_task) =
         candidate::spawn_operation(8, 2, |_| async move { panic!("synthetic worker panic") });
     let reader = owner.reader();
     let panicked = reader
@@ -158,7 +367,7 @@ async fn worker_panic_is_observed_as_unknown_and_blocks_admission() {
 
 #[tokio::test]
 async fn failed_and_uncertain_publication_cannot_be_overwritten() {
-    let (owner, supervisor_task) = candidate::spawn_operation(8, 4, |publisher| async move {
+    let (owner, mut supervisor_task) = candidate::spawn_operation(8, 4, |publisher| async move {
         assert!(publisher.observe(Publication::Failed).await.is_ok());
         assert!(matches!(
             publisher.observe(Publication::Acknowledged).await,
@@ -174,7 +383,7 @@ async fn failed_and_uncertain_publication_cannot_be_overwritten() {
     assert_eq!(failed.publication, Publication::Failed);
     assert!(failed.outcome_unknown);
 
-    let (owner2, supervisor_task2) = candidate::spawn_operation(8, 4, |publisher| async move {
+    let (owner2, mut supervisor_task2) = candidate::spawn_operation(8, 4, |publisher| async move {
         publisher.observe(Publication::Uncertain).await.unwrap();
         assert!(publisher.observe(Publication::Failed).await.is_err());
         assert!(publisher.observe(Publication::Acknowledged).await.is_err());
@@ -195,7 +404,7 @@ async fn failed_and_uncertain_publication_cannot_be_overwritten() {
 
 #[tokio::test]
 async fn late_unknown_conflict_and_capacity_refusal_remain_closed() {
-    let (owner, supervisor_task) = candidate::spawn_operation(8, 3, |publisher| async move {
+    let (owner, mut supervisor_task) = candidate::spawn_operation(8, 3, |publisher| async move {
         publisher.observe(Publication::Visible).await.unwrap();
         publisher.observe(Publication::Acknowledged).await.unwrap();
         EffectObservation::Known(5)
@@ -226,7 +435,7 @@ async fn late_unknown_conflict_and_capacity_refusal_remain_closed() {
     drop(reader);
     assert!(supervisor_task.join().await.is_ok());
 
-    let (owner, supervisor_task) = candidate::spawn_operation(8, 1, |publisher| async move {
+    let (owner, mut supervisor_task) = candidate::spawn_operation(8, 1, |publisher| async move {
         publisher.observe(Publication::Visible).await.unwrap();
         publisher.observe(Publication::Acknowledged).await.unwrap();
         EffectObservation::Known(8)
@@ -248,7 +457,7 @@ async fn late_unknown_conflict_and_capacity_refusal_remain_closed() {
 
 #[tokio::test]
 async fn coordinator_abort_is_joined_and_marks_supervisor_lost() {
-    let (owner, supervisor_task) = candidate::spawn_operation(8, 2, |publisher| async move {
+    let (owner, mut supervisor_task) = candidate::spawn_operation(8, 2, |publisher| async move {
         publisher.observe(Publication::Visible).await.unwrap();
         publisher.observe(Publication::Acknowledged).await.unwrap();
         EffectObservation::Known(9)
@@ -269,8 +478,225 @@ async fn coordinator_abort_is_joined_and_marks_supervisor_lost() {
 }
 
 #[tokio::test]
+async fn cancelled_join_waiter_leaves_handle_owned_and_normal_join_observed() {
+    let (finish_worker_tx, finish_worker_rx) = oneshot::channel();
+    let (owner, supervisor_task) = candidate::spawn_operation(8, 2, move |publisher| async move {
+        publisher.observe(Publication::Visible).await.unwrap();
+        publisher.observe(Publication::Acknowledged).await.unwrap();
+        let _ = finish_worker_rx.await;
+        EffectObservation::Known(41)
+    });
+    let reader = owner.reader();
+    reader
+        .wait_for(|state| state.publication == Publication::Acknowledged)
+        .await
+        .expect("publication acknowledgment observed");
+    let (coordinator_entered, release_coordinator) = owner.pause_coordinator_for_test().await;
+    coordinator_entered
+        .await
+        .expect("coordinator reached barrier");
+    let task = Arc::new(AsyncMutex::new(supervisor_task));
+    let (started_tx, started_rx) = oneshot::channel();
+    let waiter_task = {
+        let task = task.clone();
+        tokio::spawn(async move { task.lock().await.join_started_for_test(started_tx).await })
+    };
+    tokio::time::timeout(candidate::WATCHDOG, started_rx)
+        .await
+        .expect("join waiter started")
+        .expect("join waiter start signal");
+    waiter_task.abort();
+    assert!(matches!(
+        waiter_task.await,
+        Err(error) if error.is_cancelled()
+    ));
+
+    {
+        let guard = task.lock().await;
+        assert_eq!(require_join_observer(&guard), Ok(()));
+    }
+    let still_owned = reader.snapshot().await;
+    assert_eq!(still_owned.owner, OwnerRole::Initiator);
+    assert!(!still_owned.operation_cancelled);
+    assert!(!still_owned.coordinator_abort_requested);
+    assert!(!still_owned.coordinator_join_observed);
+    let _ = release_coordinator.send(());
+    let _ = finish_worker_tx.send(());
+    let _ = reader
+        .wait_for(|state| state.worker_completed)
+        .await
+        .expect("worker completion observed");
+    drop(owner);
+    drop(reader);
+    let join_result = tokio::time::timeout(candidate::WATCHDOG, async {
+        task.lock().await.join().await
+    })
+    .await
+    .expect("retained join watchdog");
+    assert!(join_result.is_ok());
+    assert!(task.lock().await.join_observation_is_owned_for_test());
+}
+
+#[tokio::test]
+async fn cancelled_abort_waiter_keeps_join_unresolved_then_observable() {
+    let (owner, supervisor_task) =
+        candidate::spawn_operation(8, 2, |_| async move { EffectObservation::Known(42) });
+    let reader = owner.reader();
+    let (coordinator_entered, _release_coordinator) = owner.pause_coordinator_for_test().await;
+    coordinator_entered
+        .await
+        .expect("coordinator reached barrier");
+    let task = Arc::new(AsyncMutex::new(supervisor_task));
+    let (abort_requested_tx, abort_requested_rx) = oneshot::channel();
+    let (resume_tx, resume_rx) = oneshot::channel();
+    let abort_waiter = {
+        let task = task.clone();
+        tokio::spawn(async move {
+            task.lock()
+                .await
+                .abort_and_join_paused_for_test(abort_requested_tx, resume_rx)
+                .await
+        })
+    };
+    tokio::time::timeout(candidate::WATCHDOG, abort_requested_rx)
+        .await
+        .expect("abort request observed")
+        .expect("abort request signal");
+    let pending = reader.snapshot().await;
+    assert!(pending.coordinator_abort_requested);
+    assert!(!pending.coordinator_join_observed);
+    assert!(pending.supervisor_lost);
+    assert_eq!(
+        owner.admit_protected_operation().await,
+        Err(Refusal::SupervisorLost)
+    );
+    abort_waiter.abort();
+    assert!(matches!(
+        abort_waiter.await,
+        Err(error) if error.is_cancelled()
+    ));
+    drop(resume_tx);
+    assert_eq!(
+        require_join_observer(&*task.lock().await),
+        Ok(()),
+        "cancelling the abort-result waiter leaves the JoinHandle in its guard"
+    );
+    let still_unobserved = reader.snapshot().await;
+    assert!(still_unobserved.coordinator_abort_requested);
+    assert!(!still_unobserved.coordinator_join_observed);
+
+    let observed = task.lock().await.join().await;
+    assert!(matches!(
+        observed,
+        Err(SupervisorJoinError::Task(error)) if error.is_cancelled()
+    ));
+    assert!(reader.snapshot().await.coordinator_join_observed);
+    drop(owner);
+    drop(reader);
+}
+
+#[tokio::test]
+async fn post_abort_watchdog_timeout_is_unresolved_until_retained_join_is_polled() {
+    let (owner, supervisor_task) =
+        candidate::spawn_operation(8, 2, |_| async move { EffectObservation::Known(43) });
+    let reader = owner.reader();
+    let (coordinator_entered, _release_coordinator) = owner.pause_coordinator_for_test().await;
+    coordinator_entered
+        .await
+        .expect("coordinator reached barrier");
+    let task = Arc::new(AsyncMutex::new(supervisor_task));
+    let (watchdog_entered_tx, watchdog_entered_rx) = oneshot::channel();
+    let (release_watchdog_tx, release_watchdog_rx) = oneshot::channel();
+    let watchdog_waiter = {
+        let task = task.clone();
+        tokio::spawn(async move {
+            task.lock()
+                .await
+                .abort_and_join_watchdog_for_test(
+                    std::time::Duration::from_millis(10),
+                    watchdog_entered_tx,
+                    release_watchdog_rx,
+                )
+                .await
+        })
+    };
+    tokio::time::timeout(candidate::WATCHDOG, watchdog_entered_rx)
+        .await
+        .expect("post-abort wait entered")
+        .expect("post-abort wait signal");
+    assert!(matches!(
+        tokio::time::timeout(candidate::WATCHDOG, watchdog_waiter)
+            .await
+            .expect("watchdog result bounded")
+            .expect("watchdog task joined"),
+        Err(SupervisorJoinError::WatchdogUnresolved)
+    ));
+    drop(release_watchdog_tx);
+    let pending = reader.snapshot().await;
+    assert!(pending.coordinator_abort_requested);
+    assert!(!pending.coordinator_join_observed);
+    assert_eq!(
+        require_join_observer(&*task.lock().await),
+        Ok(()),
+        "watchdog timeout preserves the join handle for later observation"
+    );
+    assert!(matches!(
+        task.lock().await.join().await,
+        Err(SupervisorJoinError::Task(error)) if error.is_cancelled()
+    ));
+    assert!(reader.snapshot().await.coordinator_join_observed);
+    drop(owner);
+    drop(reader);
+}
+
+#[tokio::test]
+async fn detached_join_sensitivity_detects_unowned_observation() {
+    let (owner, supervisor_task) =
+        candidate::spawn_operation(8, 2, |_| async move { EffectObservation::Known(44) });
+    let reader = owner.reader();
+    let (coordinator_entered, _release_coordinator) = owner.pause_coordinator_for_test().await;
+    coordinator_entered
+        .await
+        .expect("coordinator reached barrier");
+    let task = Arc::new(AsyncMutex::new(supervisor_task));
+    let (started_tx, started_rx) = oneshot::channel();
+    let detached_waiter = {
+        let task = task.clone();
+        tokio::spawn(async move {
+            let _ = started_tx.send(());
+            task.lock().await.join_detached_for_test().await
+        })
+    };
+    tokio::time::timeout(candidate::WATCHDOG, started_rx)
+        .await
+        .expect("detached join waiter started")
+        .expect("detached waiter signal");
+    detached_waiter.abort();
+    assert!(matches!(
+        detached_waiter.await,
+        Err(error) if error.is_cancelled()
+    ));
+    assert_eq!(
+        require_join_observer(&*task.lock().await),
+        Err("coordinator JoinHandle has no retained observer")
+    );
+
+    drop(owner);
+    let detached_guard = Arc::try_unwrap(task)
+        .ok()
+        .expect("detached waiter released the task guard")
+        .into_inner();
+    drop(detached_guard);
+    let unresolved = reader.snapshot().await;
+    assert!(unresolved.supervisor_lost);
+    assert!(unresolved.coordinator_abort_requested);
+    assert!(!unresolved.coordinator_join_observed);
+    drop(reader);
+}
+
+#[tokio::test]
 async fn coordinator_panic_is_joined_and_marks_supervisor_lost() {
-    let (owner, supervisor_task) = candidate::spawn_operation(8, 2, |publisher| async move {
+    let (owner, mut supervisor_task) = candidate::spawn_operation(8, 2, |publisher| async move {
         publisher.observe(Publication::Visible).await.unwrap();
         publisher.observe(Publication::Acknowledged).await.unwrap();
         EffectObservation::Known(10)
@@ -293,7 +719,7 @@ async fn coordinator_panic_is_joined_and_marks_supervisor_lost() {
 
 #[tokio::test]
 async fn full_command_queue_refuses_admission_without_mutation() {
-    let (owner, supervisor_task) =
+    let (owner, mut supervisor_task) =
         candidate::spawn_operation(1, 2, |_| async move { EffectObservation::Known(17) });
     let owner = Arc::new(owner);
     let state_guard = owner.hold_state_for_test().await;
@@ -331,7 +757,7 @@ async fn full_command_queue_refuses_admission_without_mutation() {
 
 #[tokio::test]
 async fn sensitivity_checks_reject_premature_handoff_unobserved_work_and_reopening() {
-    let (owner, supervisor_task) = candidate::spawn_operation(8, 3, |publisher| async move {
+    let (owner, mut supervisor_task) = candidate::spawn_operation(8, 3, |publisher| async move {
         publisher.observe(Publication::Visible).await.unwrap();
         publisher.observe(Publication::Acknowledged).await.unwrap();
         EffectObservation::Known(13)
@@ -377,7 +803,7 @@ async fn sensitivity_checks_reject_premature_handoff_unobserved_work_and_reopeni
 
 #[tokio::test]
 async fn cancellation_and_retirement_sensitivity_controls_reject_reopening() {
-    let (cancelled_owner, cancelled_task) =
+    let (cancelled_owner, mut cancelled_task) =
         candidate::spawn_operation(8, 2, |publisher| async move {
             publisher.observe(Publication::Visible).await.unwrap();
             publisher.observe(Publication::Acknowledged).await.unwrap();
@@ -401,11 +827,12 @@ async fn cancellation_and_retirement_sensitivity_controls_reject_reopening() {
     drop(cancelled_reader);
     assert!(cancelled_task.join().await.is_ok());
 
-    let (retired_owner, retired_task) = candidate::spawn_operation(8, 2, |publisher| async move {
-        publisher.observe(Publication::Visible).await.unwrap();
-        publisher.observe(Publication::Acknowledged).await.unwrap();
-        EffectObservation::Known(22)
-    });
+    let (retired_owner, mut retired_task) =
+        candidate::spawn_operation(8, 2, |publisher| async move {
+            publisher.observe(Publication::Visible).await.unwrap();
+            publisher.observe(Publication::Acknowledged).await.unwrap();
+            EffectObservation::Known(22)
+        });
     let retired_reader = retired_owner.reader();
     let _ = ready_snapshot(&retired_reader).await;
     retired_owner.retire().await.unwrap();

@@ -5927,3 +5927,59 @@ scope, and limitations are recorded in
 `evidence/a33_f1/quarantine-owner-lease-component-prototype.md`. A33-F1 /
 E27 and all other unresolved obligations remain **OPEN**; activation
 **DISABLED**; public DevNet **NO-GO**.
+
+## 59. Correct cancellation ownership in the test-only owner prototype
+
+**TEST-ONLY OWNERSHIP CORRECTION — INDEPENDENT REVIEW PENDING.** This
+follow-up implements the two source-traced findings in the supplied reviewer
+report; no reviewer identity or reviewer-run test result is asserted.
+
+Handoff acceptance now constructs the receiver's loss-reporting
+`OperationOwner` before enqueueing the acceptance request. The coordinator
+updates the current-owner atomic only when it accepts the request and sends
+the acceptance reply; the initiator acknowledgment follows that reply send.
+The acknowledgment means coordinator acceptance while the receiving future
+already holds the guard, not proof that the receiver later receives the reply
+or remains alive. A dropped receiver guard synchronously moves its current
+owner role to Lost before best-effort bounded-channel notification. The
+initiator's later drop cannot revoke the transferred Supervisor role. A full
+or closed notification channel remains fail-closed: the shared role and
+watch state record loss synchronously, and unavailable bounded control
+capacity adds the existing capacity-uncertain refusal.
+
+`SupervisorTask::join`, `abort_and_join`, and the watchdog wait retain the
+coordinator `JoinHandle` in the guard across awaits. Cancelling an observer
+does not cancel the operation or imply coordinator termination. The outer
+`SupervisorTask` remains responsible for later observation; an abort request
+sets refusal/loss state but only the actual `JoinHandle` result sets
+`coordinator_join_observed`. The test-only detached-handle sensitivity path
+intentionally reproduces the old ownership defect, is rejected by the same
+observer-ownership check, and records the final unobserved abort as
+unresolved rather than as a successful join.
+
+The focused target
+`crates/qbind-node/tests/a33_f1_inprocess_owner_prototype_tests.rs` reports
+**19 passed, 0 failed, 0 ignored**. Controls cover cancellation after reply
+send but before receiver completion, failed delivery, acquired-owner loss,
+full control-channel loss reporting, pending join waiter cancellation,
+pending abort-result waiter cancellation, watchdog timeout, successful join,
+and detached-JoinHandle sensitivity. The two defective traces are expected
+rejections inside passing tests, not passing exploit tests.
+
+The final exact command and raw output are recorded in
+`evidence/a33_f1/quarantine-owner-lease-tokio-cancellation-correction-raw.log`;
+the correction contract and limitations are in
+`evidence/a33_f1/quarantine-owner-lease-tokio-cancellation-correction.md`.
+During iteration, compilation and fixture checks exposed and corrected
+test-only issues; one diagnostic run was stopped at its 20-second outer
+timeout while investigating a barrier that held the state lock. Those
+intermediate attempts are not counted as passing evidence.
+
+The component remains test-support-only and in-process. Mock publication is
+not filesystem or crash/power-loss durability; Tokio task abort/join does
+not prove OS reclamation; the in-memory supervisor does not survive
+process/runtime loss; and the harness does not fence production signer,
+storage, consensus, snapshot, callback, or outbound work. The accepted
+substituted-snapshot model, retirement correction, and historical raw logs
+remain unchanged. A33-F1 / E27 and all other unresolved obligations remain
+**OPEN**; activation **DISABLED**; public DevNet **NO-GO**.
