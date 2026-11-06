@@ -209,3 +209,11 @@ e1d10145b2f99b8c7ce0bb2f96215b577bbfeb90cfaf186df572d9e1849d4e3f  quarantine-own
 9f682356169de4326dfb4f2ca400dfa375e2bebaf22c577b2dde5e4a0bd1fe2d  quarantine-owner-lease-model-integrity.log
 9cab2c425b9bb40c10e6feadbb8ddb164708465d9713384295dfe35e1a822e36  ../../../../docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
 4b9a032e4237d1ae1f7f5cbd87a629865f31198b47189123ce0175e93e3f6a5c  quarantine-owner-lease-worker-result-capacity-reconciliation.md
+c37b41016171bb67fb527cfafb657e607baa2b3976f01286c66a59d92e66bb63  ../../../../crates/qbind-consensus/tests/a33_f1_catchup_partial_prefix_tests.rs
+a8fb07b027fa175310e16792bf68c6cd7c8c0108483c02507d80ec1671167539  ../../../../docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+5530c3b215ae676a2cc1a75faa85b74490b525907fb6fac7574a172a7550d553  catchup-partial-prefix-boundary.md
+575c92d319357001511057fad61da9a7de54136bac9828f7d6eb4e9d357d3971  catchup-partial-prefix-compile-attempt.log
+75453dfa86918a944e2759df551e3c50af4906703b6b64bd6aace2e55013d58f  catchup-partial-prefix-inference-attempt.log
+77f588e3ca9627e1b94b28f869b26f66a95e9da24512d022f72b459d005f64e8  catchup-partial-prefix-focused.log
+adf37b7e4adbac76563e2c99d107bda4ef3ee44288e92a45ca2caf91f809620e  catchup-partial-prefix-existing-catchup.log
+3d17f7578d12e0fdc752a8e4d8274f3ad2867d3abb6bb43674cccb455c8bd393  catchup-partial-prefix-regressions.log

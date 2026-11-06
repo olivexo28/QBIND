@@ -6188,3 +6188,41 @@ updates are append-only. Later manifest totals are reported separately
 from the pinned 209-entry result. No production capacity or recovery
 assurance follows. A33-F1 / E27 remain **OPEN**; activation **DISABLED**;
 public DevNet **NO-GO**.
+
+## 64. Real-engine valid-prefix-then-error observation
+
+**TEST-ONLY REAL-ENGINE CATCH-UP BOUNDARY — INDEPENDENT REVIEW PENDING.**
+At source producer `c56138c0139c4df5d12ae9b0aaf3222de3ce3968`, retained
+real-engine tests cover successful suffixes and first-item refusal, not
+a valid prefix followed by an invalid later item. The new separate
+`crates/qbind-consensus/tests/a33_f1_catchup_partial_prefix_tests.rs`
+uses the real `apply_restore_catchup_blocks` API and existing synthetic
+fixture conventions, leaving accepted tests and production code unchanged.
+
+Starting from snapshot height 10, four valid items followed by item 15
+with a nonmember logical QC signer return the exact `InvalidQc` error
+after retaining four blocks and their votes/own QCs, moving the lock to
+view 14, and committing heights 11 and 12. The final view update is
+skipped (view remains 11). The invalid item's node is absent and its vote
+count zero. The same public-state observer compares a successful four-item
+prefix (same observations except final view 15), first-item rejection
+(unchanged observations), and all five valid items (commit through 13,
+lock 15, current view 16). These observations establish this partial-prefix
+boundary, not universal zero effects, rollback, durability or policy.
+
+Detailed source anchors, observation limits, commands, raw outputs,
+unsuccessful compile attempts, whitespace and current/historical checksum
+separation are retained in
+`evidence/a33_f1/catchup-partial-prefix-boundary.md`. Three focused tests
+and 42 existing consensus/safety regressions pass. E1's reporting correction
+and W1/W2, P1/P2, capacity and earlier accepted controls remain closed within
+their reviewed scopes; no reviewer-run tests are claimed. Producing
+revisions of the two intermediate integrity-log states remain unestablished.
+
+This test-only evidence selects no partial-prefix policy, adds no marker
+or gate, and changes no node caller, production catch-up, authentication,
+signing, recovery/clear authority or operational behavior. Synthetic
+logical signers and direct engine calls are not authenticated network
+input, real signing, startup or durable-quarantine assurance. A33-F1 / E27
+and remaining obligations remain **OPEN**; activation **DISABLED**;
+public DevNet **NO-GO**.

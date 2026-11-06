@@ -1,0 +1,130 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on build directory
+   Compiling qbind-consensus v0.1.0 (/workspaces/QBIND/olivexo28/QBIND/crates/qbind-consensus)
+warning: multiple fields are never read
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1698:5
+     |
+1697 | struct ReceivedVoteQcRouteControlFrame {
+     |        ------------------------------- fields in this struct
+1698 |     token: Option<VerifiedVoteToken>,
+     |     ^^^^^
+1699 |     preflight: Option<VerifiedVotePreflight>,
+     |     ^^^^^^^^^
+1700 |     report_owner: Option<ReceivedVoteQcReportOwner>,
+     |     ^^^^^^^^^^^^
+1701 |     projection: Option<crate::vote_accumulator::VoteAccumulatorProjection<'static, [u8; 32]>>,
+     |     ^^^^^^^^^^
+1702 |     candidate: Option<ReceivedVoteQcCandidateSeal>,
+     |     ^^^^^^^^^
+1703 |     control_charge: Option<Result<u64, ReceivedVoteQcStageError>>,
+     |     ^^^^^^^^^^^^^^
+1704 |     wire_preparation: Option<Result<ReceivedVoteQcWirePreparation, ReceivedVoteQcStageError>>,
+     |     ^^^^^^^^^^^^^^^^
+1705 |     wire: Option<ReceivedVoteQcWire>,
+     |     ^^^^
+1706 |     mutation: Option<VoteMutationReport<[u8; 32]>>,
+     |     ^^^^^^^^
+1707 |     actual: Option<ReceivedVoteQcEventSummary>,
+     |     ^^^^^^
+1708 |     outcome: Option<ReceivedVoteQcOutcome>,
+     |     ^^^^^^^
+1709 |     report: Option<ReceivedVoteQcReport>,
+     |     ^^^^^^
+1710 |     refusal: Option<ReceivedVoteQcRefusal>,
+     |     ^^^^^^^
+1711 |     return_carrier: Option<Result<ReceivedVoteQcReport, ReceivedVoteQcRefusal>>,
+     |     ^^^^^^^^^^^^^^
+1712 |     staged_incomplete: Option<ReceivedVoteQcIncomplete>,
+     |     ^^^^^^^^^^^^^^^^^
+1713 |     mapped_incomplete: Option<ReceivedVoteQcIncomplete>,
+     |     ^^^^^^^^^^^^^^^^^
+1714 |     logical_qc: Option<QuorumCertificate<[u8; 32]>>,
+     |     ^^^^^^^^^^
+1715 |     qc_summary: Option<ReceivedVoteQcSummary>,
+     |     ^^^^^^^^^^
+1716 |     voter: ValidatorId,
+     |     ^^^^^
+1717 |     view: u64,
+     |     ^^^^
+1718 |     block_id: [u8; 32],
+     |     ^^^^^^^^
+1719 |     control_bytes: u64,
+     |     ^^^^^^^^^^^^^
+1720 |     is_equivocation: bool,
+     |     ^^^^^^^^^^^^^^^
+1721 |     projected_disposition: VoteAccumulatorDisposition,
+     |     ^^^^^^^^^^^^^^^^^^^^^
+1722 |     cursor: Option<ValidatorId>,
+     |     ^^^^^^
+1723 |     signer: Option<ValidatorId>,
+     |     ^^^^^^
+1724 |     raw: usize,
+     |     ^^^
+1725 |     roster_len: usize,
+     |     ^^^^^^^^^^
+1726 |     word: usize,
+     |     ^^^^
+1727 |     incoming_index: usize,
+     |     ^^^^^^^^^^^^^^
+1728 |     incoming_present: bool,
+     |     ^^^^^^^^^^^^^^^^
+1729 |     evidence: ReceivedVoteEvidenceDisposition,
+     |     ^^^^^^^^
+1730 |     still_retained: bool,
+     |     ^^^^^^^^^^^^^^
+1731 |     view_advanced: bool,
+     |     ^^^^^^^^^^^^^
+1732 |     correspondence_matches: bool,
+     |     ^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: multiple fields are never read
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1736:5
+     |
+1735 | struct ReceivedQcGateControlFrame {
+     |        -------------------------- fields in this struct
+1736 |     borrowed_gate: Option<&'static mut dyn ReceivedQcEffectGate>,
+     |     ^^^^^^^^^^^^^
+1737 |     adapter: Option<ReceivedQcGateAdapter<'static>>,
+     |     ^^^^^^^
+1738 |     adapter_borrow: Option<&'static mut ReceivedQcGateAdapter<'static>>,
+     |     ^^^^^^^^^^^^^^
+1739 |     state_gate: Option<&'static mut dyn crate::hotstuff_state_engine::VoteQcEffectGate<[u8; 32]>>,
+     |     ^^^^^^^^^^
+1740 |     state_borrow: Option<&'static HotStuffStateEngine<[u8; 32]>>,
+     |     ^^^^^^^^^^^^
+1741 |     input: Option<ReceivedQcEffectView<'static>>,
+     |     ^^^^^
+1742 |     input_argument: Option<ReceivedQcEffectView<'static>>,
+     |     ^^^^^^^^^^^^^^
+1743 |     logical_borrow: Option<&'static QuorumCertificate<[u8; 32]>>,
+     |     ^^^^^^^^^^^^^^
+1744 |     application: ReceivedQcApplication,
+     |     ^^^^^^^^^^^
+1745 |     application_return: Option<Result<(), QcValidationError>>,
+     |     ^^^^^^^^^^^^^^^^^^
+1746 |     state_result: Option<(VoteMutationReport<[u8; 32]>, Option<Result<(), QcValidationError>>)>,
+     |     ^^^^^^^^^^^^
+1747 |     route_result: Option<(VoteMutationReport<[u8; 32]>, ReceivedQcApplication)>,
+     |     ^^^^^^^^^^^^
+1748 |     lock_summary: Option<ReceivedVoteQcSummary>,
+     |     ^^^^^^^^^^^^
+1749 |     incomplete: Option<ReceivedVoteQcIncomplete>,
+     |     ^^^^^^^^^^
+1750 |     decision: Option<ReceivedQcGateDecision>,
+     |     ^^^^^^^^
+1751 |     allow_result: bool,
+     |     ^^^^^^^^^^^^
+
+warning: `qbind-consensus` (lib test) generated 2 warnings
+    Finished `test` profile [unoptimized] target(s) in 4.14s
+     Running unittests src/lib.rs (target/debug/deps/qbind_consensus-d2e3d634563c201b)
+
+running 2 tests
+test basic_hotstuff_engine::tests::restore_catchup_rejects_malformed_parent_fail_closed ... ok
+test basic_hotstuff_engine::tests::restore_catchup_applies_valid_peer_learned_suffix_above_snapshot ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 310 filtered out; finished in 0.00s
+
