@@ -6226,3 +6226,40 @@ logical signers and direct engine calls are not authenticated network
 input, real signing, startup or durable-quarantine assurance. A33-F1 / E27
 and remaining obligations remain **OPEN**; activation **DISABLED**;
 public DevNet **NO-GO**.
+
+## 65. I1 reset marker / own-temporary-path identity correction
+
+**I1 RESET PATH-SEPARATION CORRECTION — INDEPENDENT REVIEW PENDING.**
+At starting tip `c33132812646794de3640301e291313c6e182e04`, the reset
+guard omitted marker-versus-own-temp identity comparison. The sole
+production correction adds that pair to the existing Linux/stable
+operator-controlled path-separation guard. The public reset API therefore
+refuses this alias before verification-refusal, pending or final audit
+publication and before marker persistence. The shared public marker writer
+is unchanged from protected main; its truncating-temp behavior predates
+this branch, and direct writer callers remain outside the reset guard.
+
+A separate new public-API test uses actually verified synthetic genesis,
+signed bundle and ratification inputs, a valid existing marker, real
+destination ownership and a pre-existing hard link from its temp path.
+Corrected refusal preserves all directory names, bytes and file identities.
+A distinct-marker/temp control succeeds. An isolated starting-revision
+reproduction confirms the public reset instead changes both shared-inode
+paths and publishes success; both names remain after the same-inode rename.
+The first baseline attempt's incorrect link-count assertion and raw failure
+are preserved, as is the corrected baseline observation. Existing accepted
+test bodies and historical evidence are unchanged.
+
+Exact commands, raw results, supported-profile limits and checksum
+interpretation are in `evidence/a33_f1/i1-marker-temp-correction.md`.
+Thirteen focused/path/verified-reset/destination-lock tests and 22 reset
+unit/error-reporting tests pass. The user-supplied review did not execute
+the reproduction; this task did. Earlier separation, error reporting,
+ownership, E1, W1/W2 and catch-up acceptances remain within their recorded
+scopes. Full-branch integration approval remains withheld pending this
+correction's independent review and integration-evidence disposition.
+
+No hostile namespace-race protection, other writer-path fix, crash
+durability, quarantine/currentness or signer exclusivity is established.
+The two intermediate log producing revisions remain unestablished.
+A33-F1 / E27 remain **OPEN**; activation **DISABLED**; public DevNet **NO-GO**.

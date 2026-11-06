@@ -1057,6 +1057,7 @@ fn check_authority_reset_audit_path(
             (0, 3),
             (1, 2),
             (1, 3),
+            (2, 3),
             (0, 4),
             (1, 4),
             (2, 4),

@@ -1,0 +1,1081 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+warning: enum `VerifiedVoteInvocationRefusal` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1456:17
+     |
+1456 | pub(crate) enum VerifiedVoteInvocationRefusal {
+     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: enum `ReceivedVoteEvidenceDisposition` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1469:17
+     |
+1469 | pub(crate) enum ReceivedVoteEvidenceDisposition {
+     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `VerifiedVoteInvocation` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1479:17
+     |
+1479 | pub(crate) enum VerifiedVoteInvocation {
+     |                 ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `ReceivedVoteQcRefusalReason` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1492:17
+     |
+1492 | pub(crate) enum ReceivedVoteQcRefusalReason {
+     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedVoteQcRefusal` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1498:19
+     |
+1498 | pub(crate) struct ReceivedVoteQcRefusal {
+     |                   ^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `ReceivedVoteQcIncomplete` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1504:17
+     |
+1504 | pub(crate) enum ReceivedVoteQcIncomplete {
+     |                 ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedVoteQcEventSummary` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1518:19
+     |
+1518 | pub(crate) struct ReceivedVoteQcEventSummary {
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `ReceivedQcGateRefusal` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1528:17
+     |
+1528 | pub(crate) enum ReceivedQcGateRefusal {
+     |                 ^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `ReceivedQcGateDecision` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1534:17
+     |
+1534 | pub(crate) enum ReceivedQcGateDecision {
+     |                 ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `ReceivedQcApplication` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1540:17
+     |
+1540 | pub(crate) enum ReceivedQcApplication {
+     |                 ^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedQcEffectView` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1549:19
+     |
+1549 | pub(crate) struct ReceivedQcEffectView<'a> {
+     |                   ^^^^^^^^^^^^^^^^^^^^
+
+warning: multiple methods are never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1561:19
+     |
+1560 | impl ReceivedQcEffectView<'_> {
+     | ----------------------------- methods in this implementation
+1561 |     pub(crate) fn logical(&self) -> &QuorumCertificate<[u8; 32]> { self.logical }
+     |                   ^^^^^^^
+1562 |     pub(crate) fn wire(&self) -> &qbind_wire::consensus::QuorumCertificate { self.wire }
+     |                   ^^^^
+1563 |     pub(crate) fn locked(&self) -> Option<ReceivedVoteQcSummary> { self.locked }
+     |                   ^^^^^^
+1564 |     pub(crate) fn target_own_qc(&self) -> Option<&QuorumCertificate<[u8; 32]>> {
+     |                   ^^^^^^^^^^^^^
+...
+1567 |     pub(crate) fn committed_block(&self) -> Option<&[u8; 32]> { self.committed_block }
+     |                   ^^^^^^^^^^^^^^^
+1568 |     pub(crate) fn committed_height(&self) -> Option<u64> { self.committed_height }
+     |                   ^^^^^^^^^^^^^^^^
+1569 |     pub(crate) fn commit_log(&self) -> &[CommittedEntry<[u8; 32]>] { self.commit_log }
+     |                   ^^^^^^^^^^
+1570 |     pub(crate) fn current_view(&self) -> u64 { self.current_view }
+     |                   ^^^^^^^^^^^^
+
+warning: trait `ReceivedQcEffectGate` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1573:18
+     |
+1573 | pub(crate) trait ReceivedQcEffectGate {
+     |                  ^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedQcGateAdapter` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1577:8
+     |
+1577 | struct ReceivedQcGateAdapter<'a> {
+     |        ^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedVoteQcSummary` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1639:19
+     |
+1639 | pub(crate) struct ReceivedVoteQcSummary {
+     |                   ^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `ReceivedVoteQcOutcome` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1645:17
+     |
+1645 | pub(crate) enum ReceivedVoteQcOutcome {
+     |                 ^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedVoteQcCandidateSeal` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1689:8
+     |
+1689 | struct ReceivedVoteQcCandidateSeal {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedVoteQcRouteControlFrame` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1697:8
+     |
+1697 | struct ReceivedVoteQcRouteControlFrame {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedQcGateControlFrame` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1735:8
+     |
+1735 | struct ReceivedQcGateControlFrame {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `VerifiedVotePreflight` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1755:8
+     |
+1755 | struct VerifiedVotePreflight {
+     |        ^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `same_vote_signed_fields` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:2803:4
+     |
+2803 | fn same_vote_signed_fields(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `map_received_vote_qc_incomplete` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:2818:4
+     |
+2818 | fn map_received_vote_qc_incomplete(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `received_vote_qc_control_charge` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:2844:4
+     |
+2844 | fn received_vote_qc_control_charge() -> Result<u64, ReceivedVoteQcStageError> {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `qc_matches_projected_membership` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:2859:4
+     |
+2859 | fn qc_matches_projected_membership(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `compare_actual_qc_failure` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:2889:4
+     |
+2889 | fn compare_actual_qc_failure(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: multiple methods are never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:2938:19
+     |
+2937 | impl BasicHotStuffEngine<[u8; 32]> {
+     | ---------------------------------- methods in this implementation
+2938 |     pub(crate) fn invoke_verified_received_vote_qc(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+2945 |     pub(crate) fn invoke_verified_received_vote_qc_effect_gated(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+2953 |     fn invoke_received_vote_qc_inner(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3264 |     pub(crate) fn install_received_vote_context(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3376 |     pub(crate) fn admit_verified_received_vote(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3398 |     pub(crate) fn invoke_verified_received_vote(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3496 |     fn preflight_verified_received_vote(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedVoteQcReport` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1657:23
+     |
+1657 |     pub(crate) struct ReceivedVoteQcReport {
+     |                       ^^^^^^^^^^^^^^^^^^^^
+
+warning: associated items `new`, `actual`, and `outcome` are never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1664:23
+     |
+1663 |     impl ReceivedVoteQcReport {
+     |     ------------------------- associated items in this implementation
+1664 |         pub(super) fn new(
+     |                       ^^^
+...
+1672 |         pub(crate) fn actual(&self) -> &ReceivedVoteQcEventSummary {
+     |                       ^^^^^^
+...
+1676 |         pub(crate) fn outcome(&self) -> &ReceivedVoteQcOutcome {
+     |                       ^^^^^^^
+
+warning: field `accumulator` is never read
+   --> crates/qbind-consensus/src/hotstuff_state_engine.rs:193:16
+    |
+191 | pub(crate) struct VoteMutationReport<BlockIdT> {
+    |                   ------------------ field in this struct
+192 |     pub(crate) history: VoteHistoryOutcome<BlockIdT>,
+193 |     pub(crate) accumulator:
+    |                ^^^^^^^^^^^
+
+warning: trait `VoteQcEffectGate` is never used
+   --> crates/qbind-consensus/src/hotstuff_state_engine.rs:198:18
+    |
+198 | pub(crate) trait VoteQcEffectGate<BlockIdT: Eq + std::hash::Hash + Clone> {
+    |                  ^^^^^^^^^^^^^^^^
+
+warning: method `is_equivocation` is never used
+   --> crates/qbind-consensus/src/hotstuff_state_engine.rs:212:19
+    |
+211 | impl<BlockIdT> VoteMutationReport<BlockIdT> {
+    | ------------------------------------------- method in this implementation
+212 |     pub(crate) fn is_equivocation(&self) -> bool {
+    |                   ^^^^^^^^^^^^^^^
+
+warning: enum `VoteEvidencePreflightError` is never used
+   --> crates/qbind-consensus/src/hotstuff_state_engine.rs:218:17
+    |
+218 | pub(crate) enum VoteEvidencePreflightError {
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `VoteEvidencePlan` is never used
+   --> crates/qbind-consensus/src/hotstuff_state_engine.rs:225:17
+    |
+225 | pub(crate) enum VoteEvidencePlan {
+    |                 ^^^^^^^^^^^^^^^^
+
+warning: multiple methods are never used
+    --> crates/qbind-consensus/src/hotstuff_state_engine.rs:567:19
+     |
+ 361 | / impl<BlockIdT> HotStuffStateEngine<BlockIdT>
+ 362 | | where
+ 363 | |     BlockIdT: Eq + std::hash::Hash + Clone,
+     | |___________________________________________- methods in this implementation
+...
+ 567 |       pub(crate) fn received_vote_budget(&self) -> Option<&EvidenceBudget> {
+     |                     ^^^^^^^^^^^^^^^^^^^^
+...
+ 571 |       pub(crate) fn received_vote_evidence_table(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 577 |       pub(crate) fn install_received_vote_evidence_table(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 598 |       pub(crate) fn prepare_received_vote_evidence(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 641 |       pub(crate) fn project_received_vote_accumulator<'a>(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 651 |       pub(crate) fn has_conflicting_vote_history(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 662 |       pub(crate) fn has_vote_memberships(
+     |                     ^^^^^^^^^^^^^^^^^^^^
+...
+ 700 |       pub(crate) fn retain_received_vote_token(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 729 |       pub(crate) fn map_qc_charge_checked(&self) -> Result<u64, EvidenceRetentionError> {
+     |                     ^^^^^^^^^^^^^^^^^^^^^
+...
+ 737 |       pub(crate) fn install_received_vote_budget(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+1719 |       pub(crate) fn on_vote_detailed_effect_gated(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `VoteAccumulatorProjection` is never constructed
+   --> crates/qbind-consensus/src/vote_accumulator.rs:223:19
+    |
+223 | pub(crate) struct VoteAccumulatorProjection<'a, BlockIdT> {
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `disposition`, `projected_count`, and `next_signer` are never used
+   --> crates/qbind-consensus/src/vote_accumulator.rs:236:19
+    |
+232 | / impl<BlockIdT> VoteAccumulatorProjection<'_, BlockIdT>
+233 | | where
+234 | |     BlockIdT: Eq + std::hash::Hash + Clone,
+    | |___________________________________________- methods in this implementation
+235 |   {
+236 |       pub(crate) fn disposition(&self) -> VoteAccumulatorDisposition {
+    |                     ^^^^^^^^^^^
+...
+240 |       pub(crate) fn projected_count(&self) -> usize {
+    |                     ^^^^^^^^^^^^^^^
+...
+244 |       pub(crate) fn next_signer(&self, after: Option<ValidatorId>) -> Option<ValidatorId> {
+    |                     ^^^^^^^^^^^
+
+warning: methods `project_vote` and `will_contain_after_on_vote` are never used
+   --> crates/qbind-consensus/src/vote_accumulator.rs:438:19
+    |
+282 | / impl<BlockIdT> VoteAccumulator<BlockIdT>
+283 | | where
+284 | |     BlockIdT: Eq + std::hash::Hash + Clone,
+    | |___________________________________________- methods in this implementation
+...
+438 |       pub(crate) fn project_vote<'a>(
+    |                     ^^^^^^^^^^^^
+...
+489 |       pub(crate) fn will_contain_after_on_vote(
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `qbind-consensus` (lib) generated 37 warnings
+   Compiling qbind-node v0.1.0 (/workspaces/QBIND/olivexo28/QBIND/crates/qbind-node)
+warning: function `maybe_emit_view_timeout` is never used
+    --> crates/qbind-node/src/binary_consensus_loop.rs:7512:4
+     |
+7512 | fn maybe_emit_view_timeout(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `apply_local_tc_and_broadcast_new_view` is never used
+    --> crates/qbind-node/src/binary_consensus_loop.rs:7869:4
+     |
+7869 | fn apply_local_tc_and_broadcast_new_view(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `same_ledger` is never used
+   --> crates/qbind-node/src/safety_record_store/accounting.rs:699:19
+    |
+676 | impl SharedAccountant {
+    | --------------------- method in this implementation
+...
+699 |     pub(crate) fn same_ledger(&self, other: &SharedAccountant) -> bool {
+    |                   ^^^^^^^^^^^
+
+warning: associated function `construct` is never used
+    --> crates/qbind-node/src/signing_reservation_journal.rs:1699:8
+     |
+1691 | impl LiveContainer {
+     | ------------------ associated function in this implementation
+...
+1699 |     fn construct(
+     |        ^^^^^^^^^
+
+warning: variant `Bounded` is never constructed
+    --> crates/qbind-node/src/signing_reservation_journal.rs:1799:5
+     |
+1797 | enum LiveMode {
+     |      -------- variant in this enum
+1798 |     Legacy(HashMap<SigningPosition, LiveState>),
+1799 |     Bounded(LiveContainer),
+     |     ^^^^^^^
+     |
+     = note: `LiveMode` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: methods `contains_key`, `len`, and `legacy_len_capacity` are never used
+    --> crates/qbind-node/src/signing_reservation_journal.rs:1817:8
+     |
+1802 | impl LiveMode {
+     | ------------- methods in this implementation
+...
+1817 |     fn contains_key(&self, pos: &SigningPosition) -> bool {
+     |        ^^^^^^^^^^^^
+...
+1821 |     fn len(&self) -> usize {
+     |        ^^^
+...
+1865 |     fn legacy_len_capacity(&self) -> Option<(usize, usize)> {
+     |        ^^^^^^^^^^^^^^^^^^^
+
+warning: enum `AdmissionInstallError` is never used
+    --> crates/qbind-node/src/signing_reservation_journal.rs:1991:17
+     |
+1991 | pub(crate) enum AdmissionInstallError {
+     |                 ^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `install_accountant_association` and `enter_bounded_live_mode` are never used
+    --> crates/qbind-node/src/signing_reservation_journal.rs:2190:19
+     |
+2159 | impl SigningReservationJournal {
+     | ------------------------------ methods in this implementation
+...
+2190 |     pub(crate) fn install_accountant_association(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+2228 |     pub(crate) fn enter_bounded_live_mode(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `qbind-node` (lib) generated 8 warnings
+    Finished `test` profile [unoptimized] target(s) in 20.96s
+     Running tests/a33_f1_authority_reset_audit_collision_tests.rs (target/debug/deps/a33_f1_authority_reset_audit_collision_tests-bd6f1336945c86a4)
+
+running 6 tests
+test equivalent_spellings_and_temporary_aliases_refuse ... case=dot; returned=Err(UnsafeAuditPath("/tmp/.tmp44cpt8/pqc_authority_state.json aliases /tmp/.tmp44cpt8/pqc_authority_state.json"))
+marker_before={
+  "record_version": 1,
+  "chain_id": "0000000000000001",
+  "environment": "devnet",
+  "genesis_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authority_policy_version": 1,
+  "authority_sequence": 5,
+  "authority_epoch": 2,
+  "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ratified_bundle_signing_key_fingerprint": "cccccccccccccccccccccccccccccccccccccccc",
+  "ratification_object_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "last_update_source": "test-or-fixture",
+  "updated_at_unix_secs": 1700000000
+}
+marker_after={
+  "record_version": 1,
+  "chain_id": "0000000000000001",
+  "environment": "devnet",
+  "genesis_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authority_policy_version": 1,
+  "authority_sequence": 5,
+  "authority_epoch": 2,
+  "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ratified_bundle_signing_key_fingerprint": "cccccccccccccccccccccccccccccccccccccccc",
+  "ratification_object_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "last_update_source": "test-or-fixture",
+  "updated_at_unix_secs": 1700000000
+}
+marker_bytes_changed=false
+case=parent; returned=Err(UnsafeAuditPath("/tmp/.tmp2iEeJR/pqc_authority_state.json aliases /tmp/.tmp2iEeJR/pqc_authority_state.json"))
+marker_before={
+  "record_version": 1,
+  "chain_id": "0000000000000001",
+  "environment": "devnet",
+  "genesis_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authority_policy_version": 1,
+  "authority_sequence": 5,
+  "authority_epoch": 2,
+  "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ratified_bundle_signing_key_fingerprint": "cccccccccccccccccccccccccccccccccccccccc",
+  "ratification_object_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "last_update_source": "test-or-fixture",
+  "updated_at_unix_secs": 1700000000
+}
+marker_after={
+  "record_version": 1,
+  "chain_id": "0000000000000001",
+  "environment": "devnet",
+  "genesis_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authority_policy_version": 1,
+  "authority_sequence": 5,
+  "authority_epoch": 2,
+  "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ratified_bundle_signing_key_fingerprint": "cccccccccccccccccccccccccccccccccccccccc",
+  "ratification_object_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "last_update_source": "test-or-fixture",
+  "updated_at_unix_secs": 1700000000
+}
+marker_bytes_changed=false
+case=marker-temp; returned=Err(UnsafeAuditPath("/tmp/.tmpN5Fbgb/pqc_authority_state.json.tmp aliases /tmp/.tmpN5Fbgb/pqc_authority_state.json.tmp"))
+marker_before={
+  "record_version": 1,
+  "chain_id": "0000000000000001",
+  "environment": "devnet",
+  "genesis_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authority_policy_version": 1,
+  "authority_sequence": 5,
+  "authority_epoch": 2,
+  "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ratified_bundle_signing_key_fingerprint": "cccccccccccccccccccccccccccccccccccccccc",
+  "ratification_object_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "last_update_source": "test-or-fixture",
+  "updated_at_unix_secs": 1700000000
+}
+marker_after={
+  "record_version": 1,
+  "chain_id": "0000000000000001",
+  "environment": "devnet",
+  "genesis_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authority_policy_version": 1,
+  "authority_sequence": 5,
+  "authority_epoch": 2,
+  "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ratified_bundle_signing_key_fingerprint": "cccccccccccccccccccccccccccccccccccccccc",
+  "ratification_object_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "last_update_source": "test-or-fixture",
+  "updated_at_unix_secs": 1700000000
+}
+marker_bytes_changed=false
+case=derived-marker-temp; returned=Err(UnsafeAuditPath("/tmp/.tmpOrR20g/pqc_authority_state.json.tmp aliases /tmp/.tmpOrR20g/pqc_authority_state.json.tmp"))
+marker_before={
+  "record_version": 1,
+  "chain_id": "0000000000000001",
+  "environment": "devnet",
+  "genesis_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authority_policy_version": 1,
+  "authority_sequence": 5,
+  "authority_epoch": 2,
+  "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ratified_bundle_signing_key_fingerprint": "cccccccccccccccccccccccccccccccccccccccc",
+  "ratification_object_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "last_update_source": "test-or-fixture",
+  "updated_at_unix_secs": 1700000000
+}
+marker_after={
+  "record_version": 1,
+  "chain_id": "0000000000000001",
+  "environment": "devnet",
+  "genesis_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authority_policy_version": 1,
+  "authority_sequence": 5,
+  "authority_epoch": 2,
+  "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ratified_bundle_signing_key_fingerprint": "cccccccccccccccccccccccccccccccccccccccc",
+  "ratification_object_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "last_update_source": "test-or-fixture",
+  "updated_at_unix_secs": 1700000000
+}
+marker_bytes_changed=false
+case=audit-temp-alias; returned=Err(UnsafeAuditPath("/tmp/.tmpNbiauP/reset-audit.json.tmp aliases /tmp/.tmpNbiauP/pqc_authority_state.json"))
+marker_before={
+  "record_version": 1,
+  "chain_id": "0000000000000001",
+  "environment": "devnet",
+  "genesis_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authority_policy_version": 1,
+  "authority_sequence": 5,
+  "authority_epoch": 2,
+  "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ratified_bundle_signing_key_fingerprint": "cccccccccccccccccccccccccccccccccccccccc",
+  "ratification_object_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "last_update_source": "test-or-fixture",
+  "updated_at_unix_secs": 1700000000
+}
+marker_after={
+  "record_version": 1,
+  "chain_id": "0000000000000001",
+  "environment": "devnet",
+  "genesis_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authority_policy_version": 1,
+  "authority_sequence": 5,
+  "authority_epoch": 2,
+  "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ratified_bundle_signing_key_fingerprint": "cccccccccccccccccccccccccccccccccccccccc",
+  "ratification_object_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "last_update_source": "test-or-fixture",
+  "updated_at_unix_secs": 1700000000
+}
+marker_bytes_changed=false
+case=hard-link; returned=Err(UnsafeAuditPath("/tmp/.tmp1mV9Ri/reset-audit.json aliases /tmp/.tmp1mV9Ri/pqc_authority_state.json"))
+marker_before={
+  "record_version": 1,
+  "chain_id": "0000000000000001",
+  "environment": "devnet",
+  "genesis_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authority_policy_version": 1,
+  "authority_sequence": 5,
+  "authority_epoch": 2,
+  "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ratified_bundle_signing_key_fingerprint": "cccccccccccccccccccccccccccccccccccccccc",
+  "ratification_object_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "last_update_source": "test-or-fixture",
+  "updated_at_unix_secs": 1700000000
+}
+marker_after={
+  "record_version": 1,
+  "chain_id": "0000000000000001",
+  "environment": "devnet",
+  "genesis_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authority_policy_version": 1,
+  "authority_sequence": 5,
+  "authority_epoch": 2,
+  "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ratified_bundle_signing_key_fingerprint": "cccccccccccccccccccccccccccccccccccccccc",
+  "ratification_object_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "last_update_source": "test-or-fixture",
+  "updated_at_unix_secs": 1700000000
+}
+marker_bytes_changed=false
+case=marker-temp-alias; returned=Err(UnsafeAuditPath("/tmp/.tmpvzjeve/reset-audit.json.tmp aliases /tmp/.tmpvzjeve/pqc_authority_state.json.tmp"))
+marker_before={
+  "record_version": 1,
+  "chain_id": "0000000000000001",
+  "environment": "devnet",
+  "genesis_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authority_policy_version": 1,
+  "authority_sequence": 5,
+  "authority_epoch": 2,
+  "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ratified_bundle_signing_key_fingerprint": "cccccccccccccccccccccccccccccccccccccccc",
+  "ratification_object_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "last_update_source": "test-or-fixture",
+  "updated_at_unix_secs": 1700000000
+}
+marker_after={
+  "record_version": 1,
+  "chain_id": "0000000000000001",
+  "environment": "devnet",
+  "genesis_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authority_policy_version": 1,
+  "authority_sequence": 5,
+  "authority_epoch": 2,
+  "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ratified_bundle_signing_key_fingerprint": "cccccccccccccccccccccccccccccccccccccccc",
+  "ratification_object_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "last_update_source": "test-or-fixture",
+  "updated_at_unix_secs": 1700000000
+}
+marker_bytes_changed=false
+ok
+test parent_symlinks_resolve_but_leaf_symlinks_refuse ... case=parent-symlink; returned=Err(UnsafeAuditPath("/tmp/.tmpx9HrdK/pqc_authority_state.json aliases /tmp/.tmpx9HrdK/pqc_authority_state.json"))
+marker_before={
+  "record_version": 1,
+  "chain_id": "0000000000000001",
+  "environment": "devnet",
+  "genesis_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authority_policy_version": 1,
+  "authority_sequence": 5,
+  "authority_epoch": 2,
+  "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ratified_bundle_signing_key_fingerprint": "cccccccccccccccccccccccccccccccccccccccc",
+  "ratification_object_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "last_update_source": "test-or-fixture",
+  "updated_at_unix_secs": 1700000000
+}
+marker_after={
+  "record_version": 1,
+  "chain_id": "0000000000000001",
+  "environment": "devnet",
+  "genesis_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authority_policy_version": 1,
+  "authority_sequence": 5,
+  "authority_epoch": 2,
+  "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ratified_bundle_signing_key_fingerprint": "cccccccccccccccccccccccccccccccccccccccc",
+  "ratification_object_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "last_update_source": "test-or-fixture",
+  "updated_at_unix_secs": 1700000000
+}
+marker_bytes_changed=false
+case=distinct-parent-symlink; returned=Err(MalformedExpectedGenesisHash("not-a-genesis-hash"))
+marker_before={
+  "record_version": 1,
+  "chain_id": "0000000000000001",
+  "environment": "devnet",
+  "genesis_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authority_policy_version": 1,
+  "authority_sequence": 5,
+  "authority_epoch": 2,
+  "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ratified_bundle_signing_key_fingerprint": "cccccccccccccccccccccccccccccccccccccccc",
+  "ratification_object_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "last_update_source": "test-or-fixture",
+  "updated_at_unix_secs": 1700000000
+}
+marker_after={
+  "record_version": 1,
+  "chain_id": "0000000000000001",
+  "environment": "devnet",
+  "genesis_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authority_policy_version": 1,
+  "authority_sequence": 5,
+  "authority_epoch": 2,
+  "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ratified_bundle_signing_key_fingerprint": "cccccccccccccccccccccccccccccccccccccccc",
+  "ratification_object_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "last_update_source": "test-or-fixture",
+  "updated_at_unix_secs": 1700000000
+}
+marker_bytes_changed=false
+audit_bytes={
+  "record_version": 1,
+  "action": "authority_state_reset",
+  "environment": "devnet",
+  "chain_id": null,
+  "genesis_hash": null,
+  "old_marker_present": false,
+  "old_marker_raw_sha256": null,
+  "old_marker_record_if_parseable": null,
+  "new_marker_hash": null,
+  "new_marker_record": null,
+  "ratification_hash": null,
+  "trust_bundle_fingerprint": null,
+  "snapshot_metadata_hash_if_any": null,
+  "operator_note_hash": null,
+  "binary_sha256_or_unavailable": "ec18c3cae617125632e20dc17afd4569e69f9aed6300fda54ced953573d050ec",
+  "binary_build_id_or_unavailable": "qbind-node@0.1.0",
+  "result": "refused",
+  "refusal_reason_if_any": "MalformedExpectedGenesisHash",
+  "refusal_detail_if_any": "--expect-genesis-hash must be 64 lowercase hex chars (with optional 0x prefix); got: not-a-genesis-hash",
+  "wall_clock_unix_secs": 1793976176
+}
+
+case=leaf-symlink; returned=Err(UnsafeAuditPath("symlink or non-regular path: /tmp/.tmpwmL2ty/reset-audit.json"))
+marker_before={
+  "record_version": 1,
+  "chain_id": "0000000000000001",
+  "environment": "devnet",
+  "genesis_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authority_policy_version": 1,
+  "authority_sequence": 5,
+  "authority_epoch": 2,
+  "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ratified_bundle_signing_key_fingerprint": "cccccccccccccccccccccccccccccccccccccccc",
+  "ratification_object_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "last_update_source": "test-or-fixture",
+  "updated_at_unix_secs": 1700000000
+}
+marker_after={
+  "record_version": 1,
+  "chain_id": "0000000000000001",
+  "environment": "devnet",
+  "genesis_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authority_policy_version": 1,
+  "authority_sequence": 5,
+  "authority_epoch": 2,
+  "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ratified_bundle_signing_key_fingerprint": "cccccccccccccccccccccccccccccccccccccccc",
+  "ratification_object_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "last_update_source": "test-or-fixture",
+  "updated_at_unix_secs": 1700000000
+}
+marker_bytes_changed=false
+ok
+test publication_rechecks_parent_alias_after_an_earlier_safe_write ... case=recheck; returned=Err(MalformedExpectedGenesisHash("not-a-genesis-hash"))
+marker_before={
+  "record_version": 1,
+  "chain_id": "0000000000000001",
+  "environment": "devnet",
+  "genesis_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authority_policy_version": 1,
+  "authority_sequence": 5,
+  "authority_epoch": 2,
+  "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ratified_bundle_signing_key_fingerprint": "cccccccccccccccccccccccccccccccccccccccc",
+  "ratification_object_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "last_update_source": "test-or-fixture",
+  "updated_at_unix_secs": 1700000000
+}
+marker_after={
+  "record_version": 1,
+  "chain_id": "0000000000000001",
+  "environment": "devnet",
+  "genesis_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authority_policy_version": 1,
+  "authority_sequence": 5,
+  "authority_epoch": 2,
+  "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ratified_bundle_signing_key_fingerprint": "cccccccccccccccccccccccccccccccccccccccc",
+  "ratification_object_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "last_update_source": "test-or-fixture",
+  "updated_at_unix_secs": 1700000000
+}
+marker_bytes_changed=false
+audit_bytes={
+  "record_version": 1,
+  "action": "authority_state_reset",
+  "environment": "devnet",
+  "chain_id": null,
+  "genesis_hash": null,
+  "old_marker_present": false,
+  "old_marker_raw_sha256": null,
+  "old_marker_record_if_parseable": null,
+  "new_marker_hash": null,
+  "new_marker_record": null,
+  "ratification_hash": null,
+  "trust_bundle_fingerprint": null,
+  "snapshot_metadata_hash_if_any": null,
+  "operator_note_hash": null,
+  "binary_sha256_or_unavailable": "ec18c3cae617125632e20dc17afd4569e69f9aed6300fda54ced953573d050ec",
+  "binary_build_id_or_unavailable": "qbind-node@0.1.0",
+  "result": "refused",
+  "refusal_reason_if_any": "MalformedExpectedGenesisHash",
+  "refusal_detail_if_any": "--expect-genesis-hash must be 64 lowercase hex chars (with optional 0x prefix); got: not-a-genesis-hash",
+  "wall_clock_unix_secs": 1793976185
+}
+
+ok
+test refusal_audit_at_distinct_path_preserves_synthetic_marker_control ... case=distinct; returned=Err(MalformedExpectedGenesisHash("not-a-genesis-hash"))
+marker_before={
+  "record_version": 1,
+  "chain_id": "0000000000000001",
+  "environment": "devnet",
+  "genesis_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authority_policy_version": 1,
+  "authority_sequence": 5,
+  "authority_epoch": 2,
+  "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ratified_bundle_signing_key_fingerprint": "cccccccccccccccccccccccccccccccccccccccc",
+  "ratification_object_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "last_update_source": "test-or-fixture",
+  "updated_at_unix_secs": 1700000000
+}
+marker_after={
+  "record_version": 1,
+  "chain_id": "0000000000000001",
+  "environment": "devnet",
+  "genesis_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authority_policy_version": 1,
+  "authority_sequence": 5,
+  "authority_epoch": 2,
+  "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ratified_bundle_signing_key_fingerprint": "cccccccccccccccccccccccccccccccccccccccc",
+  "ratification_object_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "last_update_source": "test-or-fixture",
+  "updated_at_unix_secs": 1700000000
+}
+marker_bytes_changed=false
+audit_bytes={
+  "record_version": 1,
+  "action": "authority_state_reset",
+  "environment": "devnet",
+  "chain_id": null,
+  "genesis_hash": null,
+  "old_marker_present": false,
+  "old_marker_raw_sha256": null,
+  "old_marker_record_if_parseable": null,
+  "new_marker_hash": null,
+  "new_marker_record": null,
+  "ratification_hash": null,
+  "trust_bundle_fingerprint": null,
+  "snapshot_metadata_hash_if_any": null,
+  "operator_note_hash": null,
+  "binary_sha256_or_unavailable": "ec18c3cae617125632e20dc17afd4569e69f9aed6300fda54ced953573d050ec",
+  "binary_build_id_or_unavailable": "qbind-node@0.1.0",
+  "result": "refused",
+  "refusal_reason_if_any": "MalformedExpectedGenesisHash",
+  "refusal_detail_if_any": "--expect-genesis-hash must be 64 lowercase hex chars (with optional 0x prefix); got: not-a-genesis-hash",
+  "wall_clock_unix_secs": 1793976188
+}
+
+ok
+test refusal_audit_at_marker_path_is_rejected_without_marker_change ... case=equal; returned=Err(UnsafeAuditPath("/tmp/.tmpiE0ye9/pqc_authority_state.json aliases /tmp/.tmpiE0ye9/pqc_authority_state.json"))
+marker_before={
+  "record_version": 1,
+  "chain_id": "0000000000000001",
+  "environment": "devnet",
+  "genesis_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authority_policy_version": 1,
+  "authority_sequence": 5,
+  "authority_epoch": 2,
+  "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ratified_bundle_signing_key_fingerprint": "cccccccccccccccccccccccccccccccccccccccc",
+  "ratification_object_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "last_update_source": "test-or-fixture",
+  "updated_at_unix_secs": 1700000000
+}
+marker_after={
+  "record_version": 1,
+  "chain_id": "0000000000000001",
+  "environment": "devnet",
+  "genesis_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authority_policy_version": 1,
+  "authority_sequence": 5,
+  "authority_epoch": 2,
+  "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ratified_bundle_signing_key_fingerprint": "cccccccccccccccccccccccccccccccccccccccc",
+  "ratification_object_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "last_update_source": "test-or-fixture",
+  "updated_at_unix_secs": 1700000000
+}
+marker_bytes_changed=false
+ok
+test unavailable_or_unsupported_paths_refuse_without_publication ... case=missing-parent; returned=Err(UnsafeAuditPath("cannot resolve parent of /tmp/.tmpOPR2xr/absent/audit.json: No such file or directory (os error 2)"))
+marker_before={
+  "record_version": 1,
+  "chain_id": "0000000000000001",
+  "environment": "devnet",
+  "genesis_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authority_policy_version": 1,
+  "authority_sequence": 5,
+  "authority_epoch": 2,
+  "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ratified_bundle_signing_key_fingerprint": "cccccccccccccccccccccccccccccccccccccccc",
+  "ratification_object_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "last_update_source": "test-or-fixture",
+  "updated_at_unix_secs": 1700000000
+}
+marker_after={
+  "record_version": 1,
+  "chain_id": "0000000000000001",
+  "environment": "devnet",
+  "genesis_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authority_policy_version": 1,
+  "authority_sequence": 5,
+  "authority_epoch": 2,
+  "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ratified_bundle_signing_key_fingerprint": "cccccccccccccccccccccccccccccccccccccccc",
+  "ratification_object_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "last_update_source": "test-or-fixture",
+  "updated_at_unix_secs": 1700000000
+}
+marker_bytes_changed=false
+case=dangling-parent; returned=Err(UnsafeAuditPath("cannot resolve parent of /tmp/.tmpaNkrny/alias/audit.json: No such file or directory (os error 2)"))
+marker_before={
+  "record_version": 1,
+  "chain_id": "0000000000000001",
+  "environment": "devnet",
+  "genesis_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authority_policy_version": 1,
+  "authority_sequence": 5,
+  "authority_epoch": 2,
+  "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ratified_bundle_signing_key_fingerprint": "cccccccccccccccccccccccccccccccccccccccc",
+  "ratification_object_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "last_update_source": "test-or-fixture",
+  "updated_at_unix_secs": 1700000000
+}
+marker_after={
+  "record_version": 1,
+  "chain_id": "0000000000000001",
+  "environment": "devnet",
+  "genesis_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authority_policy_version": 1,
+  "authority_sequence": 5,
+  "authority_epoch": 2,
+  "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ratified_bundle_signing_key_fingerprint": "cccccccccccccccccccccccccccccccccccccccc",
+  "ratification_object_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "last_update_source": "test-or-fixture",
+  "updated_at_unix_secs": 1700000000
+}
+marker_bytes_changed=false
+case=loop-parent; returned=Err(UnsafeAuditPath("cannot resolve parent of /tmp/.tmp3Bq7p3/alias/audit.json: Too many levels of symbolic links (os error 40)"))
+marker_before={
+  "record_version": 1,
+  "chain_id": "0000000000000001",
+  "environment": "devnet",
+  "genesis_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authority_policy_version": 1,
+  "authority_sequence": 5,
+  "authority_epoch": 2,
+  "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ratified_bundle_signing_key_fingerprint": "cccccccccccccccccccccccccccccccccccccccc",
+  "ratification_object_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "last_update_source": "test-or-fixture",
+  "updated_at_unix_secs": 1700000000
+}
+marker_after={
+  "record_version": 1,
+  "chain_id": "0000000000000001",
+  "environment": "devnet",
+  "genesis_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authority_policy_version": 1,
+  "authority_sequence": 5,
+  "authority_epoch": 2,
+  "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ratified_bundle_signing_key_fingerprint": "cccccccccccccccccccccccccccccccccccccccc",
+  "ratification_object_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "last_update_source": "test-or-fixture",
+  "updated_at_unix_secs": 1700000000
+}
+marker_bytes_changed=false
+case=non-directory-parent; returned=Err(UnsafeAuditPath("parent is not a directory: /tmp/.tmpOzPCyQ/pqc_authority_state.json"))
+marker_before={
+  "record_version": 1,
+  "chain_id": "0000000000000001",
+  "environment": "devnet",
+  "genesis_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authority_policy_version": 1,
+  "authority_sequence": 5,
+  "authority_epoch": 2,
+  "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ratified_bundle_signing_key_fingerprint": "cccccccccccccccccccccccccccccccccccccccc",
+  "ratification_object_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "last_update_source": "test-or-fixture",
+  "updated_at_unix_secs": 1700000000
+}
+marker_after={
+  "record_version": 1,
+  "chain_id": "0000000000000001",
+  "environment": "devnet",
+  "genesis_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authority_policy_version": 1,
+  "authority_sequence": 5,
+  "authority_epoch": 2,
+  "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ratified_bundle_signing_key_fingerprint": "cccccccccccccccccccccccccccccccccccccccc",
+  "ratification_object_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "last_update_source": "test-or-fixture",
+  "updated_at_unix_secs": 1700000000
+}
+marker_bytes_changed=false
+case=special-leaf; returned=Err(UnsafeAuditPath("symlink or non-regular path: /tmp/.tmptk90Jc/reset-audit.json"))
+marker_before={
+  "record_version": 1,
+  "chain_id": "0000000000000001",
+  "environment": "devnet",
+  "genesis_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authority_policy_version": 1,
+  "authority_sequence": 5,
+  "authority_epoch": 2,
+  "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ratified_bundle_signing_key_fingerprint": "cccccccccccccccccccccccccccccccccccccccc",
+  "ratification_object_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "last_update_source": "test-or-fixture",
+  "updated_at_unix_secs": 1700000000
+}
+marker_after={
+  "record_version": 1,
+  "chain_id": "0000000000000001",
+  "environment": "devnet",
+  "genesis_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authority_policy_version": 1,
+  "authority_sequence": 5,
+  "authority_epoch": 2,
+  "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ratified_bundle_signing_key_fingerprint": "cccccccccccccccccccccccccccccccccccccccc",
+  "ratification_object_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "last_update_source": "test-or-fixture",
+  "updated_at_unix_secs": 1700000000
+}
+marker_bytes_changed=false
+ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 53.60s
+
+     Running tests/a33_f1_authority_reset_destination_lock_tests.rs (target/debug/deps/a33_f1_authority_reset_destination_lock_tests-a0b4b092f21726f8)
+
+running 5 tests
+test absent_explicit_destination_creates_only_ownership_artifacts_before_verification ... explicit absent destination: directory/empty stable lock created; verification refusal audit separate
+ok
+test contender_refuses_then_release_allows_normal_verification ... contended CLI exit=1; marker_changed=false; audit_changed=false
+CLI diagnostic: [run-127] FATAL: authority-state-reset refused without destination ownership: destination lock /tmp/.tmpJXk9F9/data/restore.lock is already held by another participating process; no reset audit or marker write attempted.
+
+released CLI: verification refusal and separate refusal audit; marker unchanged
+ok
+test cooperating_lock_holder ... ok
+test missing_destination_and_unavailable_lock_refuse_without_reset_writes ... missing: ownership refusal; no reset marker/audit write
+lock-directory: ownership refusal; no reset marker/audit write
+data-file: ownership refusal; no reset marker/audit write
+ok
+test reset_write_aliases_cannot_replace_destination_lock ... equal: UnsafeAuditPath before verifier; lock inode/bytes and marker unchanged
+dot: UnsafeAuditPath before verifier; lock inode/bytes and marker unchanged
+parent-symlink: UnsafeAuditPath before verifier; lock inode/bytes and marker unchanged
+audit-hardlink: UnsafeAuditPath before verifier; lock inode/bytes and marker unchanged
+audit-temp-hardlink: UnsafeAuditPath before verifier; lock inode/bytes and marker unchanged
+marker-hardlink: UnsafeAuditPath before verifier; lock inode/bytes and marker unchanged
+marker-temp-hardlink: UnsafeAuditPath before verifier; lock inode/bytes and marker unchanged
+ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 14.40s
+
+     Running tests/a33_f1_authority_reset_verified_success_tests.rs (target/debug/deps/a33_f1_authority_reset_verified_success_tests-258c7ee12223c2ad)
+
+running 1 test
+test verified_synthetic_reset_success_tampering_and_path_refusal ... first reset: public success; loader/derived fields/final audit consistent
+repeat reset: verified existing-marker success; archive and final audit consistent
+CLI reset: fully verified success under destination lock; loader/final audit consistent
+CLI valid-input equal path: ownership acquired then UnsafeAuditPath; marker/audit unchanged
+valid-input equal path: UnsafeAuditPath at pre-verification guard; marker/audit unchanged
+tampered signed bundle: real verification refusal; marker unchanged; separate refusal audit
+tampered ratification signature: Strict enforcement refusal; marker unchanged; separate refusal audit
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 31.41s
+
+     Running tests/a33_f1_reset_marker_temp_identity_tests.rs (target/debug/deps/a33_f1_reset_marker_temp_identity_tests-8b1d4181cee5d618)
+
+running 1 test
+test marker_temp_identity_refuses_and_distinct_files_allow_verified_reset ... CORRECTED: UnsafeAuditPath; every directory entry, inode, link count and file byte unchanged; no audit final/temp publication
+CONTROL: distinct marker/temp files; verified public reset succeeds; expected marker and success audit retained
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 11.56s
+

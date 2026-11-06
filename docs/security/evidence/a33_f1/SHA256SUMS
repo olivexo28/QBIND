@@ -217,3 +217,11 @@ a8fb07b027fa175310e16792bf68c6cd7c8c0108483c02507d80ec1671167539  ../../../../do
 77f588e3ca9627e1b94b28f869b26f66a95e9da24512d022f72b459d005f64e8  catchup-partial-prefix-focused.log
 adf37b7e4adbac76563e2c99d107bda4ef3ee44288e92a45ca2caf91f809620e  catchup-partial-prefix-existing-catchup.log
 3d17f7578d12e0fdc752a8e4d8274f3ad2867d3abb6bb43674cccb455c8bd393  catchup-partial-prefix-regressions.log
+11efa2d36617a0fb740a29a386e7e1eabfd8b25d31ecb90a32146fac3cd553c2  ../../../../crates/qbind-node/src/pqc_authority_state_reset.rs
+58c6de915b8d68434ebd7c4b7d2773028e968d7f2503e97da97748ec2cf1627d  ../../../../crates/qbind-node/tests/a33_f1_reset_marker_temp_identity_tests.rs
+4b19bb0ce877b2234935885a4af92964b8d06b8bb19c9f9885b0f59896c09f21  ../../../../docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+a178b85b3ad02c1f1c247cd60b26bc0aee6437759ff3666249410a5d840c8882  i1-marker-temp-correction.md
+5178d70eb9471692b077d4ca5b04b813fa609c737b74615a3c3b843981ebfecd  i1-marker-temp-baseline-attempt-1.log
+3540435faad0bf6e9e35654c15cf62a07677549846a0b1ce20056e445ae0b933  i1-marker-temp-baseline.log
+9c4927cb397d19f895d456c52900f358ffe310e9e6c1f8daf8b0313d2d6feea1  i1-marker-temp-focused.log
+6d1b1282c42386c2d944d96616671f30d049df31c529200d3eb33e40317aa6da  i1-marker-temp-errors.log
