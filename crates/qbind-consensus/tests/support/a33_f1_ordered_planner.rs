@@ -284,6 +284,7 @@ impl Model {
         if self.blocks.contains_key(&candidate.id) {
             return Err(Refusal::ExistingId(candidate.id));
         }
+        self.accounting_is_consistent()?;
 
         // Candidate lineage is required even when D == 0. No unrelated
         // protected or unprotected component is scanned in that case.
@@ -304,7 +305,6 @@ impl Model {
         let (victims, protected) = if deficit == 0 {
             (Vec::new(), candidate_lineage)
         } else {
-            self.accounting_is_consistent()?;
             let protected = self.all_protected_paths(&candidate, limits)?;
             let victims = self.choose_victims(deficit, &protected)?;
             if !self.plan_preserves_candidate_lineage(&candidate, &victims, limits)? {
@@ -447,12 +447,22 @@ impl Model {
         if self.generation != plan.base_generation || *self != plan.snapshot {
             return PublishOutcome::Refused(Refusal::StaleOrSubstitutedSnapshot);
         }
+        let protected = if plan.deficit == 0 {
+            self.candidate_lineage(&plan.candidate, plan.limits)
+        } else {
+            self.all_protected_paths(&plan.candidate, plan.limits)
+        };
+        let protected = match protected {
+            Ok(protected) => protected,
+            Err(reason) => return PublishOutcome::Refused(reason),
+        };
+        if let Err(reason) = self.accounting_is_consistent() {
+            return PublishOutcome::Refused(reason);
+        }
         if plan.deficit != plan.victims.len()
             || plan.victims.iter().copied().collect::<BTreeSet<_>>().len() != plan.victims.len()
-            || self
-                .all_protected_paths(&plan.candidate, plan.limits)
-                .is_err()
-            || plan.victims.iter().any(|id| plan.protected.contains(id))
+            || protected != plan.protected
+            || plan.victims.iter().any(|id| protected.contains(id))
             || !self
                 .plan_preserves_candidate_lineage(&plan.candidate, &plan.victims, plan.limits)
                 .unwrap_or(false)
@@ -586,6 +596,8 @@ impl Model {
             effects.shared_accounting = EffectObservation::Observed;
         }
         self.queue.push(candidate.id);
+        effects.queue = EffectObservation::Observed;
+        effects.phase = PublicationPhase::AfterRegistration;
         if self.bump_generation().is_err() {
             effects.phase = PublicationPhase::AfterRegistration;
             return PublishOutcome::Unresolved(effects);
@@ -716,6 +728,7 @@ pub enum ItemPhase {
 pub enum Terminal {
     InProgress,
     Complete,
+    /// Current item and empty replay prefix only; inspect unresolved/evidence separately.
     NoEffectRefusal,
     PrefixThenRefusal,
     PartialCurrentItem,
@@ -737,6 +750,24 @@ pub struct CurrentItem {
     pub phase: ItemPhase,
     /// Registration, eviction/accounting, vote replay, and QC/lock/commit.
     pub effects: [EffectObservation; 4],
+    pub input_signers: Vec<u16>,
+    pub completed_signers: Vec<SignerObservation>,
+    pub interrupted_signer: Option<SignerObservation>,
+    pub signer_details_unavailable: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SignerDisposition {
+    pub vote_history: EffectObservation,
+    /// None means unavailable/unknown, not proof of no accumulator effect.
+    pub accumulator: Option<VoteDisposition>,
+    pub qc: EffectObservation,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SignerObservation {
+    pub signer: u16,
+    pub disposition: SignerDisposition,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -760,6 +791,7 @@ pub struct OutcomeReport {
     pub terminal: Terminal,
     pub unresolved: bool,
     pub known_unrecorded_effects: usize,
+    pub external_effects: EffectObservation,
     effect_observations: usize,
     limits: FixtureLimits,
 }
@@ -773,6 +805,7 @@ impl OutcomeReport {
             terminal: Terminal::InProgress,
             unresolved: false,
             known_unrecorded_effects: 0,
+            external_effects: EffectObservation::NotObserved,
             effect_observations: 0,
             limits,
         }
@@ -859,9 +892,86 @@ impl OutcomeReport {
             return false;
         }
         self.effect_observations += count;
-        self.current = Some(CurrentItem { id, phase, effects });
+        self.current = Some(CurrentItem {
+            id,
+            phase,
+            effects,
+            input_signers: Vec::new(),
+            completed_signers: Vec::new(),
+            interrupted_signer: None,
+            signer_details_unavailable: matches!(phase, ItemPhase::ReplayingSigners { .. }),
+        });
         self.terminal = Terminal::PartialCurrentItem;
         self.unresolved = true;
+        true
+    }
+
+    pub fn record_current_signers(
+        &mut self,
+        id: BlockId,
+        input: &[u16],
+        completed: &[SignerDisposition],
+        interrupted: Option<SignerDisposition>,
+        effects: [EffectObservation; 4],
+    ) -> bool {
+        if input.len() > self.limits.max_signers_per_item
+            || completed.len() > input.len()
+            || (interrupted.is_some() && completed.len() >= input.len())
+        {
+            self.exhaust(Self::count_effects(&effects));
+            return false;
+        }
+        let signer_effects = completed
+            .iter()
+            .chain(interrupted.iter())
+            .map(|s| {
+                usize::from(matches!(
+                    s.vote_history,
+                    EffectObservation::Observed | EffectObservation::KnownDetailsUnavailable
+                )) + usize::from(s.accumulator == Some(VoteDisposition::Added))
+                    + usize::from(matches!(
+                        s.qc,
+                        EffectObservation::Observed | EffectObservation::KnownDetailsUnavailable
+                    ))
+            })
+            .sum::<usize>();
+        let count = Self::count_effects(&effects);
+        if self.terminal != Terminal::InProgress
+            || self.completed_prefix.len() >= self.limits.max_input_items
+            || self
+                .effect_observations
+                .checked_add(count)
+                .and_then(|n| n.checked_add(signer_effects))
+                .is_none_or(|n| n > self.limits.max_prefix_effect_observations)
+        {
+            self.exhaust(count.saturating_add(signer_effects));
+            return false;
+        }
+        if !self.record_current_failure(
+            id,
+            ItemPhase::ReplayingSigners {
+                completed: completed.len(),
+            },
+            effects,
+        ) {
+            return false;
+        }
+        self.effect_observations += signer_effects;
+        let current = self.current.as_mut().expect("current failure was recorded");
+        current.input_signers = input.to_vec();
+        current.completed_signers = input
+            .iter()
+            .zip(completed)
+            .map(|(signer, disposition)| SignerObservation {
+                signer: *signer,
+                disposition: *disposition,
+            })
+            .collect();
+        current.interrupted_signer = interrupted.map(|disposition| SignerObservation {
+            signer: input[completed.len()],
+            disposition,
+        });
+        current.signer_details_unavailable = false;
         true
     }
 
@@ -883,8 +993,16 @@ impl OutcomeReport {
         } else {
             [EffectObservation::NotObserved; 4]
         };
-        self.current = Some(CurrentItem { id, phase, effects });
-        self.unresolved = !self.completed_prefix.is_empty() || !before;
+        self.current = Some(CurrentItem {
+            id,
+            phase,
+            effects,
+            input_signers: Vec::new(),
+            completed_signers: Vec::new(),
+            interrupted_signer: None,
+            signer_details_unavailable: !before,
+        });
+        self.unresolved |= !self.completed_prefix.is_empty() || !before;
         self.terminal = if before && self.completed_prefix.is_empty() {
             Terminal::NoEffectRefusal
         } else if before {
@@ -912,6 +1030,10 @@ impl OutcomeReport {
     pub fn mark_complete(&mut self) {
         if self.terminal == Terminal::InProgress {
             self.terminal = Terminal::Complete;
+            self.unresolved |= matches!(
+                self.external_effects,
+                EffectObservation::NotObserved | EffectObservation::KnownDetailsUnavailable
+            );
         }
     }
 }

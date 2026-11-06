@@ -6341,3 +6341,51 @@ the full staged whitespace check is a non-pass caused only by preserved raw
 logs; non-log source/document whitespace passes. The audit register and
 previous evidence remain unchanged. A33-F1 / E27 and all other remaining
 obligations stay **OPEN**; activation **DISABLED**; public DevNet **NO-GO**.
+
+## 67. Four isolated ordered-model review corrections
+
+**TEST-ONLY MODEL CORRECTION — INDEPENDENT REVIEW PENDING.**
+The user supplied a **CHANGES REQUIRED** independent-review verdict at
+`74206e34a6af557f8e710e7e402b907b36faa1a8` (tree
+`42f1a6aaa6fe4dfc6cc88ff0e7ac1d4c80c248db`). Reviewer identity and a raw
+review artifact were not supplied; neither is asserted here. At entry,
+HEAD/current task branch and direct remote task matched that tip, local and
+direct remote main matched `c9aaef40b045e896ddfa8b01bad230f6b680715e`, and
+worktree/staging were clean.
+
+The isolated support model now preserves prior unresolved conflicts across
+current-item refusal; reports queue insertion before any post-registration
+failure; checks pre-existing accounting even for zero-deficit plans and
+uses matching candidate-lineage-only publication checks for D=0; and binds
+bounded current signer details to supplied input identities/order, separating
+completed versus interrupted processing, vote-history, accumulator and QC
+observations. Count-only reports explicitly mark signer details unavailable.
+Complete reports remain unresolved when external effects are unobserved.
+No conflict resolution, participation capability or clear/resume is added.
+
+Six added regression tests cover all four findings, the shared-evidence
+final-owner logical release, same-generation substituted content, and
+conditional ordered path preservation under frozen roots/parent links.
+All 17 focused tests pass (0 failed/ignored); targeted rustfmt passes.
+Four uniquely retained test executions pass; no unsuccessful test or format
+attempt occurred in this correction task. Injected publication faults and
+the existing direct-parent-only invariant rejection remain labeled controls,
+not demonstrated production failures or expected-failure security passes.
+Raw outputs, commands, exits, hashes and limits are in
+[`ordered-model-correction.md`](evidence/a33_f1/ordered-model-correction.md).
+
+The reviewed commit appended **10**, not nine, checksum entries. The old
+nine-entry wording and all historical document/manifest/log bytes remain
+preserved; this append corrects the report. Ordinary full-manifest and full
+whitespace non-passes are not converted to targeted current-artifact passes.
+Historical revision-matched checks remain distinct; the two prefix-only
+integrity-log producing revisions remain unestablished. Older overwritten
+raw outputs remain unavailable, and E1 is not reopened.
+
+No production source/caller, catch-up, node, startup, storage, network or
+signer behavior changes. Fixture limits do not prove bounded inbound
+deserialization, whole-model allocation/work, total evidence retention,
+production 64-KiB sufficiency, durability, ownership barriers, production
+equivalence, rollback or retry safety. I1, W1/W2 and prior bounded
+acceptances remain closed within their scopes. A33-F1 / E27 and remaining
+obligations stay **OPEN**; activation **DISABLED**; public DevNet **NO-GO**.

@@ -520,3 +520,246 @@ fn evidence_limits_and_conflicts_preserve_unresolved_ownership() {
     assert_eq!(item_limited.known_unrecorded_effects, 1);
     assert!(item_limited.unresolved);
 }
+
+#[test]
+fn conflict_and_refusal_commute_without_clearing_unresolved_evidence() {
+    for conflict_first in [true, false] {
+        let mut report = model::OutcomeReport::new(FixtureLimits::TEST);
+        let conflict = LateEvidence {
+            item_index: 0,
+            id: 9,
+            kind: EvidenceKind::Conflicting,
+        };
+        if conflict_first {
+            assert!(report.record_late_evidence(conflict));
+        }
+        assert!(report.refuse_current(9, ItemPhase::BeforeMutation, true));
+        if !conflict_first {
+            assert!(report.record_late_evidence(conflict));
+        }
+        assert_eq!(report.late_evidence, vec![conflict]);
+        assert_eq!(report.terminal, Terminal::NoEffectRefusal);
+        assert!(
+            report.unresolved,
+            "item refusal cannot erase operation conflict"
+        );
+        assert!(!report.participation_allowed());
+    }
+}
+
+#[test]
+fn candidate_queue_insertion_is_observed_without_queued_victims() {
+    for retained in [false, true] {
+        let mut state = Model::new(1);
+        if retained {
+            state.add_fixture_block(1, None, false, 1, None).unwrap();
+            state.set_queue_for_test(vec![]).unwrap();
+        }
+        let before_queue = state.queue.clone();
+        let plan = state.plan(candidate(2, None), FixtureLimits::TEST).unwrap();
+        assert_eq!(plan.victims(), if retained { &[1][..] } else { &[][..] });
+        let PublishOutcome::Unresolved(report) =
+            state.publish(plan, Some(PublishFault::AfterRegistration))
+        else {
+            panic!("injected failure must report partial publication");
+        };
+        assert_ne!(state.queue, before_queue);
+        assert_eq!(state.queue, vec![2]);
+        assert_eq!(report.queue, E::Observed);
+        assert_eq!(report.registration, E::Observed);
+    }
+}
+
+#[test]
+fn zero_deficit_checks_accounting_and_publishes_unchanged_malformed_protected_state() {
+    let mut inconsistent = Model::new(1);
+    inconsistent.accounting.local_bytes = 1;
+    let before = inconsistent.clone();
+    assert_eq!(
+        inconsistent.plan(candidate(1, None), FixtureLimits::TEST),
+        Err(Refusal::AccountingMismatch)
+    );
+    assert_eq!(inconsistent, before);
+
+    for parent in [Some(1), Some(99)] {
+        let mut state = Model::new(2);
+        state.add_fixture_block(1, parent, true, 1, None).unwrap();
+        state.set_protected_roots(Some(1), Some(1)).unwrap();
+        let plan = state.plan(candidate(2, None), FixtureLimits::TEST).unwrap();
+        assert_eq!(plan.deficit(), 0);
+        assert!(matches!(
+            state.publish(plan, None),
+            PublishOutcome::Published { .. }
+        ));
+        assert_eq!(state.blocks[&1].parent, parent);
+        assert_eq!(state.blocks.len(), 2);
+    }
+}
+
+#[test]
+fn same_generation_substitution_refuses_and_last_shared_owner_releases_charge() {
+    let mut state = Model::new(1);
+    state
+        .add_fixture_block(1, None, false, 2, Some((7, 11)))
+        .unwrap();
+    let plan = state.plan(candidate(2, None), FixtureLimits::TEST).unwrap();
+    let mut substituted = state.clone();
+    substituted.blocks.get_mut(&1).unwrap().parent = Some(99);
+    let before = substituted.clone();
+    assert_eq!(
+        substituted.publish(plan.clone(), None),
+        PublishOutcome::Refused(Refusal::StaleOrSubstitutedSnapshot)
+    );
+    assert_eq!(substituted, before);
+    assert_eq!(
+        state.publish(plan, None),
+        PublishOutcome::Published {
+            victims: vec![1],
+            accounting: Accounting {
+                local_bytes: 3,
+                shared_bytes: 0
+            },
+        }
+    );
+    assert!(state.shared_charges.is_empty());
+}
+
+#[test]
+fn current_signers_bind_order_dispositions_interruption_and_capacity() {
+    use model::SignerDisposition;
+    let added = SignerDisposition {
+        vote_history: E::Observed,
+        accumulator: Some(VoteDisposition::Added),
+        qc: E::ConfirmedNoEffect,
+    };
+    let duplicate = SignerDisposition {
+        vote_history: E::KnownDetailsUnavailable,
+        accumulator: Some(VoteDisposition::Duplicate),
+        qc: E::NotObserved,
+    };
+    let interrupted = SignerDisposition {
+        vote_history: E::KnownDetailsUnavailable,
+        accumulator: None,
+        qc: E::NotObserved,
+    };
+    let mut reports = Vec::new();
+    for disposition in [added, duplicate] {
+        let mut report = model::OutcomeReport::new(FixtureLimits::TEST);
+        assert!(report.record_current_signers(
+            5,
+            &[42, 7],
+            &[disposition],
+            Some(interrupted),
+            [E::Observed, E::NotObserved, E::NotObserved, E::NotObserved],
+        ));
+        let current = report.current.as_ref().unwrap();
+        assert_eq!(current.input_signers, vec![42, 7]);
+        assert_eq!(current.completed_signers[0].signer, 42);
+        assert_eq!(current.completed_signers[0].disposition, disposition);
+        assert_eq!(current.interrupted_signer.unwrap().signer, 7);
+        assert_eq!(
+            current.interrupted_signer.unwrap().disposition.accumulator,
+            None
+        );
+        assert!(!current.signer_details_unavailable);
+        assert!(report.unresolved);
+        reports.push(report);
+    }
+    assert_ne!(reports[0].current, reports[1].current);
+
+    let no_effect = SignerDisposition {
+        vote_history: E::ConfirmedNoEffect,
+        accumulator: None,
+        qc: E::ConfirmedNoEffect,
+    };
+    let mut boundary = model::OutcomeReport::new(FixtureLimits::TEST);
+    assert!(boundary.record_current_signers(
+        6,
+        &[4, 3, 2, 1],
+        &[no_effect; 4],
+        None,
+        [E::NotObserved; 4]
+    ));
+    assert_eq!(
+        boundary
+            .current
+            .as_ref()
+            .unwrap()
+            .completed_signers
+            .iter()
+            .map(|s| s.signer)
+            .collect::<Vec<_>>(),
+        vec![4, 3, 2, 1]
+    );
+    let mut overflow = model::OutcomeReport::new(FixtureLimits::TEST);
+    assert!(!overflow.record_current_signers(
+        6,
+        &[4, 3, 2, 1, 0],
+        &[added; 5],
+        None,
+        [E::Observed; 4]
+    ));
+    assert!(overflow.unresolved);
+    assert_eq!(overflow.terminal, Terminal::EvidenceLimitExhausted);
+    assert!(
+        overflow.current.is_none(),
+        "discarded details are not recoverable"
+    );
+    assert!(!overflow.participation_allowed());
+
+    let mut effect_overflow = model::OutcomeReport::new(FixtureLimits::TEST);
+    assert!(!effect_overflow.record_current_signers(
+        6,
+        &[4, 3, 2, 1],
+        &[added; 3],
+        None,
+        [E::Observed; 4],
+    ));
+    assert!(effect_overflow.unresolved);
+    assert_eq!(effect_overflow.terminal, Terminal::EvidenceLimitExhausted);
+    assert_eq!(effect_overflow.known_unrecorded_effects, 10);
+    assert!(effect_overflow.current.is_none());
+
+    let mut item_overflow = model::OutcomeReport::new(FixtureLimits {
+        max_input_items: 1,
+        ..FixtureLimits::TEST
+    });
+    assert!(item_overflow.record_completed(1, &[], None, [E::NotObserved; 4],));
+    assert!(!item_overflow.record_current_signers(
+        2,
+        &[42],
+        &[added],
+        None,
+        [E::Observed, E::NotObserved, E::NotObserved, E::NotObserved],
+    ));
+    assert_eq!(item_overflow.completed_prefix.len(), 1);
+    assert_eq!(item_overflow.known_unrecorded_effects, 3);
+    assert!(item_overflow.unresolved);
+
+    let mut complete = model::OutcomeReport::new(FixtureLimits::TEST);
+    complete.mark_complete();
+    assert_eq!(complete.terminal, Terminal::Complete);
+    assert_eq!(complete.external_effects, E::NotObserved);
+    assert!(complete.unresolved);
+    assert!(!complete.participation_allowed());
+}
+
+#[test]
+fn ordered_victims_preserve_frozen_protected_roots_and_parent_links() {
+    let (mut state, candidate) = full_lineage_model();
+    state.set_protected_roots(Some(1), Some(3)).unwrap();
+    state.blocks.get_mut(&2).unwrap().own_qc = true;
+    let plan = state.plan(candidate, FixtureLimits::TEST).unwrap();
+    let protected = plan.protected().clone();
+    let original = state.blocks.clone();
+    for victim in plan.victims() {
+        assert!(!protected.contains(victim));
+        state.blocks.remove(victim);
+        for id in &protected {
+            assert_eq!(state.blocks.get(id), original.get(id));
+            if let Some(parent) = state.blocks[id].parent {
+                assert!(state.blocks.contains_key(&parent));
+            }
+        }
+    }
+}

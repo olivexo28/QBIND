@@ -235,3 +235,14 @@ f9fb7091b9af9cd2572d2654374e12e07243591138a2d1ffcd4282677809d6ec  ordered-planne
 767bd5e6f3b575b84ad074898f97bc626042cf753bdea76f772a7338bc2d8036  ordered-planner-pre-exhaustion-11-test-iteration.log
 8c6c3a0d1ed698b23e9416fe5993c586cc3dbb6f32d6b33e2e36bb40a5b0d1f2  ordered-planner-pre-phase-update-11-test-iteration.log
 82ad342700d16d4b62fe38ad124561117910e7f0ebe69bee5587e1b7de284e57  ordered-planner-prior-11-test-iteration.log
+236b7ad04fef85051c1b3b39b9d79c28bd547444f58f9fb9c408ef881118bb35  ../../../../crates/qbind-consensus/tests/a33_f1_ordered_planner_model_tests.rs
+4801b07471f1039abe5b390e7fb934e996365704b5d1af7a9633d8c9665d7108  ../../../../crates/qbind-consensus/tests/support/a33_f1_ordered_planner.rs
+32a9930f64905e0ada46466cf843bdfccf01ed5a6085ce1ab5aa8a087183b9e3  ../../../../docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+795f46d52fdf955d9a9d1fbafa34d853e2bae1690858426523036742c87fdee9  ordered-model-correction.md
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ordered-model-correction-format-final.log
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ordered-model-correction-format.log
+8f876dcd0b75dc184d9c57e4baf112a63eecb5b27f5252c893f615db1ca12b7b  ordered-model-correction-tests-attempt-1.log
+dd3c4dd08e00e1f7478a622ab0a4c21f3ad3d4a92f330e81857e357020131809  ordered-model-correction-tests-attempt-2.log
+a98044e8dd408f34de4964e7b03cff961b54c4fc5bbd9d906cbd08adae02cf9a  ordered-model-correction-tests-attempt-3.log
+f96ef587bf6c8a816a26940e9429c9ef64581c4c4f76a4ee1f757202c143e1d5  ordered-model-correction-tests-final.log
+8395d7c775818f556db70eb4d865e07d3290d86799809b7d23f04cba59cd639b  ordered-model-correction-platform.txt
