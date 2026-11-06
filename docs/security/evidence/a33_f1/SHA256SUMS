@@ -246,3 +246,11 @@ dd3c4dd08e00e1f7478a622ab0a4c21f3ad3d4a92f330e81857e357020131809  ordered-model-
 a98044e8dd408f34de4964e7b03cff961b54c4fc5bbd9d906cbd08adae02cf9a  ordered-model-correction-tests-attempt-3.log
 f96ef587bf6c8a816a26940e9429c9ef64581c4c4f76a4ee1f757202c143e1d5  ordered-model-correction-tests-final.log
 8395d7c775818f556db70eb4d865e07d3290d86799809b7d23f04cba59cd639b  ordered-model-correction-platform.txt
+9a3509c6fb10f76c2bb8b04af9a90caccd18c27cec3d7f072fd44a6783994dcc  ../../../../crates/qbind-consensus/tests/a33_f1_ordered_planner_model_tests.rs
+01ca153e7730ed56928e7200f25fb5f64cc931fc62285f9b2d555d75d95f549f  ../../../../crates/qbind-consensus/tests/support/a33_f1_ordered_planner.rs
+4530103797a57a64e5d43c3a2d7dee8bcfd3c6fe04435aebb912b73a30b2dc57  ../../../../docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+6249148fc224b8b43eca32ffae12b4bf1bf64e926e6ff9302602ddef247eb96d  early-refusal-accounting.md
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  early-accounting-format.log
+8395d7c775818f556db70eb4d865e07d3290d86799809b7d23f04cba59cd639b  early-accounting-platform.txt
+55bd0799b344afefb4b444a3b6c970d8affb83d93b3b2cdbf92b2164bd02c6f7  early-accounting-tests-final.log
+6130e94a5c974eaf2d56f90b05635fee087c46bbe712e2c87028633be9a8eea1  early-accounting-tests-unregistered-attempt.log

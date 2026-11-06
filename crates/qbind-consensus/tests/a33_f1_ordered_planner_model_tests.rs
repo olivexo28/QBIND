@@ -451,8 +451,8 @@ fn evidence_limits_and_conflicts_preserve_unresolved_ownership() {
     assert_eq!(report.terminal, Terminal::EvidenceLimitExhausted);
     assert!(report.unresolved);
     assert_eq!(
-        report.known_unrecorded_effects, 0,
-        "exhaustion without an observed effect must not invent one"
+        report.known_unrecorded_effects, 1,
+        "supplied Added disposition survives even when aggregate effects are unobserved"
     );
     assert!(!report.participation_allowed());
 
@@ -470,7 +470,7 @@ fn evidence_limits_and_conflicts_preserve_unresolved_ownership() {
     ));
     assert!(effects_limited.unresolved);
     assert_eq!(effects_limited.terminal, Terminal::EvidenceLimitExhausted);
-    assert_eq!(effects_limited.known_unrecorded_effects, 2);
+    assert_eq!(effects_limited.known_unrecorded_effects, 4);
 
     let conflict_limits = FixtureLimits {
         max_late_conflicting_evidence: 2,
@@ -762,4 +762,95 @@ fn ordered_victims_preserve_frozen_protected_roots_and_parent_links() {
             }
         }
     }
+}
+
+#[test]
+fn early_signer_refusal_preserves_known_facts_without_inventing_unknown_effects() {
+    use model::SignerDisposition;
+    let known = SignerDisposition {
+        vote_history: E::Observed,
+        accumulator: Some(VoteDisposition::Added),
+        qc: E::NotObserved,
+    };
+    let unknown = SignerDisposition {
+        vote_history: E::NotObserved,
+        accumulator: None,
+        qc: E::NotObserved,
+    };
+    for (observation, expected) in [(known, 2), (unknown, 0)] {
+        let mut report = model::OutcomeReport::new(FixtureLimits::TEST);
+        assert!(!report.record_current_signers(
+            1,
+            &[1, 2, 3, 4, 5],
+            &[observation],
+            None,
+            [E::NotObserved; 4],
+        ));
+        assert_eq!(report.known_unrecorded_effects, expected);
+        assert!(!report.unrecorded_accounting_incomplete);
+        assert!(!report.unrecorded_accounting_saturated);
+        assert_eq!(report.last_signer_observations_inspected, 1);
+        assert!(report.unresolved);
+        assert!(!report.participation_allowed());
+    }
+    let mut malformed = model::OutcomeReport::new(FixtureLimits::TEST);
+    assert!(!malformed.record_current_signers(1, &[], &[known], Some(known), [E::NotObserved; 4],));
+    assert_eq!(malformed.known_unrecorded_effects, 4);
+    assert_eq!(malformed.last_signer_observations_inspected, 2);
+    assert!(!malformed.unrecorded_accounting_incomplete);
+    assert!(!malformed.record_current_signers(2, &[1], &[], Some(known), [E::NotObserved; 4],));
+    assert_eq!(malformed.known_unrecorded_effects, 6);
+    assert!(malformed.unresolved);
+    assert!(!malformed.participation_allowed());
+}
+
+#[test]
+fn rejected_signer_inspection_is_bounded_and_incomplete_counts_are_lower_bounds() {
+    use model::SignerDisposition;
+    let unknown = SignerDisposition {
+        vote_history: E::NotObserved,
+        accumulator: None,
+        qc: E::NotObserved,
+    };
+    let known = SignerDisposition {
+        vote_history: E::KnownDetailsUnavailable,
+        accumulator: Some(VoteDisposition::Added),
+        qc: E::Observed,
+    };
+    let mut oversized = vec![unknown; 10_000];
+    oversized[9_999] = known;
+    let mut report = model::OutcomeReport::new(FixtureLimits::TEST);
+    assert!(!report.record_current_signers(1, &[1], &oversized, None, [E::NotObserved; 4],));
+    assert_eq!(report.last_signer_observations_inspected, 4);
+    assert_eq!(report.known_unrecorded_effects, 0);
+    assert!(
+        report.unrecorded_accounting_incomplete,
+        "zero is not a complete count"
+    );
+    assert!(report.current.is_none());
+    assert!(report.completed_prefix.is_empty());
+    assert!(report.late_evidence.is_empty());
+    assert!(!report.record_current_signers(2, &[], &oversized, Some(known), [E::NotObserved; 4],));
+    assert_eq!(report.last_signer_observations_inspected, 5);
+    assert_eq!(report.known_unrecorded_effects, 3);
+    assert!(report.unrecorded_accounting_incomplete);
+    assert!(report.unresolved);
+    assert!(!report.participation_allowed());
+    report.known_unrecorded_effects = usize::MAX - 1;
+    assert!(!report.record_current_signers(3, &[], &[known], None, [E::NotObserved; 4],));
+    assert_eq!(report.known_unrecorded_effects, usize::MAX);
+    assert!(report.unrecorded_accounting_saturated);
+    assert!(report.unrecorded_accounting_incomplete);
+}
+
+#[test]
+fn completed_item_refusal_also_accounts_bounded_supplied_vote_and_qc_facts() {
+    let mut report = model::OutcomeReport::new(FixtureLimits::TEST);
+    let observations = vec![VoteDisposition::Added; 10_000];
+    assert!(!report.record_completed(1, &observations, Some(true), [E::NotObserved; 4]));
+    assert_eq!(report.known_unrecorded_effects, 5);
+    assert!(report.unrecorded_accounting_incomplete);
+    assert!(report.completed_prefix.is_empty());
+    assert!(report.unresolved);
+    assert!(!report.participation_allowed());
 }

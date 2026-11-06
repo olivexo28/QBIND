@@ -791,6 +791,11 @@ pub struct OutcomeReport {
     pub terminal: Terminal,
     pub unresolved: bool,
     pub known_unrecorded_effects: usize,
+    /// Sticky: the count is a lower bound when supplied observations were not inspected.
+    pub unrecorded_accounting_incomplete: bool,
+    pub unrecorded_accounting_saturated: bool,
+    /// Diagnostic work bound for the most recent signer summary.
+    pub last_signer_observations_inspected: usize,
     pub external_effects: EffectObservation,
     effect_observations: usize,
     limits: FixtureLimits,
@@ -805,6 +810,9 @@ impl OutcomeReport {
             terminal: Terminal::InProgress,
             unresolved: false,
             known_unrecorded_effects: 0,
+            unrecorded_accounting_incomplete: false,
+            unrecorded_accounting_saturated: false,
+            last_signer_observations_inspected: 0,
             external_effects: EffectObservation::NotObserved,
             effect_observations: 0,
             limits,
@@ -830,7 +838,40 @@ impl OutcomeReport {
     fn exhaust(&mut self, known_effects: usize) {
         self.unresolved = true;
         self.terminal = Terminal::EvidenceLimitExhausted;
-        self.known_unrecorded_effects = self.known_unrecorded_effects.saturating_add(known_effects);
+        match self.known_unrecorded_effects.checked_add(known_effects) {
+            Some(count) => self.known_unrecorded_effects = count,
+            None => {
+                self.known_unrecorded_effects = usize::MAX;
+                self.unrecorded_accounting_saturated = true;
+            }
+        }
+    }
+
+    fn summarize_signers(
+        &mut self,
+        completed: &[SignerDisposition],
+        interrupted: Option<SignerDisposition>,
+    ) -> (usize, bool) {
+        // Fixed test-model inspection cap, independent of rejected slice length.
+        let inspected = completed
+            .len()
+            .min(FixtureLimits::TEST.max_signers_per_item);
+        self.last_signer_observations_inspected = inspected + usize::from(interrupted.is_some());
+        let count = completed[..inspected]
+            .iter()
+            .chain(interrupted.iter())
+            .map(|s| {
+                usize::from(matches!(
+                    s.vote_history,
+                    EffectObservation::Observed | EffectObservation::KnownDetailsUnavailable
+                )) + usize::from(s.accumulator == Some(VoteDisposition::Added))
+                    + usize::from(matches!(
+                        s.qc,
+                        EffectObservation::Observed | EffectObservation::KnownDetailsUnavailable
+                    ))
+            })
+            .sum();
+        (count, inspected < completed.len())
     }
 
     pub fn record_completed(
@@ -849,7 +890,15 @@ impl OutcomeReport {
                 .checked_add(added_effects)
                 .is_none_or(|n| n > self.limits.max_prefix_effect_observations)
         {
-            self.exhaust(added_effects);
+            let inspected = dispositions
+                .len()
+                .min(FixtureLimits::TEST.max_signers_per_item);
+            let signer_effects = dispositions[..inspected]
+                .iter()
+                .filter(|d| **d == VoteDisposition::Added)
+                .count();
+            self.unrecorded_accounting_incomplete |= inspected < dispositions.len();
+            self.exhaust(added_effects + signer_effects + usize::from(qc_formed == Some(true)));
             return false;
         }
         self.effect_observations += added_effects;
@@ -914,29 +963,18 @@ impl OutcomeReport {
         interrupted: Option<SignerDisposition>,
         effects: [EffectObservation; 4],
     ) -> bool {
+        let (signer_effects, incomplete) = self.summarize_signers(completed, interrupted);
+        let count = Self::count_effects(&effects);
         if input.len() > self.limits.max_signers_per_item
             || completed.len() > input.len()
             || (interrupted.is_some() && completed.len() >= input.len())
         {
-            self.exhaust(Self::count_effects(&effects));
+            self.unrecorded_accounting_incomplete |= incomplete;
+            self.exhaust(count + signer_effects);
             return false;
         }
-        let signer_effects = completed
-            .iter()
-            .chain(interrupted.iter())
-            .map(|s| {
-                usize::from(matches!(
-                    s.vote_history,
-                    EffectObservation::Observed | EffectObservation::KnownDetailsUnavailable
-                )) + usize::from(s.accumulator == Some(VoteDisposition::Added))
-                    + usize::from(matches!(
-                        s.qc,
-                        EffectObservation::Observed | EffectObservation::KnownDetailsUnavailable
-                    ))
-            })
-            .sum::<usize>();
-        let count = Self::count_effects(&effects);
-        if self.terminal != Terminal::InProgress
+        if incomplete
+            || self.terminal != Terminal::InProgress
             || self.completed_prefix.len() >= self.limits.max_input_items
             || self
                 .effect_observations
@@ -944,7 +982,8 @@ impl OutcomeReport {
                 .and_then(|n| n.checked_add(signer_effects))
                 .is_none_or(|n| n > self.limits.max_prefix_effect_observations)
         {
-            self.exhaust(count.saturating_add(signer_effects));
+            self.unrecorded_accounting_incomplete |= incomplete;
+            self.exhaust(count + signer_effects);
             return false;
         }
         if !self.record_current_failure(

@@ -6389,3 +6389,48 @@ production 64-KiB sufficiency, durability, ownership barriers, production
 equivalence, rollback or retry safety. I1, W1/W2 and prior bounded
 acceptances remain closed within their scopes. A33-F1 / E27 and remaining
 obligations stay **OPEN**; activation **DISABLED**; public DevNet **NO-GO**.
+
+## 68. Bounded early-refusal signer-evidence accounting correction
+
+**TEST-ONLY EVIDENCE-ACCOUNTING CORRECTION — INDEPENDENT REVIEW PENDING.**
+At entry, task branch/direct remote tip matched
+`8bc374d7554db821cebd4d06412a30fe4c0a535d`, tree
+`f3ab86c3fc334b91b89d0b9e41f499e0bf7859dd`. Local/direct remote main
+matched `c9aaef40b045e896ddfa8b01bad230f6b680715e`; staging/worktree clean.
+The user supplied an independent acceptance of the previous four model
+corrections with limitations and a remaining source-derived early-refusal
+gap. No reviewer identity/raw artifact or review of this new change is
+asserted; accepted bounded controls are not reopened.
+
+The synthetic outcome model now summarizes at most four completed signer
+observations plus one interrupted observation before early oversized/shape
+or later item/effect-budget refusal. It preserves known history/Added/QC
+facts, distinguishes wholly unknown observations, and retains sticky
+incomplete and saturated accounting indicators. Uninspected suffixes imply
+a lower bound, not a complete zero; counts describe supplied observation
+categories rather than unique physical mutations. No rejected-slice
+allocation or unbounded scan is needed by this summary. Related rejected
+completed-item Added/QC facts receive the same bounded accounting.
+
+Three new top-level regressions cover five input IDs with known/unknown
+completed facts and unobserved aggregate effects, interrupted/malformed
+shape, sticky facts, 10,000-observation bounded inspection and saturation,
+and the related completed-item refusal. Final focused run exits 0:
+20 passed, 0 failed/ignored; targeted rustfmt/check exits 0. The first
+command exited 0 with 17 tests but warned that new tests were nested and
+unregistered; it is retained as an unsuccessful coverage attempt, not
+passing evidence for this correction. All raw outputs are uniquely retained.
+Commands, hashes, exits and limits are in
+[`early-refusal-accounting.md`](evidence/a33_f1/early-refusal-accounting.md).
+
+Earlier plan, manifest, evidence and audit bytes are preserved. Current
+artifact verification does not replace ordinary full-manifest or complete
+whitespace non-passes, historical revision-matched checks, or the two
+prefix-only identities whose producing revisions remain unestablished.
+Older unavailable raw outputs remain unavailable. I1, W1/W2 and all earlier
+bounded acceptances remain preserved. No production code, Cargo settings,
+catch-up caller, signer, network, startup, storage or quarantine wiring
+changes. No clear/resume, inbound/all-model resource bound, total evidence
+retention, production 64-KiB sufficiency, durability or ownership barrier is
+established. A33-F1 / E27 and remaining obligations stay **OPEN**;
+activation **DISABLED**; public DevNet **NO-GO**.
