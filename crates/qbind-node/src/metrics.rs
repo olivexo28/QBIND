@@ -2023,14 +2023,15 @@ pub struct RestoreCatchupMetrics {
     requests_received: AtomicU64,
     responses_sent: AtomicU64,
     responses_received: AtomicU64,
+    empty_responses_ignored_total: AtomicU64,
     blocks_applied: AtomicU64,
     responses_rejected: AtomicU64,
     proposals_deferred: AtomicU64,
     /// Gauge: 1 while the restored node is in bounded restore-catchup
     /// mode, 0 otherwise (including for nodes that never restored).
     /// Flips at most once per node lifetime, on the post-catchup
-    /// transition. Provides a direct "this node has resumed normal
-    /// participation" signal for evidence runs.
+    /// transition in direct characterization. Current response ingress
+    /// cannot clear it. This is not recovery or participation authority.
     mode_active: AtomicU64,
     /// Gauge: the local committed height at which the post-catchup
     /// transition happened, or 0 if it has not happened (yet, or this
@@ -2929,6 +2930,7 @@ impl RestoreCatchupMetrics {
         requests_received: u64,
         responses_sent: u64,
         responses_received: u64,
+        empty_responses_ignored_total: u64,
         blocks_applied: u64,
         responses_rejected: u64,
         proposals_deferred: u64,
@@ -2941,6 +2943,8 @@ impl RestoreCatchupMetrics {
         self.responses_sent.store(responses_sent, Ordering::Relaxed);
         self.responses_received
             .store(responses_received, Ordering::Relaxed);
+        self.empty_responses_ignored_total
+            .store(empty_responses_ignored_total, Ordering::Relaxed);
         self.blocks_applied.store(blocks_applied, Ordering::Relaxed);
         self.responses_rejected
             .store(responses_rejected, Ordering::Relaxed);
@@ -2969,6 +2973,10 @@ impl RestoreCatchupMetrics {
         output.push_str(&format!(
             "qbind_restore_catchup_responses_received_total {}\n",
             self.responses_received.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_restore_catchup_empty_responses_ignored_total {}\n",
+            self.empty_responses_ignored_total.load(Ordering::Relaxed)
         ));
         output.push_str(&format!(
             "qbind_restore_catchup_blocks_applied_total {}\n",

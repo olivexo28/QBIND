@@ -1,0 +1,57 @@
+Tool-discovery attempts (before dependency restoration)
+
+COMMAND: git diff --stat && df -h . && command -v cargo && rustc --version
+OUTPUT:
+ crates/qbind-node/src/binary_consensus_loop.rs | 334 +++++++++++++++++++++++--
+ crates/qbind-node/src/metrics.rs               |   8 +
+ 2 files changed, 316 insertions(+), 26 deletions(-)
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/vdb         19G  7.5G  9.8G  44% /
+EXIT STATUS: 1 (command -v cargo unsuccessful; rustc was not run)
+
+COMMAND: printf 'PATH=%s\n' "$PATH"; ls -ld /root/.cargo/bin /usr/local/cargo/bin /opt/rust/bin 2>&1; ls /root/.cargo/bin/cargo /root/.cargo/bin/rustc 2>&1; command -v rustup; ls -ld target .cargo
+OUTPUT:
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/root/.cache/copilot/pkg/linux-x64/1.0.104-4/ripgrep/bin/linux-x64
+ls: cannot access '/root/.cargo/bin': No such file or directory
+ls: cannot access '/opt/rust/bin': No such file or directory
+drwxrwsr-x 2 root rustlang 4096 Nov  3 19:05 /usr/local/cargo/bin
+ls: cannot access '/root/.cargo/bin/cargo': No such file or directory
+ls: cannot access '/root/.cargo/bin/rustc': No such file or directory
+ls: cannot access 'target': No such file or directory
+ls: cannot access '.cargo': No such file or directory
+EXIT STATUS: 2 (final ls; missing PATH tool lookups were also unsuccessful)
+
+COMMAND: PATH=/usr/local/cargo/bin:$PATH cargo --version && PATH=/usr/local/cargo/bin:$PATH rustc --version && ls /usr/local/cargo/bin && command -v clang && command -v cmake && command -v pkg-config
+OUTPUT:
+cargo 1.99.1 (5f94df478 2026-08-27)
+rustc 1.99.1 (58cf8f9c3 2026-10-13)
+cargo
+cargo-clippy
+cargo-fmt
+cargo-miri
+clippy-driver
+rls
+rust-analyzer
+rust-gdb
+rust-gdbgui
+rust-lldb
+rustc
+rustdoc
+rustfmt
+rustup
+EXIT STATUS: 1 (clang PATH lookup unsuccessful; later lookups not run)
+
+All cargo commands below explicitly prepend /usr/local/cargo/bin to PATH.
+focused-attempt-1.log retains the full libclang failure (exit 101); no tests
+ran. build-dependency-install.log retains apt-get update/install output
+(exit 0), performed only after that confirmed missing-dependency failure.
+
+focused-attempt-2.log: exit 0, 9 tests passed at that source stage.
+focused-final.log: exit 0, 9 tests passed, but newly added H6 was inadvertently
+nested and NOT discovered; warnings are retained in full. This was not
+complete ten-test coverage. The inventory probe was:
+COMMAND: git diff --numstat && PATH=/usr/local/cargo/bin:$PATH cargo test -p qbind-node --lib -- --list 2>&1 | grep -E 'empty_containment_|Compiling qbind-node|Finished'
+EXIT STATUS: 0 (pipeline); output listed only 9 focused tests and warned
+that the nested H6 function was unused. The nesting was corrected, and
+focused-complete.log records all 10 tests discovered/passed (exit 0).
+The final strengthened D2 oracle is exercised separately in focused-verified.log.

@@ -1782,6 +1782,9 @@ pub struct BinaryConsensusLoopInboundStats {
     pub restore_catchup_responses_sent: u64,
     /// Restore-catchup responses received from peers.
     pub restore_catchup_responses_received: u64,
+    /// Admitted empty responses ignored before peer-height/mode evaluation.
+    /// Saturates at u64::MAX; observability only, never recovery authority.
+    pub restore_catchup_empty_responses_ignored_total: u64,
     /// Peer-learned catchup blocks accepted and applied.
     pub restore_catchup_blocks_applied: u64,
     /// Malformed or inconsistent catchup responses rejected fail-closed.
@@ -1789,7 +1792,7 @@ pub struct BinaryConsensusLoopInboundStats {
     /// Future proposals deferred while a restored node is behind its peers.
     pub restore_catchup_proposals_deferred: u64,
     /// Whether the restored node is still in bounded restore-catchup mode
-    /// (`1`) or has transitioned out into normal participation (`0`).
+    /// (`1`) or is inactive (`0`). Not recovery/participation authority.
     ///
     /// For nodes that did **not** start with a `RestoreBaseline`, this is
     /// always `0` — they were never in restore-catchup mode at all.
@@ -1799,10 +1802,10 @@ pub struct BinaryConsensusLoopInboundStats {
     /// `RestoreCatchupRequest` frames every
     /// `RESTORE_CATCHUP_REQUEST_EVERY_TICKS` ticks and to defer inbound
     /// proposals more than one height above the local committed anchor)
-    /// and flips to `0` exactly once when the explicit transition
-    /// condition in `RestoreCatchupModeState::maybe_exit_after_response`
-    /// is met. After that flip, request broadcasts and proposal deferral
-    /// stop and the node participates as a normal binary-path validator.
+    /// remains active on every inbound response: non-empty responses are
+    /// refused and empty responses ignored before the transition helper.
+    /// The retained direct-helper transition is characterization only.
+    /// Inactive mode removes these gates, not authority or signer checks.
     pub restore_catchup_mode_active: u64,
     /// The local `committed_height` at the moment the restored node
     /// transitioned out of bounded restore-catchup mode, or `0` if no
@@ -2320,9 +2323,13 @@ pub struct BinaryConsensusLoopInboundStats {
 ///
 /// # Transition condition (explicit and bounded)
 ///
-/// Mode flips from `active=true` to `active=false` exactly once, on the
-/// first inbound `RestoreCatchupResponse` tick where ALL of the
-/// following hold:
+/// This retained tracker describes the direct helper's historical transition,
+/// not current ingress authority. Inbound dispatch now refuses non-empty
+/// responses and ignores empty responses before this tracker. No inbound
+/// response updates the peer maximum or clears/rearms mode.
+///
+/// In direct characterization calls, mode flips from `active=true` to
+/// `active=false` exactly once when ALL of the following hold:
 ///
 /// 1. The response was either applied successfully (added ≥ 0 blocks)
 ///    or rejected with no state change. We never flip on a malformed /
@@ -2352,10 +2359,8 @@ pub(crate) struct RestoreCatchupModeState {
     /// declare catchup complete. `None` when no baseline was applied
     /// (in which case `active` is also `false` from the start).
     snapshot_baseline_height: Option<u64>,
-    /// The maximum `responder_committed_height` ever observed in an
-    /// inbound `RestoreCatchupResponse`. Updated on every received
-    /// response (including responses that carry zero blocks). Used as
-    /// the catch-up target.
+    /// Maximum reported height recorded by direct helper characterization.
+    /// Current inbound response dispatch never updates this target.
     peer_max_observed_committed_height: Option<u64>,
     /// The local `committed_height` at the moment of the active→false
     /// flip, or `None` if no flip has occurred. Observability only.
@@ -7417,7 +7422,20 @@ pub(crate) fn handle_inbound_consensus_msg(
                 );
                 return;
             }
-            handle_restore_catchup_response(engine, resp, stats, local_validator_id, restore_mode);
+            #[cfg(test)]
+            if tests::empty_response_sensitivity_before_guard(
+                engine,
+                resp.clone(),
+                stats,
+                local_validator_id,
+                restore_mode,
+            ) {
+                return;
+            }
+            stats.restore_catchup_empty_responses_ignored_total = stats
+                .restore_catchup_empty_responses_ignored_total
+                .saturating_add(1);
+            return;
         }
     }
 }
@@ -8444,9 +8462,10 @@ fn handle_restore_catchup_request(
     stats.restore_catchup_responses_sent = stats.restore_catchup_responses_sent.saturating_add(1);
 }
 
-// Non-empty responses are refused by the authenticated inbound dispatch.
+// All responses are refused or ignored by the inbound dispatch.
 // Keep this helper's existing behavior for empty responses and for direct
 // characterization tests of the non-transactional engine import operation.
+#[cfg_attr(not(test), allow(dead_code))]
 fn handle_restore_catchup_response(
     engine: &mut BasicHotStuffEngine<[u8; 32]>,
     resp: RestoreCatchupResponse,
@@ -9272,6 +9291,7 @@ fn update_restore_catchup_metrics(
         stats.restore_catchup_requests_received,
         stats.restore_catchup_responses_sent,
         stats.restore_catchup_responses_received,
+        stats.restore_catchup_empty_responses_ignored_total,
         stats.restore_catchup_blocks_applied,
         stats.restore_catchup_responses_rejected,
         stats.restore_catchup_proposals_deferred,
@@ -10056,6 +10076,7 @@ mod tests {
     #[derive(Default)]
     struct A17RecordingFacade {
         calls: std::sync::Mutex<Vec<String>>,
+        fail_consensus: bool,
     }
 
     impl ConsensusNetworkFacade for A17RecordingFacade {
@@ -10110,7 +10131,13 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push(format!("consensus:{msg:?}"));
-            Ok(())
+            if self.fail_consensus {
+                Err(qbind_consensus::network::NetworkError::Other(
+                    "test recording facade failure".into(),
+                ))
+            } else {
+                Ok(())
+            }
         }
     }
 
@@ -10175,10 +10202,9 @@ mod tests {
             stats.inbound_sender_binding_rejected_total,
             stats.restore_catchup_responses_received,
             stats.restore_catchup_responses_rejected,
+            stats.restore_catchup_empty_responses_ignored_total,
         );
         let nonempty = !resp.blocks.is_empty();
-        let may_observe_empty_peer =
-            resp.blocks.is_empty() && resp.responder_validator_index != 0 && mode.is_active();
         handle_inbound_consensus_msg(
             engine,
             ConsensusNetMsg::RestoreCatchupResponse(resp),
@@ -10198,16 +10224,7 @@ mod tests {
         );
         let after = a17_protected_observation(engine, mode, &outbound);
         let result = a17_check_protected(&before, &after);
-        if may_observe_empty_peer {
-            // Only the existing empty-response mode effect is allowed here;
-            // individual controls below assert its exact progress/exit state.
-            assert!(
-                result == Ok(()) || result == Err(vec!["restore_mode"]),
-                "{result:?}"
-            );
-        } else {
-            assert_eq!(result, Ok(()), "protected dispatch observations changed");
-        }
+        assert_eq!(result, Ok(()), "protected dispatch observations changed");
         // Ingress counters are deliberately outside the protected-state oracle.
         let binding_rejected = stats.inbound_sender_binding_rejected_total != counters_before.1;
         assert_eq!(stats.inbound_msgs_received, counters_before.0 + 1);
@@ -10222,6 +10239,10 @@ mod tests {
         assert_eq!(
             stats.restore_catchup_responses_rejected,
             counters_before.3 + u64::from(!binding_rejected && nonempty),
+        );
+        assert_eq!(
+            stats.restore_catchup_empty_responses_ignored_total,
+            counters_before.4 + u64::from(!binding_rejected && !nonempty),
         );
         assert!(metrics
             .format_metrics()
@@ -10265,6 +10286,906 @@ mod tests {
         // Compare the SAME engine before/after, not independently seeded maps.
         // Allocation capacities and opaque recorder internals are not observed.
         format!("{engine:?}")
+    }
+
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum EmptyGuardControl {
+        Correct,
+        Omitted,
+        AfterHelper,
+    }
+
+    thread_local! {
+        static EMPTY_GUARD_CONTROL: std::cell::Cell<EmptyGuardControl> =
+            const { std::cell::Cell::new(EmptyGuardControl::Correct) };
+    }
+
+    struct EmptyGuardControlReset(EmptyGuardControl);
+
+    impl Drop for EmptyGuardControlReset {
+        fn drop(&mut self) {
+            EMPTY_GUARD_CONTROL.set(self.0);
+        }
+    }
+
+    // Test-only defects traverse the same bound/receipt/non-empty handler arm.
+    // Production builds contain neither this hook nor the thread-local control.
+    pub(super) fn empty_response_sensitivity_before_guard(
+        engine: &mut BasicHotStuffEngine<[u8; 32]>,
+        resp: RestoreCatchupResponse,
+        stats: &mut BinaryConsensusLoopInboundStats,
+        local: ValidatorId,
+        mode: &mut RestoreCatchupModeState,
+    ) -> bool {
+        let control = EMPTY_GUARD_CONTROL.get();
+        if control != EmptyGuardControl::Correct {
+            handle_restore_catchup_response(engine, resp, stats, local, mode);
+        }
+        control == EmptyGuardControl::Omitted
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn empty_containment_dispatch(
+        engine: &mut BasicHotStuffEngine<[u8; 32]>,
+        mode: &mut RestoreCatchupModeState,
+        stats: &mut BinaryConsensusLoopInboundStats,
+        resp: RestoreCatchupResponse,
+        origin: Option<&AuthenticatedConsensusOrigin>,
+        gate: Option<&PeerConsensusBindingGate>,
+        outbound: &A17RecordingFacade,
+    ) -> Result<(), Vec<&'static str>> {
+        let before = a17_protected_observation(engine, mode, outbound);
+        let before_stats = *stats;
+        let nonempty = !resp.blocks.is_empty();
+        let binding_before = gate.map(|g| g.metrics().accepted());
+        let metrics = Arc::new(NodeMetrics::new());
+        handle_inbound_consensus_msg(
+            engine,
+            ConsensusNetMsg::RestoreCatchupResponse(resp),
+            stats,
+            Some(outbound),
+            &metrics,
+            ValidatorId::new(0),
+            mode,
+            None,
+            None,
+            None,
+            &mut BinaryReconfigDetector::default(),
+            origin,
+            gate,
+            None,
+            ConsensusVerificationPolicy::Required,
+        );
+        let rejected = stats.inbound_sender_binding_rejected_total
+            != before_stats.inbound_sender_binding_rejected_total;
+        assert_eq!(
+            stats.inbound_msgs_received,
+            before_stats.inbound_msgs_received.saturating_add(1)
+        );
+        assert_eq!(
+            stats.restore_catchup_responses_received,
+            before_stats
+                .restore_catchup_responses_received
+                .saturating_add(u64::from(!rejected))
+        );
+        assert_eq!(
+            stats.restore_catchup_responses_rejected,
+            before_stats
+                .restore_catchup_responses_rejected
+                .saturating_add(u64::from(!rejected && nonempty))
+        );
+        if EMPTY_GUARD_CONTROL.get() != EmptyGuardControl::Omitted {
+            assert_eq!(
+                stats.restore_catchup_empty_responses_ignored_total,
+                before_stats
+                    .restore_catchup_empty_responses_ignored_total
+                    .saturating_add(u64::from(!rejected && !nonempty))
+            );
+        }
+        if let (Some(g), Some(accepted_before)) = (gate, binding_before) {
+            assert_eq!(
+                g.metrics().accepted(),
+                accepted_before + u64::from(!rejected)
+            );
+        }
+        assert!(metrics
+            .format_metrics()
+            .contains("consensus_net_inbound_total{kind=\"other\"} 1"));
+        if EMPTY_GUARD_CONTROL.get() == EmptyGuardControl::Correct {
+            let mut expected = before_stats;
+            expected.inbound_msgs_received = expected.inbound_msgs_received.saturating_add(1);
+            expected.inbound_sender_binding_rejected_total = expected
+                .inbound_sender_binding_rejected_total
+                .saturating_add(u64::from(rejected));
+            expected.restore_catchup_responses_received = expected
+                .restore_catchup_responses_received
+                .saturating_add(u64::from(!rejected));
+            expected.restore_catchup_responses_rejected = expected
+                .restore_catchup_responses_rejected
+                .saturating_add(u64::from(!rejected && nonempty));
+            expected.restore_catchup_empty_responses_ignored_total = expected
+                .restore_catchup_empty_responses_ignored_total
+                .saturating_add(u64::from(!rejected && !nonempty));
+            assert_eq!(
+                format!("{stats:?}"),
+                format!("{expected:?}"),
+                "only generic, binding, receipt, rejection/ignored accounting may change"
+            );
+        }
+        update_restore_catchup_metrics(&metrics, stats);
+        assert!(metrics.format_metrics().contains(&format!(
+            "qbind_restore_catchup_empty_responses_ignored_total {}\n",
+            stats.restore_catchup_empty_responses_ignored_total
+        )));
+        a17_check_protected(&before, &a17_protected_observation(engine, mode, outbound))
+    }
+
+    #[test]
+    fn empty_containment_h1_h2_h4_h5_h6_h7_handler_matrix() {
+        let anchor = [0xE1; 32];
+        let gate = a17_binding_gate(4);
+        let mut cases = 0;
+        // Absent/below local height with an active baseline are deliberately
+        // fixture-only states, not production restore initialization evidence.
+        for local in [None, Some(4), Some(5), Some(8)] {
+            for active in [false, true] {
+                for target in [None, Some(4), Some(8), Some(100), Some(u64::MAX)] {
+                    for height in [None, Some(4), Some(5), Some(8), Some(9), Some(u64::MAX)] {
+                        for responder in [0, 1] {
+                            let mut engine = a17_engine(local.map(|h| (h, anchor)));
+                            let mut mode = a17_mode(Some((5, anchor)));
+                            mode.active = active;
+                            mode.peer_max_observed_committed_height = target;
+                            mode.exited_at_height = (!active).then_some(8);
+                            let mut stats = BinaryConsensusLoopInboundStats {
+                                restore_catchup_mode_active: u64::from(active),
+                                restore_catchup_mode_exited_at_height: if active { 0 } else { 8 },
+                                ..Default::default()
+                            };
+                            let origin = a17_origin(responder as u64);
+                            let out = A17RecordingFacade::default();
+                            // No request is emitted/outstanding. Both anchors mismatch.
+                            for _ in 0..2 {
+                                assert_eq!(
+                                    empty_containment_dispatch(
+                                        &mut engine,
+                                        &mut mode,
+                                        &mut stats,
+                                        a17_response(responder, 999, [0xFF; 32], height, vec![]),
+                                        Some(&origin),
+                                        Some(&gate),
+                                        &out,
+                                    ),
+                                    Ok(())
+                                );
+                            }
+                            assert_eq!(stats.restore_catchup_responses_received, 2);
+                            assert_eq!(stats.restore_catchup_empty_responses_ignored_total, 2);
+                            assert_eq!(stats.restore_catchup_responses_rejected, 0);
+                            assert_eq!(stats.restore_catchup_mode_active, u64::from(active));
+                            assert_eq!(
+                                stats.restore_catchup_mode_exited_at_height,
+                                if active { 0 } else { 8 }
+                            );
+                            cases += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(cases, 480);
+        eprintln!("H1/H2/H4-H7: {cases} fixture combinations; 960 actual handler calls");
+    }
+
+    #[test]
+    fn empty_containment_h3_installed_binding_failures_and_no_gate_compatibility() {
+        let gate = a17_binding_gate(4);
+        let valid = a17_origin(1);
+        let unknown = a17_origin(9);
+        let ambiguous = AuthenticatedConsensusOrigin::new(a17_node_id(1), ValidatorId::new(2));
+        for (origin, claim, reason) in [
+            (None, 1, ConsensusBindingReject::MissingOrigin),
+            (Some(&unknown), 1, ConsensusBindingReject::UnknownPeer),
+            (
+                Some(&ambiguous),
+                1,
+                ConsensusBindingReject::AmbiguousMapping,
+            ),
+            (Some(&valid), 9, ConsensusBindingReject::UnknownValidator),
+            (
+                Some(&valid),
+                0,
+                ConsensusBindingReject::ClaimedSenderMismatch,
+            ),
+            (
+                Some(&valid),
+                2,
+                ConsensusBindingReject::ClaimedSenderMismatch,
+            ),
+        ] {
+            let mut engine = a17_engine(Some((5, [0xE2; 32])));
+            let mut mode = a17_mode(Some((5, [0xE2; 32])));
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let out = A17RecordingFacade::default();
+            let count = gate.metrics().reject_count(reason);
+            assert_eq!(
+                empty_containment_dispatch(
+                    &mut engine,
+                    &mut mode,
+                    &mut stats,
+                    a17_response(claim, 0, [0; 32], Some(u64::MAX), vec![]),
+                    origin,
+                    Some(&gate),
+                    &out,
+                ),
+                Ok(())
+            );
+            assert_eq!(gate.metrics().reject_count(reason), count + 1);
+            assert_eq!(stats.inbound_sender_binding_rejected_total, 1);
+            assert_eq!(stats.restore_catchup_responses_received, 0);
+            assert_eq!(stats.restore_catchup_empty_responses_ignored_total, 0);
+            assert_eq!(stats.restore_catchup_responses_rejected, 0);
+        }
+        // This callable no-gate path accepts the claim, NOT an authenticated origin.
+        for origin in [None, Some(&valid), Some(&unknown), Some(&ambiguous)] {
+            for claim in [0, 1, 9] {
+                let mut engine = a17_engine(Some((8, [0xE2; 32])));
+                let mut mode = a17_mode(Some((5, [0xE2; 32])));
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+                assert_eq!(
+                    empty_containment_dispatch(
+                        &mut engine,
+                        &mut mode,
+                        &mut stats,
+                        a17_response(claim, 0, [0; 32], Some(8), vec![]),
+                        origin,
+                        None,
+                        &A17RecordingFacade::default(),
+                    ),
+                    Ok(())
+                );
+                assert_eq!(stats.inbound_sender_binding_rejected_total, 0);
+                assert_eq!(stats.restore_catchup_responses_received, 1);
+                assert_eq!(stats.restore_catchup_empty_responses_ignored_total, 1);
+            }
+        }
+    }
+
+    #[test]
+    fn empty_containment_h6_repeated_differing_heights_do_not_clear_or_rearm() {
+        for active in [false, true] {
+            let mut engine = a17_engine(Some((8, [0xE2; 32])));
+            let mut mode = a17_mode(Some((5, [0xE2; 32])));
+            // Establish historical tracker state through its direct fixture path.
+            mode.maybe_exit_after_response(Some(8), Some(if active { 5 } else { 8 }));
+            assert_eq!(mode.is_active(), active);
+            let mut stats = BinaryConsensusLoopInboundStats {
+                restore_catchup_mode_active: u64::from(active),
+                restore_catchup_mode_exited_at_height: if active { 0 } else { 8 },
+                ..Default::default()
+            };
+            for height in [None, Some(4), Some(8), Some(100), Some(u64::MAX), Some(4)] {
+                assert_eq!(
+                    empty_containment_dispatch(
+                        &mut engine,
+                        &mut mode,
+                        &mut stats,
+                        a17_response(1, 0, [0xFF; 32], height, vec![]),
+                        Some(&a17_origin(1)),
+                        Some(&a17_binding_gate(4)),
+                        &A17RecordingFacade::default(),
+                    ),
+                    Ok(())
+                );
+            }
+            assert_eq!(stats.restore_catchup_empty_responses_ignored_total, 6);
+            assert_eq!(mode.is_active(), active);
+            assert_eq!(mode.peer_max_observed_committed_height, Some(8));
+        }
+    }
+
+    #[test]
+    fn empty_containment_counter_saturation_and_distinct_nonempty_accounting() {
+        let gate = a17_binding_gate(4);
+        let origin = a17_origin(1);
+        for received in [0, u64::MAX - 1, u64::MAX] {
+            for ignored in [0, u64::MAX - 1, u64::MAX] {
+                for rejected in [0, u64::MAX - 1, u64::MAX] {
+                    let mut engine = a17_engine(Some((5, [0xE3; 32])));
+                    let mut mode = a17_mode(Some((5, [0xE3; 32])));
+                    let mut stats = BinaryConsensusLoopInboundStats {
+                        restore_catchup_responses_received: received,
+                        restore_catchup_empty_responses_ignored_total: ignored,
+                        restore_catchup_responses_rejected: rejected,
+                        ..Default::default()
+                    };
+                    let out = A17RecordingFacade::default();
+                    for _ in 0..2 {
+                        assert_eq!(
+                            empty_containment_dispatch(
+                                &mut engine,
+                                &mut mode,
+                                &mut stats,
+                                a17_response(1, 5, [0xE3; 32], Some(5), vec![]),
+                                Some(&origin),
+                                Some(&gate),
+                                &out,
+                            ),
+                            Ok(())
+                        );
+                    }
+                    assert_eq!(
+                        stats.restore_catchup_responses_received,
+                        received.saturating_add(2)
+                    );
+                    assert_eq!(
+                        stats.restore_catchup_empty_responses_ignored_total,
+                        ignored.saturating_add(2)
+                    );
+                    let blocks = a17_suffix(&engine, 5, [0xE3; 32], 1);
+                    for _ in 0..2 {
+                        assert_eq!(
+                            empty_containment_dispatch(
+                                &mut engine,
+                                &mut mode,
+                                &mut stats,
+                                a17_response(1, 5, [0xE3; 32], Some(6), blocks.clone()),
+                                Some(&origin),
+                                Some(&gate),
+                                &out,
+                            ),
+                            Ok(())
+                        );
+                    }
+                    assert_eq!(
+                        stats.restore_catchup_responses_received,
+                        received.saturating_add(4)
+                    );
+                    assert_eq!(
+                        stats.restore_catchup_empty_responses_ignored_total,
+                        ignored.saturating_add(2)
+                    );
+                    assert_eq!(
+                        stats.restore_catchup_responses_rejected,
+                        rejected.saturating_add(2)
+                    );
+                    assert_eq!(
+                        empty_containment_dispatch(
+                            &mut engine,
+                            &mut mode,
+                            &mut stats,
+                            a17_response(0, 0, [0; 32], None, vec![]),
+                            Some(&origin),
+                            Some(&gate),
+                            &out,
+                        ),
+                        Ok(())
+                    );
+                    assert_eq!(
+                        stats.restore_catchup_responses_received,
+                        received.saturating_add(4)
+                    );
+                    assert_eq!(
+                        stats.restore_catchup_empty_responses_ignored_total,
+                        ignored.saturating_add(2)
+                    );
+                    assert_eq!(
+                        stats.restore_catchup_responses_rejected,
+                        rejected.saturating_add(2)
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn empty_containment_h8_h9_same_oracle_detects_omitted_and_after_helper_guards() {
+        for control in [
+            EmptyGuardControl::Correct,
+            EmptyGuardControl::Omitted,
+            EmptyGuardControl::AfterHelper,
+        ] {
+            let _reset = EmptyGuardControlReset(EMPTY_GUARD_CONTROL.replace(control));
+            let mut engine = a17_engine(Some((8, [0xE4; 32])));
+            let mut mode = a17_mode(Some((5, [0xE4; 32])));
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let out = A17RecordingFacade::default();
+            let result = empty_containment_dispatch(
+                &mut engine,
+                &mut mode,
+                &mut stats,
+                a17_response(1, 999, [0xFF; 32], Some(8), vec![]),
+                Some(&a17_origin(1)),
+                Some(&a17_binding_gate(4)),
+                &out,
+            );
+            if control == EmptyGuardControl::Correct {
+                assert_eq!(result, Ok(()));
+                assert!(mode.is_active());
+                assert_eq!(stats.restore_catchup_mode_exited_at_height, 0);
+            } else {
+                assert_eq!(
+                    result,
+                    Err(vec!["restore_mode"]),
+                    "same protected-state assertion detects defect"
+                );
+                assert!(!mode.is_active());
+                assert_eq!(mode.peer_max_observed_committed_height, Some(8));
+                assert_eq!(stats.restore_catchup_mode_exited_at_height, 8);
+            }
+            assert!(
+                out.calls.lock().unwrap().is_empty(),
+                "mode-only defect, not publication"
+            );
+            // The existing non-empty guard precedes even the test-only defect.
+            let blocks = a17_suffix(&engine, 8, [0xE4; 32], 1);
+            assert_eq!(
+                empty_containment_dispatch(
+                    &mut engine,
+                    &mut mode,
+                    &mut stats,
+                    a17_response(1, 8, [0xE4; 32], Some(9), blocks),
+                    Some(&a17_origin(1)),
+                    Some(&a17_binding_gate(4)),
+                    &out,
+                ),
+                Ok(())
+            );
+        }
+    }
+
+    #[test]
+    fn empty_containment_d1_request_cadence_anchor_facade_and_honest_empty_export() {
+        for active in [false, true] {
+            for baseline in [None, Some((5, [0xE5; 32]))] {
+                for facade in [0, 1, 2] {
+                    let mut engine = a17_engine(baseline);
+                    let mut mode = a17_mode(Some((5, [0xE5; 32])));
+                    mode.active = active;
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let out = A17RecordingFacade {
+                        fail_consensus: facade == 2,
+                        ..Default::default()
+                    };
+                    assert_eq!(
+                        empty_containment_dispatch(
+                            &mut engine,
+                            &mut mode,
+                            &mut stats,
+                            a17_response(1, 999, [0xFF; 32], Some(u64::MAX), vec![]),
+                            Some(&a17_origin(1)),
+                            Some(&a17_binding_gate(4)),
+                            &out,
+                        ),
+                        Ok(())
+                    );
+                    for tick in 0..=RESTORE_CATCHUP_REQUEST_EVERY_TICKS + 1 {
+                        maybe_broadcast_restore_catchup_request(
+                            &engine,
+                            tick,
+                            ValidatorId::new(0),
+                            mode.is_active(),
+                            if facade == 0 { None } else { Some(&out) },
+                            &mut stats,
+                        );
+                    }
+                    let attempts = if active && baseline.is_some() && facade != 0 {
+                        2
+                    } else {
+                        0
+                    };
+                    assert_eq!(out.calls.lock().unwrap().len(), attempts);
+                    assert_eq!(
+                        stats.restore_catchup_requests_sent,
+                        if facade == 1 { attempts as u64 } else { 0 }
+                    );
+                    let before = a17_protected_observation(&engine, &mode, &out);
+                    handle_restore_catchup_request(
+                        &engine,
+                        RestoreCatchupRequest {
+                            requester_validator_index: 1,
+                            from_height: 5,
+                            from_block_id: [0xE5; 32],
+                        },
+                        &mut stats,
+                        Some(&out),
+                        ValidatorId::new(0),
+                    );
+                    assert_eq!(
+                        a17_check_protected(
+                            &before,
+                            &a17_protected_observation(&engine, &mode, &out),
+                        ),
+                        Ok(()),
+                        "honest empty export sends no response"
+                    );
+                    assert_eq!(stats.restore_catchup_responses_sent, 0);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn empty_containment_d2_proposal_deferral_requires_independent_current_authority() {
+        use qbind_crypto::ml_dsa44::MlDsa44Backend;
+        use qbind_wire::consensus::BlockHeader;
+        use qbind_wire::io::WireEncode;
+        let fixture = run030::make_fixture(4);
+        let timeout = run030::make_ctx(&fixture, None);
+        let pv = ProposalVoteAuthority {
+            validators: Arc::clone(&timeout.validators),
+            key_provider: Arc::clone(&timeout.key_provider),
+            backend_registry: Arc::clone(&timeout.backend_registry),
+            chain_id: timeout.chain_id,
+            signer: None,
+            signing_domain: ProposalVoteSigningDomainV2::try_new(
+                timeout.chain_id,
+                0,
+                [0x31; 32],
+                [0x42; 32],
+            )
+            .unwrap(),
+        };
+        let snapshot = a17_admitted_snapshot(&pv);
+        for active in [false, true] {
+            // Near/correct, near/wrong-parent, far. No embedded QC is fabricated.
+            for (height, parent, should_defer) in [
+                (6, [0xE6; 32], false),
+                (6, [0xFF; 32], true),
+                (8, [0xE6; 32], true),
+            ] {
+                for authority in 0..3 {
+                    let mut engine = a17_engine(Some((5, [0xE6; 32])));
+                    let mut mode = a17_mode(Some((5, [0xE6; 32])));
+                    mode.active = active;
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let out = A17RecordingFacade::default();
+                    assert_eq!(
+                        empty_containment_dispatch(
+                            &mut engine,
+                            &mut mode,
+                            &mut stats,
+                            a17_response(1, 5, [0xE6; 32], Some(5), vec![]),
+                            Some(&a17_origin(1)),
+                            Some(&a17_binding_gate(4)),
+                            &out,
+                        ),
+                        Ok(())
+                    );
+                    let proposer = engine.leader_for_view(height);
+                    let mut proposal = BlockProposal {
+                        header: BlockHeader {
+                            version: 1,
+                            chain_id: pv.signing_domain.expected_wire_chain_id(),
+                            epoch: 0,
+                            height,
+                            round: height,
+                            parent_block_id: parent,
+                            payload_hash: [0; 32],
+                            proposer_index: proposer.0 as u16,
+                            suite_id: 100,
+                            tx_count: 0,
+                            timestamp: 0,
+                            payload_kind: 0,
+                            next_epoch: 0,
+                            batch_commitment: [0; 32],
+                        },
+                        qc: None,
+                        txs: vec![],
+                        signature: vec![],
+                    };
+                    proposal.signature = MlDsa44Backend::sign(
+                        fixture.sks.get(&proposer).unwrap(),
+                        &pv.proposal_preimage(&proposal),
+                    )
+                    .unwrap();
+                    let mut bytes = vec![];
+                    proposal.encode(&mut bytes);
+                    let before = a17_protected_observation(&engine, &mode, &out);
+                    handle_inbound_consensus_msg(
+                        &mut engine,
+                        ConsensusNetMsg::Proposal(bytes),
+                        &mut stats,
+                        Some(&out),
+                        &Arc::new(NodeMetrics::new()),
+                        ValidatorId::new(0),
+                        &mut mode,
+                        Some(&timeout),
+                        if authority == 0 { None } else { Some(&pv) },
+                        if authority == 2 {
+                            Some(&snapshot)
+                        } else {
+                            None
+                        },
+                        &mut BinaryReconfigDetector::default(),
+                        Some(&a17_origin(proposer.0)),
+                        Some(&a17_binding_gate(4)),
+                        None,
+                        ConsensusVerificationPolicy::Required,
+                    );
+                    let deferred = authority == 2 && active && should_defer;
+                    assert_eq!(
+                        stats.restore_catchup_proposals_deferred,
+                        u64::from(deferred)
+                    );
+                    assert_eq!(
+                        stats.inbound_proposal_verify_accepted,
+                        u64::from(authority == 2)
+                    );
+                    assert_eq!(
+                        stats.inbound_proposals_delivered,
+                        u64::from(authority == 2 && !deferred)
+                    );
+                    if authority == 0 {
+                        assert_eq!(
+                            stats.inbound_proposal_verification_context_unavailable_total,
+                            1
+                        );
+                    } else if authority == 1 {
+                        assert_eq!(stats.inbound_proposal_current_state_unavailable_total, 1);
+                    }
+                    if authority != 2 || deferred {
+                        assert_eq!(
+                            a17_check_protected(
+                                &before,
+                                &a17_protected_observation(&engine, &mode, &out),
+                            ),
+                            Ok(())
+                        );
+                    } else if !should_defer {
+                        assert_eq!(stats.inbound_proposals_engine_accepted, 1);
+                        assert_eq!(
+                            a17_check_protected(
+                                &before,
+                                &a17_protected_observation(&engine, &mode, &out),
+                            ),
+                            Err(vec!["engine"]),
+                            "admitted near proposal reaches the engine even in active mode"
+                        );
+                        assert_eq!(stats.outbound_vote_signing_failure, 1);
+                    }
+                    assert!(
+                        out.calls.lock().unwrap().is_empty(),
+                        "no PV signer/journal is wired"
+                    );
+                    assert_eq!(stats.outbound_proposal_signing_success, 0);
+                    assert_eq!(stats.outbound_vote_signing_success, 0);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn empty_containment_d3_timeout_active_suppression_and_inactive_prerequisites() {
+        let fixture = run030::make_fixture(4);
+        let valid = run030::make_ctx(&fixture, Some(ValidatorId::new(0)));
+        let missing_signer = run030::make_ctx(&fixture, None);
+        let wrong_identity = run030::make_ctx(&fixture, Some(ValidatorId::new(1)));
+        for (active, threshold, facade, tick, ctx, emitted, failure) in [
+            (true, Some(5), true, 5, Some(&valid), 0, 0),
+            (false, None, true, 5, Some(&valid), 0, 0),
+            (false, Some(5), false, 5, Some(&valid), 0, 0),
+            (false, Some(5), true, 4, Some(&valid), 0, 0),
+            (false, Some(5), true, 5, None, 0, 1),
+            (false, Some(5), true, 5, Some(&missing_signer), 0, 1),
+            (false, Some(5), true, 5, Some(&wrong_identity), 0, 1),
+            (false, Some(5), true, 5, Some(&valid), 1, 0),
+        ] {
+            let mut engine = a17_engine(Some((5, [0xE7; 32])));
+            let mut mode = a17_mode(Some((5, [0xE7; 32])));
+            mode.active = active;
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let out = A17RecordingFacade::default();
+            assert_eq!(
+                empty_containment_dispatch(
+                    &mut engine,
+                    &mut mode,
+                    &mut stats,
+                    a17_response(1, 999, [0xFF; 32], Some(5), vec![]),
+                    Some(&a17_origin(1)),
+                    Some(&a17_binding_gate(4)),
+                    &out,
+                ),
+                Ok(())
+            );
+            let before = a17_protected_observation(&engine, &mode, &out);
+            let mut state =
+                ViewTimeoutState::new(engine.current_view(), engine.commit_log().len() as u64);
+            let mut backoff = ViewTimeoutBackoffState::no_growth(threshold);
+            maybe_emit_view_timeout(
+                &mut engine,
+                &mut state,
+                tick,
+                &mut backoff,
+                mode.is_active(),
+                if facade { Some(&out) } else { None },
+                &mut stats,
+                ctx,
+            );
+            assert_eq!(stats.view_timeouts_emitted, emitted);
+            assert_eq!(stats.outbound_timeout_signing_success, emitted);
+            assert_eq!(stats.outbound_timeout_signing_failure, failure);
+            if emitted == 0 {
+                assert_eq!(
+                    a17_check_protected(&before, &a17_protected_observation(&engine, &mode, &out)),
+                    Ok(())
+                );
+            } else {
+                assert!(engine.timeout_emitted_in_view());
+                assert_eq!(out.calls.lock().unwrap().len(), 1);
+                assert_eq!(
+                    stats.retained_qc_admission_rejected_total, 0,
+                    "NoQc is distinct from authenticated retained proof"
+                );
+                maybe_emit_view_timeout(
+                    &mut engine,
+                    &mut state,
+                    tick + 1,
+                    &mut backoff,
+                    mode.is_active(),
+                    Some(&out),
+                    &mut stats,
+                    ctx,
+                );
+                assert_eq!(out.calls.lock().unwrap().len(), 1, "one timeout per view");
+            }
+        }
+        // Actual present logical lock, but no admitted/retained QC authority:
+        // inactive mode must not make it eligible to sign.
+        let mut engine = a17_engine(Some((5, [0xE7; 32])));
+        for id in 0..3 {
+            engine
+                .state_mut()
+                .on_vote(ValidatorId::new(id), 5, &[0xE7; 32])
+                .unwrap();
+        }
+        assert!(engine.locked_qc().is_some());
+        let mode = a17_mode(None);
+        let out = A17RecordingFacade::default();
+        let before = a17_protected_observation(&engine, &mode, &out);
+        let mut stats = BinaryConsensusLoopInboundStats::default();
+        let mut state =
+            ViewTimeoutState::new(engine.current_view(), engine.commit_log().len() as u64);
+        maybe_emit_view_timeout(
+            &mut engine,
+            &mut state,
+            5,
+            &mut ViewTimeoutBackoffState::no_growth(Some(5)),
+            false,
+            Some(&out),
+            &mut stats,
+            Some(&valid),
+        );
+        assert_eq!(stats.retained_qc_admission_rejected_total, 1);
+        assert_eq!(stats.outbound_timeout_signing_success, 0);
+        assert_eq!(
+            a17_check_protected(&before, &a17_protected_observation(&engine, &mode, &out)),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn empty_containment_d4_single_validator_leader_progress_is_not_bound_peer_evidence() {
+        for active in [false, true] {
+            let mut engine = b14_make_engine(1, 0);
+            engine.initialize_from_snapshot_baseline([0xE8; 32], 5);
+            let mut mode = a17_mode(Some((5, [0xE8; 32])));
+            mode.active = active;
+            let out = A17RecordingFacade::default();
+            let before = a17_protected_observation(&engine, &mode, &out);
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let mut proposals = 0;
+            let mut cached_p = None;
+            let mut cached_v = None;
+            for _ in 0..6 {
+                do_leader_tick(
+                    &mut engine,
+                    &mut proposals,
+                    &Arc::new(NodeMetrics::new()),
+                    &mut stats,
+                    Some(&out),
+                    &mut cached_p,
+                    &mut cached_v,
+                    &mut BinaryReconfigDetector::default(),
+                    None,
+                    None,
+                    None,
+                    ConsensusVerificationPolicy::Required,
+                );
+            }
+            assert!(engine.committed_height().unwrap() > 5);
+            assert!(proposals > 0);
+            assert_eq!(
+                a17_check_protected(&before, &a17_protected_observation(&engine, &mode, &out)),
+                Err(vec!["engine"])
+            );
+            assert!(
+                out.calls.lock().unwrap().is_empty(),
+                "Required policy lacks current PV authority"
+            );
+            assert_eq!(stats.outbound_proposal_signing_success, 0);
+            assert_eq!(stats.outbound_vote_signing_success, 0);
+            assert!(stats.outbound_proposal_current_state_unavailable_total > 0);
+        }
+        // H1's admissible non-self inputs use a four-validator engine/map.
+        // No non-self responder is inserted into this one-validator fixture.
+    }
+
+    #[test]
+    fn empty_containment_downstream_inbound_timeout_newview_are_not_mode_fenced() {
+        let fixture = run030::make_fixture(4);
+        let ctx = run030::make_ctx(&fixture, None);
+        for active in [false, true] {
+            for newview in [false, true] {
+                let mut engine = a17_engine(Some((5, [0xE9; 32])));
+                let mut mode = a17_mode(Some((5, [0xE9; 32])));
+                mode.active = active;
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+                let out = A17RecordingFacade::default();
+                let gate = a17_binding_gate(4);
+                assert_eq!(
+                    empty_containment_dispatch(
+                        &mut engine,
+                        &mut mode,
+                        &mut stats,
+                        a17_response(1, 0, [0; 32], Some(u64::MAX), vec![]),
+                        Some(&a17_origin(1)),
+                        Some(&gate),
+                        &out,
+                    ),
+                    Ok(())
+                );
+                let view = engine.current_view();
+                let before = a17_protected_observation(&engine, &mode, &out);
+                for id in 1..=if newview { 1 } else { 3 } {
+                    let msg = if newview {
+                        ConsensusNetMsg::NewView(
+                            bincode::serialize(&run030::build_valid_tc(&fixture, view)).unwrap(),
+                        )
+                    } else {
+                        ConsensusNetMsg::Timeout(
+                            bincode::serialize(&run030::signed_timeout(
+                                view,
+                                ValidatorId::new(id),
+                                &fixture.sks,
+                            ))
+                            .unwrap(),
+                        )
+                    };
+                    handle_inbound_consensus_msg(
+                        &mut engine,
+                        msg,
+                        &mut stats,
+                        Some(&out),
+                        &Arc::new(NodeMetrics::new()),
+                        ValidatorId::new(0),
+                        &mut mode,
+                        Some(&ctx),
+                        None,
+                        None,
+                        &mut BinaryReconfigDetector::default(),
+                        Some(&a17_origin(id)),
+                        Some(&gate),
+                        None,
+                        ConsensusVerificationPolicy::Required,
+                    );
+                }
+                assert_eq!(engine.current_view(), view + 1);
+                assert_eq!(mode.is_active(), active);
+                let effects =
+                    a17_check_protected(&before, &a17_protected_observation(&engine, &mode, &out))
+                        .unwrap_err();
+                assert!(
+                    effects.contains(&"engine"),
+                    "mode does not fence independently verified Timeout/NewView"
+                );
+                assert!(!effects.contains(&"restore_mode"));
+                assert_eq!(
+                    stats.outbound_timeout_signing_success, 0,
+                    "inbound evidence uses peer test keys, no local signer"
+                );
+            }
+        }
     }
 
     fn a17_coherent_authorities() -> (TimeoutVerificationContext, ProposalVoteAuthority) {
@@ -10838,14 +11759,13 @@ mod tests {
     }
 
     #[test]
-    fn a17_empty_responses_keep_existing_progress_exit_and_self_behavior() {
+    fn a17_empty_responses_cannot_track_progress_exit_or_bypass_as_self() {
         let anchor = [0x67; 32];
         let gate = a17_binding_gate(4);
         let origin = a17_origin(1);
 
-        // Empty non-self response at the local committed height can still
-        // update peer progress and exit restore mode, as before. This is
-        // observed behavior, not an accepted recovery/participation path.
+        // Direct engine import establishes only a fixture-progress state.
+        // An admitted empty response must no longer clear or track it.
         let mut progressed = a17_engine(Some((5, anchor)));
         let suffix = a17_suffix(&progressed, 5, anchor, 3);
         let direct_blocks: Vec<_> = suffix
@@ -10881,13 +11801,13 @@ mod tests {
             None,
             ConsensusVerificationPolicy::Required,
         );
-        assert!(!exited_mode.is_active());
-        assert_eq!(exited_mode.peer_max_observed_committed_height, Some(height));
-        assert_eq!(exited_stats.restore_catchup_mode_exited_at_height, height);
+        assert!(exited_mode.is_active());
+        assert_eq!(exited_mode.peer_max_observed_committed_height, None);
+        assert_eq!(exited_stats.restore_catchup_mode_exited_at_height, 0);
+        assert_eq!(exited_stats.restore_catchup_empty_responses_ignored_total, 1);
         assert_eq!(exited_stats.restore_catchup_responses_rejected, 0);
 
-        // At the baseline, a non-self empty response records peer progress
-        // but does not exit without strict local progress.
+        // At the baseline, no peer progress is recorded either.
         let mut baseline_engine = a17_engine(Some((5, anchor)));
         let mut active_mode = a17_mode(Some((5, anchor)));
         let mut active_stats = BinaryConsensusLoopInboundStats::default();
@@ -10903,11 +11823,11 @@ mod tests {
             ConsensusVerificationPolicy::Required,
         );
         assert!(active_mode.is_active());
-        assert_eq!(active_mode.peer_max_observed_committed_height, Some(6));
+        assert_eq!(active_mode.peer_max_observed_committed_height, None);
+        assert_eq!(active_stats.restore_catchup_empty_responses_ignored_total, 1);
         assert_eq!(active_stats.restore_catchup_responses_rejected, 0);
 
-        // Empty self-labelled response retains the helper's existing early
-        // return: it is counted as received, but has no peer-progress effect.
+        // The admitted local-origin fixture is counted and ignored too.
         let mut self_engine = a17_engine(Some((5, anchor)));
         let mut self_mode = a17_mode(Some((5, anchor)));
         let mut self_stats = BinaryConsensusLoopInboundStats::default();
@@ -10926,6 +11846,7 @@ mod tests {
         assert!(self_mode.is_active());
         assert_eq!(self_mode.peer_max_observed_committed_height, None);
         assert_eq!(self_stats.restore_catchup_responses_received, 1);
+        assert_eq!(self_stats.restore_catchup_empty_responses_ignored_total, 1);
         assert_eq!(self_stats.restore_catchup_responses_rejected, 0);
     }
 

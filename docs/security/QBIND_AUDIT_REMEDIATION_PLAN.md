@@ -4784,3 +4784,48 @@ configuration, node, network experiment, activation, PR or merge is changed
 or authorized. New changed paths, documentation checks and historical
 artifact hashes are isolated in the addendum's own append-only integrity
 package; all accepted investigation and audit-register bytes remain intact.
+
+## 31. Empty RestoreCatchupResponse containment implementation
+
+**IMPLEMENTED — INDEPENDENT REVIEW PENDING.**
+A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain **OPEN**.
+Activation remains **DISABLED**; public DevNet remains **NO-GO**.
+
+The user supplied PASS WITH LIMITATIONS for the candidate at
+`30a79a21996c11f97f1c496082551dba4cbd3a45`; no reviewer identity or
+unavailable raw review artifact is asserted. Before source changes, the
+[append-only qualifications](evidence/empty-restore-response/implementation-20261107/QUALIFICATIONS.md)
+recorded saturating `u64` counter semantics and the distinction between an
+installed authenticated binding gate and the no-gate compatibility/test
+path. The prior contract, investigation, acceptances and evidence bytes are
+preserved; this entry does not rewrite their historical FUTURE status.
+
+Actual response ingress preserves generic observation, sender binding,
+receipt accounting and the unconditional A17 non-empty refusal. Empty
+responses now attempt one saturating update of the distinct
+`restore_catchup_empty_responses_ignored_total` and return before the
+response helper. At `u64::MAX` the counter remains saturated and is a lower
+bound on lifetime events, not authority or recovery evidence. Installed-gate
+failures remain binding-only; absent-gate compatibility admission still
+ignores empties and does not prove authenticated binding. There is no self,
+mode, anchor, authority or compatibility exemption, and no new per-frame
+empty log. The existing direct helper/engine operation remains unchanged.
+
+The [implementation record](evidence/empty-restore-response/implementation-20261107/README.md)
+maps H1-H10 and D1-D4 controls to focused tests and retained complete
+commands/results. The same A17 protected-state/recording-facade oracle
+detects test-only omitted and after-helper guard defects; those controls
+are compiled out of production. Source-only production-policy checks and
+default library/binary compilation preserve the suppressed posture.
+Unsuccessful tooling/build and incomplete test-discovery attempts are
+recorded, not represented as complete coverage.
+
+Active mode may persist indefinitely, retaining eligible request attempts,
+selected proposal deferral and local-timeout suppression. It is not a
+complete engine/signer fence: separate local leader progression and eligible
+inbound Timeout/NewView paths remain. Fixture states and test signing keys
+are not evidence of a deployed progressed multi-validator history, transport
+authentication, authenticated recovery or safe participation. Positive
+recovery/currentness, signer exclusivity, durable quarantine and separately
+authorized clear/resume remain distinct, open obligations. No operational
+keys, live network, node activation, PR, merge or main push is authorized.

@@ -1,0 +1,1177 @@
+COMMAND: git diff --numstat && git diff --check && ls -l docs/security/evidence/empty-restore-response/implementation-20261107 && df -h .
+586	27	crates/qbind-node/src/binary_consensus_loop.rs
+8	0	crates/qbind-node/src/metrics.rs
+crates/qbind-node/src/binary_consensus_loop.rs:1785: trailing whitespace.
++    /// Admitted empty responses ignored before peer-height/mode evaluation.
+crates/qbind-node/src/binary_consensus_loop.rs:1786: trailing whitespace.
++    /// Saturates at u64::MAX; observability only, never recovery authority.
+crates/qbind-node/src/binary_consensus_loop.rs:1787: trailing whitespace.
++    pub restore_catchup_empty_responses_ignored_total: u64,
+crates/qbind-node/src/binary_consensus_loop.rs:7423: trailing whitespace.
++            #[cfg(test)]
+crates/qbind-node/src/binary_consensus_loop.rs:7424: trailing whitespace.
++            if tests::empty_response_sensitivity_before_guard(
+crates/qbind-node/src/binary_consensus_loop.rs:7425: trailing whitespace.
++                engine,
+crates/qbind-node/src/binary_consensus_loop.rs:7426: trailing whitespace.
++                resp.clone(),
+crates/qbind-node/src/binary_consensus_loop.rs:7427: trailing whitespace.
++                stats,
+crates/qbind-node/src/binary_consensus_loop.rs:7428: trailing whitespace.
++                local_validator_id,
+crates/qbind-node/src/binary_consensus_loop.rs:7429: trailing whitespace.
++                restore_mode,
+crates/qbind-node/src/binary_consensus_loop.rs:7430: trailing whitespace.
++            ) {
+crates/qbind-node/src/binary_consensus_loop.rs:7431: trailing whitespace.
++                return;
+crates/qbind-node/src/binary_consensus_loop.rs:7432: trailing whitespace.
++            }
+crates/qbind-node/src/binary_consensus_loop.rs:7433: trailing whitespace.
++            stats.restore_catchup_empty_responses_ignored_total = stats
+crates/qbind-node/src/binary_consensus_loop.rs:7434: trailing whitespace.
++                .restore_catchup_empty_responses_ignored_total
+crates/qbind-node/src/binary_consensus_loop.rs:7435: trailing whitespace.
++                .saturating_add(1);
+crates/qbind-node/src/binary_consensus_loop.rs:7436: trailing whitespace.
++            return;
+crates/qbind-node/src/binary_consensus_loop.rs:8463: trailing whitespace.
++// All responses are refused or ignored by the inbound dispatch.
+crates/qbind-node/src/binary_consensus_loop.rs:8466: trailing whitespace.
++#[cfg_attr(not(test), allow(dead_code))]
+crates/qbind-node/src/binary_consensus_loop.rs:9292: trailing whitespace.
++        stats.restore_catchup_empty_responses_ignored_total,
+crates/qbind-node/src/binary_consensus_loop.rs:10077: trailing whitespace.
++        fail_consensus: bool,
+crates/qbind-node/src/binary_consensus_loop.rs:10132: trailing whitespace.
++            if self.fail_consensus {
+crates/qbind-node/src/binary_consensus_loop.rs:10133: trailing whitespace.
++                Err(qbind_consensus::network::NetworkError::Other(
+crates/qbind-node/src/binary_consensus_loop.rs:10134: trailing whitespace.
++                    "test recording facade failure".into(),
+crates/qbind-node/src/binary_consensus_loop.rs:10135: trailing whitespace.
++                ))
+crates/qbind-node/src/binary_consensus_loop.rs:10136: trailing whitespace.
++            } else {
+crates/qbind-node/src/binary_consensus_loop.rs:10137: trailing whitespace.
++                Ok(())
+crates/qbind-node/src/binary_consensus_loop.rs:10138: trailing whitespace.
++            }
+crates/qbind-node/src/binary_consensus_loop.rs:10203: trailing whitespace.
++            stats.restore_catchup_empty_responses_ignored_total,
+crates/qbind-node/src/binary_consensus_loop.rs:10225: trailing whitespace.
++        assert_eq!(result, Ok(()), "protected dispatch observations changed");
+crates/qbind-node/src/binary_consensus_loop.rs:10241: trailing whitespace.
++        assert_eq!(
+crates/qbind-node/src/binary_consensus_loop.rs:10242: trailing whitespace.
++            stats.restore_catchup_empty_responses_ignored_total,
+crates/qbind-node/src/binary_consensus_loop.rs:10243: trailing whitespace.
++            counters_before.4 + u64::from(!binding_rejected && !nonempty),
+crates/qbind-node/src/binary_consensus_loop.rs:10244: trailing whitespace.
++        );
+crates/qbind-node/src/binary_consensus_loop.rs:10289: trailing whitespace.
++    #[derive(Clone, Copy, PartialEq, Eq)]
+crates/qbind-node/src/binary_consensus_loop.rs:10290: trailing whitespace.
++    enum EmptyGuardControl {
+crates/qbind-node/src/binary_consensus_loop.rs:10291: trailing whitespace.
++        Correct,
+crates/qbind-node/src/binary_consensus_loop.rs:10292: trailing whitespace.
++        Omitted,
+crates/qbind-node/src/binary_consensus_loop.rs:10293: trailing whitespace.
++        AfterHelper,
+crates/qbind-node/src/binary_consensus_loop.rs:10294: trailing whitespace.
++    }
+crates/qbind-node/src/binary_consensus_loop.rs:10295: trailing whitespace.
++
+crates/qbind-node/src/binary_consensus_loop.rs:10296: trailing whitespace.
++    thread_local! {
+crates/qbind-node/src/binary_consensus_loop.rs:10297: trailing whitespace.
++        static EMPTY_GUARD_CONTROL: std::cell::Cell<EmptyGuardControl> =
+crates/qbind-node/src/binary_consensus_loop.rs:10298: trailing whitespace.
++            const { std::cell::Cell::new(EmptyGuardControl::Correct) };
+crates/qbind-node/src/binary_consensus_loop.rs:10299: trailing whitespace.
++    }
+crates/qbind-node/src/binary_consensus_loop.rs:10300: trailing whitespace.
++
+crates/qbind-node/src/binary_consensus_loop.rs:10301: trailing whitespace.
++    struct EmptyGuardControlReset(EmptyGuardControl);
+crates/qbind-node/src/binary_consensus_loop.rs:10302: trailing whitespace.
++
+crates/qbind-node/src/binary_consensus_loop.rs:10303: trailing whitespace.
++    impl Drop for EmptyGuardControlReset {
+crates/qbind-node/src/binary_consensus_loop.rs:10304: trailing whitespace.
++        fn drop(&mut self) {
+crates/qbind-node/src/binary_consensus_loop.rs:10305: trailing whitespace.
++            EMPTY_GUARD_CONTROL.set(self.0);
+crates/qbind-node/src/binary_consensus_loop.rs:10306: trailing whitespace.
++        }
+crates/qbind-node/src/binary_consensus_loop.rs:10307: trailing whitespace.
++    }
+crates/qbind-node/src/binary_consensus_loop.rs:10308: trailing whitespace.
++
+crates/qbind-node/src/binary_consensus_loop.rs:10309: trailing whitespace.
++    // Test-only defects traverse the same bound/receipt/non-empty handler arm.
+crates/qbind-node/src/binary_consensus_loop.rs:10310: trailing whitespace.
++    // Production builds contain neither this hook nor the thread-local control.
+crates/qbind-node/src/binary_consensus_loop.rs:10311: trailing whitespace.
++    pub(super) fn empty_response_sensitivity_before_guard(
+crates/qbind-node/src/binary_consensus_loop.rs:10312: trailing whitespace.
++        engine: &mut BasicHotStuffEngine<[u8; 32]>,
+crates/qbind-node/src/binary_consensus_loop.rs:10313: trailing whitespace.
++        resp: RestoreCatchupResponse,
+crates/qbind-node/src/binary_consensus_loop.rs:10314: trailing whitespace.
++        stats: &mut BinaryConsensusLoopInboundStats,
+crates/qbind-node/src/binary_consensus_loop.rs:10315: trailing whitespace.
++        local: ValidatorId,
+crates/qbind-node/src/binary_consensus_loop.rs:10316: trailing whitespace.
++        mode: &mut RestoreCatchupModeState,
+crates/qbind-node/src/binary_consensus_loop.rs:10317: trailing whitespace.
++    ) -> bool {
+crates/qbind-node/src/binary_consensus_loop.rs:10318: trailing whitespace.
++        let control = EMPTY_GUARD_CONTROL.get();
+crates/qbind-node/src/binary_consensus_loop.rs:10319: trailing whitespace.
++        if control != EmptyGuardControl::Correct {
+crates/qbind-node/src/binary_consensus_loop.rs:10320: trailing whitespace.
++            handle_restore_catchup_response(engine, resp, stats, local, mode);
+crates/qbind-node/src/binary_consensus_loop.rs:10321: trailing whitespace.
++        }
+crates/qbind-node/src/binary_consensus_loop.rs:10322: trailing whitespace.
++        control == EmptyGuardControl::Omitted
+crates/qbind-node/src/binary_consensus_loop.rs:10323: trailing whitespace.
++    }
+crates/qbind-node/src/binary_consensus_loop.rs:10324: trailing whitespace.
++
+crates/qbind-node/src/binary_consensus_loop.rs:10325: trailing whitespace.
++    #[allow(clippy::too_many_arguments)]
+crates/qbind-node/src/binary_consensus_loop.rs:10326: trailing whitespace.
++    fn empty_containment_dispatch(
+crates/qbind-node/src/binary_consensus_loop.rs:10327: trailing whitespace.
++        engine: &mut BasicHotStuffEngine<[u8; 32]>,
+crates/qbind-node/src/binary_consensus_loop.rs:10328: trailing whitespace.
++        mode: &mut RestoreCatchupModeState,
+crates/qbind-node/src/binary_consensus_loop.rs:10329: trailing whitespace.
++        stats: &mut BinaryConsensusLoopInboundStats,
+crates/qbind-node/src/binary_consensus_loop.rs:10330: trailing whitespace.
++        resp: RestoreCatchupResponse,
+crates/qbind-node/src/binary_consensus_loop.rs:10331: trailing whitespace.
++        origin: Option<&AuthenticatedConsensusOrigin>,
+crates/qbind-node/src/binary_consensus_loop.rs:10332: trailing whitespace.
++        gate: Option<&PeerConsensusBindingGate>,
+crates/qbind-node/src/binary_consensus_loop.rs:10333: trailing whitespace.
++        outbound: &A17RecordingFacade,
+crates/qbind-node/src/binary_consensus_loop.rs:10334: trailing whitespace.
++    ) -> Result<(), Vec<&'static str>> {
+crates/qbind-node/src/binary_consensus_loop.rs:10335: trailing whitespace.
++        let before = a17_protected_observation(engine, mode, outbound);
+crates/qbind-node/src/binary_consensus_loop.rs:10336: trailing whitespace.
++        let before_stats = *stats;
+crates/qbind-node/src/binary_consensus_loop.rs:10337: trailing whitespace.
++        let nonempty = !resp.blocks.is_empty();
+crates/qbind-node/src/binary_consensus_loop.rs:10338: trailing whitespace.
++        let binding_before = gate.map(|g| g.metrics().accepted());
+crates/qbind-node/src/binary_consensus_loop.rs:10339: trailing whitespace.
++        let metrics = Arc::new(NodeMetrics::new());
+crates/qbind-node/src/binary_consensus_loop.rs:10340: trailing whitespace.
++        handle_inbound_consensus_msg(
+crates/qbind-node/src/binary_consensus_loop.rs:10341: trailing whitespace.
++            engine,
+crates/qbind-node/src/binary_consensus_loop.rs:10342: trailing whitespace.
++            ConsensusNetMsg::RestoreCatchupResponse(resp),
+crates/qbind-node/src/binary_consensus_loop.rs:10343: trailing whitespace.
++            stats,
+crates/qbind-node/src/binary_consensus_loop.rs:10344: trailing whitespace.
++            Some(outbound),
+crates/qbind-node/src/binary_consensus_loop.rs:10345: trailing whitespace.
++            &metrics,
+crates/qbind-node/src/binary_consensus_loop.rs:10346: trailing whitespace.
++            ValidatorId::new(0),
+crates/qbind-node/src/binary_consensus_loop.rs:10347: trailing whitespace.
++            mode,
+crates/qbind-node/src/binary_consensus_loop.rs:10348: trailing whitespace.
++            None,
+crates/qbind-node/src/binary_consensus_loop.rs:10349: trailing whitespace.
++            None,
+crates/qbind-node/src/binary_consensus_loop.rs:10350: trailing whitespace.
++            None,
+crates/qbind-node/src/binary_consensus_loop.rs:10351: trailing whitespace.
++            &mut BinaryReconfigDetector::default(),
+crates/qbind-node/src/binary_consensus_loop.rs:10352: trailing whitespace.
++            origin,
+crates/qbind-node/src/binary_consensus_loop.rs:10353: trailing whitespace.
++            gate,
+crates/qbind-node/src/binary_consensus_loop.rs:10354: trailing whitespace.
++            None,
+crates/qbind-node/src/binary_consensus_loop.rs:10355: trailing whitespace.
++            ConsensusVerificationPolicy::Required,
+crates/qbind-node/src/binary_consensus_loop.rs:10356: trailing whitespace.
++        );
+crates/qbind-node/src/binary_consensus_loop.rs:10357: trailing whitespace.
++        let rejected = stats.inbound_sender_binding_rejected_total
+crates/qbind-node/src/binary_consensus_loop.rs:10358: trailing whitespace.
++            != before_stats.inbound_sender_binding_rejected_total;
+crates/qbind-node/src/binary_consensus_loop.rs:10359: trailing whitespace.
++        assert_eq!(stats.inbound_msgs_received, before_stats.inbound_msgs_received.saturating_add(1));
+crates/qbind-node/src/binary_consensus_loop.rs:10360: trailing whitespace.
++        assert_eq!(stats.restore_catchup_responses_received,
+crates/qbind-node/src/binary_consensus_loop.rs:10361: trailing whitespace.
++            before_stats.restore_catchup_responses_received.saturating_add(u64::from(!rejected)));
+crates/qbind-node/src/binary_consensus_loop.rs:10362: trailing whitespace.
++        assert_eq!(stats.restore_catchup_responses_rejected,
+crates/qbind-node/src/binary_consensus_loop.rs:10363: trailing whitespace.
++            before_stats.restore_catchup_responses_rejected.saturating_add(u64::from(!rejected && nonempty)));
+crates/qbind-node/src/binary_consensus_loop.rs:10364: trailing whitespace.
++        if EMPTY_GUARD_CONTROL.get() != EmptyGuardControl::Omitted {
+crates/qbind-node/src/binary_consensus_loop.rs:10365: trailing whitespace.
++            assert_eq!(stats.restore_catchup_empty_responses_ignored_total,
+crates/qbind-node/src/binary_consensus_loop.rs:10366: trailing whitespace.
++                before_stats.restore_catchup_empty_responses_ignored_total
+crates/qbind-node/src/binary_consensus_loop.rs:10367: trailing whitespace.
++                    .saturating_add(u64::from(!rejected && !nonempty)));
+crates/qbind-node/src/binary_consensus_loop.rs:10368: trailing whitespace.
++        }
+crates/qbind-node/src/binary_consensus_loop.rs:10369: trailing whitespace.
++        if let (Some(g), Some(accepted_before)) = (gate, binding_before) {
+crates/qbind-node/src/binary_consensus_loop.rs:10370: trailing whitespace.
++            assert_eq!(g.metrics().accepted(), accepted_before + u64::from(!rejected));
+crates/qbind-node/src/binary_consensus_loop.rs:10371: trailing whitespace.
++        }
+crates/qbind-node/src/binary_consensus_loop.rs:10372: trailing whitespace.
++        assert!(metrics.format_metrics()
+crates/qbind-node/src/binary_consensus_loop.rs:10373: trailing whitespace.
++            .contains("consensus_net_inbound_total{kind=\"other\"} 1"));
+crates/qbind-node/src/binary_consensus_loop.rs:10374: trailing whitespace.
++        update_restore_catchup_metrics(&metrics, stats);
+crates/qbind-node/src/binary_consensus_loop.rs:10375: trailing whitespace.
++        assert!(metrics.format_metrics().contains(&format!(
+crates/qbind-node/src/binary_consensus_loop.rs:10376: trailing whitespace.
++            "qbind_restore_catchup_empty_responses_ignored_total {}\n",
+crates/qbind-node/src/binary_consensus_loop.rs:10377: trailing whitespace.
++            stats.restore_catchup_empty_responses_ignored_total)));
+crates/qbind-node/src/binary_consensus_loop.rs:10378: trailing whitespace.
++        a17_check_protected(&before, &a17_protected_observation(engine, mode, outbound))
+crates/qbind-node/src/binary_consensus_loop.rs:10379: trailing whitespace.
++    }
+crates/qbind-node/src/binary_consensus_loop.rs:10380: trailing whitespace.
++
+crates/qbind-node/src/binary_consensus_loop.rs:10381: trailing whitespace.
++    #[test]
+crates/qbind-node/src/binary_consensus_loop.rs:10382: trailing whitespace.
++    fn empty_containment_h1_h2_h4_h5_h6_h7_handler_matrix() {
+crates/qbind-node/src/binary_consensus_loop.rs:10383: trailing whitespace.
++        let anchor = [0xE1; 32];
+crates/qbind-node/src/binary_consensus_loop.rs:10384: trailing whitespace.
++        let gate = a17_binding_gate(4);
+crates/qbind-node/src/binary_consensus_loop.rs:10385: trailing whitespace.
++        let mut cases = 0;
+crates/qbind-node/src/binary_consensus_loop.rs:10386: trailing whitespace.
++        // Absent/below local height with an active baseline are deliberately
+crates/qbind-node/src/binary_consensus_loop.rs:10387: trailing whitespace.
++        // fixture-only states, not production restore initialization evidence.
+crates/qbind-node/src/binary_consensus_loop.rs:10388: trailing whitespace.
++        for local in [None, Some(4), Some(5), Some(8)] {
+crates/qbind-node/src/binary_consensus_loop.rs:10389: trailing whitespace.
++            for active in [false, true] {
+crates/qbind-node/src/binary_consensus_loop.rs:10390: trailing whitespace.
++                for target in [None, Some(4), Some(8), Some(100), Some(u64::MAX)] {
+crates/qbind-node/src/binary_consensus_loop.rs:10391: trailing whitespace.
++                    for height in [None, Some(4), Some(5), Some(8), Some(9), Some(u64::MAX)] {
+crates/qbind-node/src/binary_consensus_loop.rs:10392: trailing whitespace.
++                        for responder in [0, 1] {
+crates/qbind-node/src/binary_consensus_loop.rs:10393: trailing whitespace.
++                            let mut engine = a17_engine(local.map(|h| (h, anchor)));
+crates/qbind-node/src/binary_consensus_loop.rs:10394: trailing whitespace.
++                            let mut mode = a17_mode(Some((5, anchor)));
+crates/qbind-node/src/binary_consensus_loop.rs:10395: trailing whitespace.
++                            mode.active = active;
+crates/qbind-node/src/binary_consensus_loop.rs:10396: trailing whitespace.
++                            mode.peer_max_observed_committed_height = target;
+crates/qbind-node/src/binary_consensus_loop.rs:10397: trailing whitespace.
++                            mode.exited_at_height = (!active).then_some(8);
+crates/qbind-node/src/binary_consensus_loop.rs:10398: trailing whitespace.
++                            let mut stats = BinaryConsensusLoopInboundStats {
+crates/qbind-node/src/binary_consensus_loop.rs:10399: trailing whitespace.
++                                restore_catchup_mode_active: u64::from(active),
+crates/qbind-node/src/binary_consensus_loop.rs:10400: trailing whitespace.
++                                restore_catchup_mode_exited_at_height: if active { 0 } else { 8 },
+crates/qbind-node/src/binary_consensus_loop.rs:10401: trailing whitespace.
++                                ..Default::default()
+crates/qbind-node/src/binary_consensus_loop.rs:10402: trailing whitespace.
++                            };
+crates/qbind-node/src/binary_consensus_loop.rs:10403: trailing whitespace.
++                            let origin = a17_origin(responder as u64);
+crates/qbind-node/src/binary_consensus_loop.rs:10404: trailing whitespace.
++                            let out = A17RecordingFacade::default();
+crates/qbind-node/src/binary_consensus_loop.rs:10405: trailing whitespace.
++                            // No request is emitted/outstanding. Both anchors mismatch.
+crates/qbind-node/src/binary_consensus_loop.rs:10406: trailing whitespace.
++                            for _ in 0..2 {
+crates/qbind-node/src/binary_consensus_loop.rs:10407: trailing whitespace.
++                                assert_eq!(empty_containment_dispatch(
+crates/qbind-node/src/binary_consensus_loop.rs:10408: trailing whitespace.
++                                    &mut engine, &mut mode, &mut stats,
+crates/qbind-node/src/binary_consensus_loop.rs:10409: trailing whitespace.
++                                    a17_response(responder, 999, [0xFF; 32], height, vec![]),
+crates/qbind-node/src/binary_consensus_loop.rs:10410: trailing whitespace.
++                                    Some(&origin), Some(&gate), &out,
+crates/qbind-node/src/binary_consensus_loop.rs:10411: trailing whitespace.
++                                ), Ok(()));
+crates/qbind-node/src/binary_consensus_loop.rs:10412: trailing whitespace.
++                            }
+crates/qbind-node/src/binary_consensus_loop.rs:10413: trailing whitespace.
++                            assert_eq!(stats.restore_catchup_responses_received, 2);
+crates/qbind-node/src/binary_consensus_loop.rs:10414: trailing whitespace.
++                            assert_eq!(stats.restore_catchup_empty_responses_ignored_total, 2);
+crates/qbind-node/src/binary_consensus_loop.rs:10415: trailing whitespace.
++                            assert_eq!(stats.restore_catchup_responses_rejected, 0);
+crates/qbind-node/src/binary_consensus_loop.rs:10416: trailing whitespace.
++                            assert_eq!(stats.restore_catchup_mode_active, u64::from(active));
+crates/qbind-node/src/binary_consensus_loop.rs:10417: trailing whitespace.
++                            assert_eq!(stats.restore_catchup_mode_exited_at_height, if active { 0 } else { 8 });
+crates/qbind-node/src/binary_consensus_loop.rs:10418: trailing whitespace.
++                            cases += 1;
+crates/qbind-node/src/binary_consensus_loop.rs:10419: trailing whitespace.
++                        }
+crates/qbind-node/src/binary_consensus_loop.rs:10420: trailing whitespace.
++                    }
+crates/qbind-node/src/binary_consensus_loop.rs:10421: trailing whitespace.
++                }
+crates/qbind-node/src/binary_consensus_loop.rs:10422: trailing whitespace.
++            }
+crates/qbind-node/src/binary_consensus_loop.rs:10423: trailing whitespace.
++        }
+crates/qbind-node/src/binary_consensus_loop.rs:10424: trailing whitespace.
++        assert_eq!(cases, 480);
+crates/qbind-node/src/binary_consensus_loop.rs:10425: trailing whitespace.
++        eprintln!("H1/H2/H4-H7: {cases} fixture combinations; 960 actual handler calls");
+crates/qbind-node/src/binary_consensus_loop.rs:10426: trailing whitespace.
++    }
+crates/qbind-node/src/binary_consensus_loop.rs:10427: trailing whitespace.
++
+crates/qbind-node/src/binary_consensus_loop.rs:10428: trailing whitespace.
++    #[test]
+crates/qbind-node/src/binary_consensus_loop.rs:10429: trailing whitespace.
++    fn empty_containment_h3_installed_binding_failures_and_no_gate_compatibility() {
+crates/qbind-node/src/binary_consensus_loop.rs:10430: trailing whitespace.
++        let gate = a17_binding_gate(4);
+crates/qbind-node/src/binary_consensus_loop.rs:10431: trailing whitespace.
++        let valid = a17_origin(1);
+crates/qbind-node/src/binary_consensus_loop.rs:10432: trailing whitespace.
++        let unknown = a17_origin(9);
+crates/qbind-node/src/binary_consensus_loop.rs:10433: trailing whitespace.
++        let ambiguous = AuthenticatedConsensusOrigin::new(a17_node_id(1), ValidatorId::new(2));
+crates/qbind-node/src/binary_consensus_loop.rs:10434: trailing whitespace.
++        for (origin, claim, reason) in [
+crates/qbind-node/src/binary_consensus_loop.rs:10435: trailing whitespace.
++            (None, 1, ConsensusBindingReject::MissingOrigin),
+crates/qbind-node/src/binary_consensus_loop.rs:10436: trailing whitespace.
++            (Some(&unknown), 1, ConsensusBindingReject::UnknownPeer),
+crates/qbind-node/src/binary_consensus_loop.rs:10437: trailing whitespace.
++            (Some(&ambiguous), 1, ConsensusBindingReject::AmbiguousMapping),
+crates/qbind-node/src/binary_consensus_loop.rs:10438: trailing whitespace.
++            (Some(&valid), 9, ConsensusBindingReject::UnknownValidator),
+crates/qbind-node/src/binary_consensus_loop.rs:10439: trailing whitespace.
++            (Some(&valid), 0, ConsensusBindingReject::ClaimedSenderMismatch),
+crates/qbind-node/src/binary_consensus_loop.rs:10440: trailing whitespace.
++            (Some(&valid), 2, ConsensusBindingReject::ClaimedSenderMismatch),
+crates/qbind-node/src/binary_consensus_loop.rs:10441: trailing whitespace.
++        ] {
+crates/qbind-node/src/binary_consensus_loop.rs:10442: trailing whitespace.
++            let mut engine = a17_engine(Some((5, [0xE2; 32])));
+crates/qbind-node/src/binary_consensus_loop.rs:10443: trailing whitespace.
++            let mut mode = a17_mode(Some((5, [0xE2; 32])));
+crates/qbind-node/src/binary_consensus_loop.rs:10444: trailing whitespace.
++            let mut stats = BinaryConsensusLoopInboundStats::default();
+crates/qbind-node/src/binary_consensus_loop.rs:10445: trailing whitespace.
++            let out = A17RecordingFacade::default();
+crates/qbind-node/src/binary_consensus_loop.rs:10446: trailing whitespace.
++            let count = gate.metrics().reject_count(reason);
+crates/qbind-node/src/binary_consensus_loop.rs:10447: trailing whitespace.
++            assert_eq!(empty_containment_dispatch(
+crates/qbind-node/src/binary_consensus_loop.rs:10448: trailing whitespace.
++                &mut engine, &mut mode, &mut stats,
+crates/qbind-node/src/binary_consensus_loop.rs:10449: trailing whitespace.
++                a17_response(claim, 0, [0; 32], Some(u64::MAX), vec![]),
+crates/qbind-node/src/binary_consensus_loop.rs:10450: trailing whitespace.
++                origin, Some(&gate), &out,
+crates/qbind-node/src/binary_consensus_loop.rs:10451: trailing whitespace.
++            ), Ok(()));
+crates/qbind-node/src/binary_consensus_loop.rs:10452: trailing whitespace.
++            assert_eq!(gate.metrics().reject_count(reason), count + 1);
+crates/qbind-node/src/binary_consensus_loop.rs:10453: trailing whitespace.
++            assert_eq!(stats.inbound_sender_binding_rejected_total, 1);
+crates/qbind-node/src/binary_consensus_loop.rs:10454: trailing whitespace.
++            assert_eq!(stats.restore_catchup_responses_received, 0);
+crates/qbind-node/src/binary_consensus_loop.rs:10455: trailing whitespace.
++            assert_eq!(stats.restore_catchup_empty_responses_ignored_total, 0);
+crates/qbind-node/src/binary_consensus_loop.rs:10456: trailing whitespace.
++            assert_eq!(stats.restore_catchup_responses_rejected, 0);
+crates/qbind-node/src/binary_consensus_loop.rs:10457: trailing whitespace.
++        }
+crates/qbind-node/src/binary_consensus_loop.rs:10458: trailing whitespace.
++        // This callable no-gate path accepts the claim, NOT an authenticated origin.
+crates/qbind-node/src/binary_consensus_loop.rs:10459: trailing whitespace.
++        for origin in [None, Some(&valid), Some(&unknown), Some(&ambiguous)] {
+crates/qbind-node/src/binary_consensus_loop.rs:10460: trailing whitespace.
++            for claim in [0, 1, 9] {
+crates/qbind-node/src/binary_consensus_loop.rs:10461: trailing whitespace.
++                let mut engine = a17_engine(Some((8, [0xE2; 32])));
+crates/qbind-node/src/binary_consensus_loop.rs:10462: trailing whitespace.
++                let mut mode = a17_mode(Some((5, [0xE2; 32])));
+crates/qbind-node/src/binary_consensus_loop.rs:10463: trailing whitespace.
++                let mut stats = BinaryConsensusLoopInboundStats::default();
+crates/qbind-node/src/binary_consensus_loop.rs:10464: trailing whitespace.
++                assert_eq!(empty_containment_dispatch(
+crates/qbind-node/src/binary_consensus_loop.rs:10465: trailing whitespace.
++                    &mut engine, &mut mode, &mut stats,
+crates/qbind-node/src/binary_consensus_loop.rs:10466: trailing whitespace.
++                    a17_response(claim, 0, [0; 32], Some(8), vec![]),
+crates/qbind-node/src/binary_consensus_loop.rs:10467: trailing whitespace.
++                    origin, None, &A17RecordingFacade::default(),
+crates/qbind-node/src/binary_consensus_loop.rs:10468: trailing whitespace.
++                ), Ok(()));
+crates/qbind-node/src/binary_consensus_loop.rs:10469: trailing whitespace.
++                assert_eq!(stats.inbound_sender_binding_rejected_total, 0);
+crates/qbind-node/src/binary_consensus_loop.rs:10470: trailing whitespace.
++                assert_eq!(stats.restore_catchup_responses_received, 1);
+crates/qbind-node/src/binary_consensus_loop.rs:10471: trailing whitespace.
++                assert_eq!(stats.restore_catchup_empty_responses_ignored_total, 1);
+crates/qbind-node/src/binary_consensus_loop.rs:10472: trailing whitespace.
++            }
+crates/qbind-node/src/binary_consensus_loop.rs:10473: trailing whitespace.
++        }
+crates/qbind-node/src/binary_consensus_loop.rs:10474: trailing whitespace.
++    }
+crates/qbind-node/src/binary_consensus_loop.rs:10475: trailing whitespace.
++
+crates/qbind-node/src/binary_consensus_loop.rs:10476: trailing whitespace.
++    #[test]
+crates/qbind-node/src/binary_consensus_loop.rs:10477: trailing whitespace.
++    fn empty_containment_counter_saturation_and_distinct_nonempty_accounting() {
+crates/qbind-node/src/binary_consensus_loop.rs:10478: trailing whitespace.
++        let gate = a17_binding_gate(4);
+crates/qbind-node/src/binary_consensus_loop.rs:10479: trailing whitespace.
++        let origin = a17_origin(1);
+crates/qbind-node/src/binary_consensus_loop.rs:10480: trailing whitespace.
++        for received in [0, u64::MAX - 1, u64::MAX] {
+crates/qbind-node/src/binary_consensus_loop.rs:10481: trailing whitespace.
++            for ignored in [0, u64::MAX - 1, u64::MAX] {
+crates/qbind-node/src/binary_consensus_loop.rs:10482: trailing whitespace.
++                for rejected in [0, u64::MAX - 1, u64::MAX] {
+crates/qbind-node/src/binary_consensus_loop.rs:10483: trailing whitespace.
++                    let mut engine = a17_engine(Some((5, [0xE3; 32])));
+crates/qbind-node/src/binary_consensus_loop.rs:10484: trailing whitespace.
++                    let mut mode = a17_mode(Some((5, [0xE3; 32])));
+crates/qbind-node/src/binary_consensus_loop.rs:10485: trailing whitespace.
++                    let mut stats = BinaryConsensusLoopInboundStats {
+crates/qbind-node/src/binary_consensus_loop.rs:10486: trailing whitespace.
++                        restore_catchup_responses_received: received,
+crates/qbind-node/src/binary_consensus_loop.rs:10487: trailing whitespace.
++                        restore_catchup_empty_responses_ignored_total: ignored,
+crates/qbind-node/src/binary_consensus_loop.rs:10488: trailing whitespace.
++                        restore_catchup_responses_rejected: rejected,
+crates/qbind-node/src/binary_consensus_loop.rs:10489: trailing whitespace.
++                        ..Default::default()
+crates/qbind-node/src/binary_consensus_loop.rs:10490: trailing whitespace.
++                    };
+crates/qbind-node/src/binary_consensus_loop.rs:10491: trailing whitespace.
++                    let out = A17RecordingFacade::default();
+crates/qbind-node/src/binary_consensus_loop.rs:10492: trailing whitespace.
++                    for _ in 0..2 {
+crates/qbind-node/src/binary_consensus_loop.rs:10493: trailing whitespace.
++                        assert_eq!(empty_containment_dispatch(
+crates/qbind-node/src/binary_consensus_loop.rs:10494: trailing whitespace.
++                            &mut engine, &mut mode, &mut stats,
+crates/qbind-node/src/binary_consensus_loop.rs:10495: trailing whitespace.
++                            a17_response(1, 5, [0xE3; 32], Some(5), vec![]),
+crates/qbind-node/src/binary_consensus_loop.rs:10496: trailing whitespace.
++                            Some(&origin), Some(&gate), &out,
+crates/qbind-node/src/binary_consensus_loop.rs:10497: trailing whitespace.
++                        ), Ok(()));
+crates/qbind-node/src/binary_consensus_loop.rs:10498: trailing whitespace.
++                    }
+crates/qbind-node/src/binary_consensus_loop.rs:10499: trailing whitespace.
++                    assert_eq!(stats.restore_catchup_responses_received, received.saturating_add(2));
+crates/qbind-node/src/binary_consensus_loop.rs:10500: trailing whitespace.
++                    assert_eq!(stats.restore_catchup_empty_responses_ignored_total, ignored.saturating_add(2));
+crates/qbind-node/src/binary_consensus_loop.rs:10501: trailing whitespace.
++                    let blocks = a17_suffix(&engine, 5, [0xE3; 32], 1);
+crates/qbind-node/src/binary_consensus_loop.rs:10502: trailing whitespace.
++                    for _ in 0..2 {
+crates/qbind-node/src/binary_consensus_loop.rs:10503: trailing whitespace.
++                        assert_eq!(empty_containment_dispatch(
+crates/qbind-node/src/binary_consensus_loop.rs:10504: trailing whitespace.
++                            &mut engine, &mut mode, &mut stats,
+crates/qbind-node/src/binary_consensus_loop.rs:10505: trailing whitespace.
++                            a17_response(1, 5, [0xE3; 32], Some(6), blocks.clone()),
+crates/qbind-node/src/binary_consensus_loop.rs:10506: trailing whitespace.
++                            Some(&origin), Some(&gate), &out,
+crates/qbind-node/src/binary_consensus_loop.rs:10507: trailing whitespace.
++                        ), Ok(()));
+crates/qbind-node/src/binary_consensus_loop.rs:10508: trailing whitespace.
++                    }
+crates/qbind-node/src/binary_consensus_loop.rs:10509: trailing whitespace.
++                    assert_eq!(stats.restore_catchup_responses_received, received.saturating_add(4));
+crates/qbind-node/src/binary_consensus_loop.rs:10510: trailing whitespace.
++                    assert_eq!(stats.restore_catchup_empty_responses_ignored_total, ignored.saturating_add(2));
+crates/qbind-node/src/binary_consensus_loop.rs:10511: trailing whitespace.
++                    assert_eq!(stats.restore_catchup_responses_rejected, rejected.saturating_add(2));
+crates/qbind-node/src/binary_consensus_loop.rs:10512: trailing whitespace.
++                    assert_eq!(empty_containment_dispatch(
+crates/qbind-node/src/binary_consensus_loop.rs:10513: trailing whitespace.
++                        &mut engine, &mut mode, &mut stats,
+crates/qbind-node/src/binary_consensus_loop.rs:10514: trailing whitespace.
++                        a17_response(0, 0, [0; 32], None, vec![]),
+crates/qbind-node/src/binary_consensus_loop.rs:10515: trailing whitespace.
++                        Some(&origin), Some(&gate), &out,
+crates/qbind-node/src/binary_consensus_loop.rs:10516: trailing whitespace.
++                    ), Ok(()));
+crates/qbind-node/src/binary_consensus_loop.rs:10517: trailing whitespace.
++                    assert_eq!(stats.restore_catchup_responses_received, received.saturating_add(4));
+crates/qbind-node/src/binary_consensus_loop.rs:10518: trailing whitespace.
++                    assert_eq!(stats.restore_catchup_empty_responses_ignored_total, ignored.saturating_add(2));
+crates/qbind-node/src/binary_consensus_loop.rs:10519: trailing whitespace.
++                    assert_eq!(stats.restore_catchup_responses_rejected, rejected.saturating_add(2));
+crates/qbind-node/src/binary_consensus_loop.rs:10520: trailing whitespace.
++                }
+crates/qbind-node/src/binary_consensus_loop.rs:10521: trailing whitespace.
++            }
+crates/qbind-node/src/binary_consensus_loop.rs:10522: trailing whitespace.
++        }
+crates/qbind-node/src/binary_consensus_loop.rs:10523: trailing whitespace.
++    }
+crates/qbind-node/src/binary_consensus_loop.rs:10524: trailing whitespace.
++
+crates/qbind-node/src/binary_consensus_loop.rs:10525: trailing whitespace.
++    #[test]
+crates/qbind-node/src/binary_consensus_loop.rs:10526: trailing whitespace.
++    fn empty_containment_h8_h9_same_oracle_detects_omitted_and_after_helper_guards() {
+crates/qbind-node/src/binary_consensus_loop.rs:10527: trailing whitespace.
++        for control in [EmptyGuardControl::Correct, EmptyGuardControl::Omitted, EmptyGuardControl::AfterHelper] {
+crates/qbind-node/src/binary_consensus_loop.rs:10528: trailing whitespace.
++            let _reset = EmptyGuardControlReset(EMPTY_GUARD_CONTROL.replace(control));
+crates/qbind-node/src/binary_consensus_loop.rs:10529: trailing whitespace.
++            let mut engine = a17_engine(Some((8, [0xE4; 32])));
+crates/qbind-node/src/binary_consensus_loop.rs:10530: trailing whitespace.
++            let mut mode = a17_mode(Some((5, [0xE4; 32])));
+crates/qbind-node/src/binary_consensus_loop.rs:10531: trailing whitespace.
++            let mut stats = BinaryConsensusLoopInboundStats::default();
+crates/qbind-node/src/binary_consensus_loop.rs:10532: trailing whitespace.
++            let out = A17RecordingFacade::default();
+crates/qbind-node/src/binary_consensus_loop.rs:10533: trailing whitespace.
++            let result = empty_containment_dispatch(
+crates/qbind-node/src/binary_consensus_loop.rs:10534: trailing whitespace.
++                &mut engine, &mut mode, &mut stats,
+crates/qbind-node/src/binary_consensus_loop.rs:10535: trailing whitespace.
++                a17_response(1, 999, [0xFF; 32], Some(8), vec![]),
+crates/qbind-node/src/binary_consensus_loop.rs:10536: trailing whitespace.
++                Some(&a17_origin(1)), Some(&a17_binding_gate(4)), &out,
+crates/qbind-node/src/binary_consensus_loop.rs:10537: trailing whitespace.
++            );
+crates/qbind-node/src/binary_consensus_loop.rs:10538: trailing whitespace.
++            if control == EmptyGuardControl::Correct {
+crates/qbind-node/src/binary_consensus_loop.rs:10539: trailing whitespace.
++                assert_eq!(result, Ok(()));
+crates/qbind-node/src/binary_consensus_loop.rs:10540: trailing whitespace.
++                assert!(mode.is_active());
+crates/qbind-node/src/binary_consensus_loop.rs:10541: trailing whitespace.
++                assert_eq!(stats.restore_catchup_mode_exited_at_height, 0);
+crates/qbind-node/src/binary_consensus_loop.rs:10542: trailing whitespace.
++            } else {
+crates/qbind-node/src/binary_consensus_loop.rs:10543: trailing whitespace.
++                assert_eq!(result, Err(vec!["restore_mode"]), "same protected-state assertion detects defect");
+crates/qbind-node/src/binary_consensus_loop.rs:10544: trailing whitespace.
++                assert!(!mode.is_active());
+crates/qbind-node/src/binary_consensus_loop.rs:10545: trailing whitespace.
++                assert_eq!(mode.peer_max_observed_committed_height, Some(8));
+crates/qbind-node/src/binary_consensus_loop.rs:10546: trailing whitespace.
++                assert_eq!(stats.restore_catchup_mode_exited_at_height, 8);
+crates/qbind-node/src/binary_consensus_loop.rs:10547: trailing whitespace.
++            }
+crates/qbind-node/src/binary_consensus_loop.rs:10548: trailing whitespace.
++            assert!(out.calls.lock().unwrap().is_empty(), "mode-only defect, not publication");
+crates/qbind-node/src/binary_consensus_loop.rs:10549: trailing whitespace.
++            // The existing non-empty guard precedes even the test-only defect.
+crates/qbind-node/src/binary_consensus_loop.rs:10550: trailing whitespace.
++            let blocks = a17_suffix(&engine, 8, [0xE4; 32], 1);
+crates/qbind-node/src/binary_consensus_loop.rs:10551: trailing whitespace.
++            assert_eq!(empty_containment_dispatch(
+crates/qbind-node/src/binary_consensus_loop.rs:10552: trailing whitespace.
++                &mut engine, &mut mode, &mut stats,
+crates/qbind-node/src/binary_consensus_loop.rs:10553: trailing whitespace.
++                a17_response(1, 8, [0xE4; 32], Some(9), blocks),
+crates/qbind-node/src/binary_consensus_loop.rs:10554: trailing whitespace.
++                Some(&a17_origin(1)), Some(&a17_binding_gate(4)), &out,
+crates/qbind-node/src/binary_consensus_loop.rs:10555: trailing whitespace.
++            ), Ok(()));
+crates/qbind-node/src/binary_consensus_loop.rs:10556: trailing whitespace.
++        }
+crates/qbind-node/src/binary_consensus_loop.rs:10557: trailing whitespace.
++    }
+crates/qbind-node/src/binary_consensus_loop.rs:10558: trailing whitespace.
++
+crates/qbind-node/src/binary_consensus_loop.rs:10559: trailing whitespace.
++    #[test]
+crates/qbind-node/src/binary_consensus_loop.rs:10560: trailing whitespace.
++    fn empty_containment_d1_request_cadence_anchor_facade_and_honest_empty_export() {
+crates/qbind-node/src/binary_consensus_loop.rs:10561: trailing whitespace.
++        for active in [false, true] {
+crates/qbind-node/src/binary_consensus_loop.rs:10562: trailing whitespace.
++            for baseline in [None, Some((5, [0xE5; 32]))] {
+crates/qbind-node/src/binary_consensus_loop.rs:10563: trailing whitespace.
++                for facade in [0, 1, 2] {
+crates/qbind-node/src/binary_consensus_loop.rs:10564: trailing whitespace.
++                    let mut engine = a17_engine(baseline);
+crates/qbind-node/src/binary_consensus_loop.rs:10565: trailing whitespace.
++                    let mut mode = a17_mode(Some((5, [0xE5; 32])));
+crates/qbind-node/src/binary_consensus_loop.rs:10566: trailing whitespace.
++                    mode.active = active;
+crates/qbind-node/src/binary_consensus_loop.rs:10567: trailing whitespace.
++                    let mut stats = BinaryConsensusLoopInboundStats::default();
+crates/qbind-node/src/binary_consensus_loop.rs:10568: trailing whitespace.
++                    let out = A17RecordingFacade {
+crates/qbind-node/src/binary_consensus_loop.rs:10569: trailing whitespace.
++                        fail_consensus: facade == 2,
+crates/qbind-node/src/binary_consensus_loop.rs:10570: trailing whitespace.
++                        ..Default::default()
+crates/qbind-node/src/binary_consensus_loop.rs:10571: trailing whitespace.
++                    };
+crates/qbind-node/src/binary_consensus_loop.rs:10572: trailing whitespace.
++                    assert_eq!(empty_containment_dispatch(
+crates/qbind-node/src/binary_consensus_loop.rs:10573: trailing whitespace.
++                        &mut engine, &mut mode, &mut stats,
+crates/qbind-node/src/binary_consensus_loop.rs:10574: trailing whitespace.
++                        a17_response(1, 999, [0xFF; 32], Some(u64::MAX), vec![]),
+crates/qbind-node/src/binary_consensus_loop.rs:10575: trailing whitespace.
++                        Some(&a17_origin(1)), Some(&a17_binding_gate(4)), &out,
+crates/qbind-node/src/binary_consensus_loop.rs:10576: trailing whitespace.
++                    ), Ok(()));
+crates/qbind-node/src/binary_consensus_loop.rs:10577: trailing whitespace.
++                    for tick in 0..=RESTORE_CATCHUP_REQUEST_EVERY_TICKS + 1 {
+crates/qbind-node/src/binary_consensus_loop.rs:10578: trailing whitespace.
++                        maybe_broadcast_restore_catchup_request(
+crates/qbind-node/src/binary_consensus_loop.rs:10579: trailing whitespace.
++                            &engine, tick, ValidatorId::new(0), mode.is_active(),
+crates/qbind-node/src/binary_consensus_loop.rs:10580: trailing whitespace.
++                            if facade == 0 { None } else { Some(&out) }, &mut stats,
+crates/qbind-node/src/binary_consensus_loop.rs:10581: trailing whitespace.
++                        );
+crates/qbind-node/src/binary_consensus_loop.rs:10582: trailing whitespace.
++                    }
+crates/qbind-node/src/binary_consensus_loop.rs:10583: trailing whitespace.
++                    let attempts = if active && baseline.is_some() && facade != 0 { 2 } else { 0 };
+crates/qbind-node/src/binary_consensus_loop.rs:10584: trailing whitespace.
++                    assert_eq!(out.calls.lock().unwrap().len(), attempts);
+crates/qbind-node/src/binary_consensus_loop.rs:10585: trailing whitespace.
++                    assert_eq!(stats.restore_catchup_requests_sent, if facade == 1 { attempts as u64 } else { 0 });
+crates/qbind-node/src/binary_consensus_loop.rs:10586: trailing whitespace.
++                    let before = a17_protected_observation(&engine, &mode, &out);
+crates/qbind-node/src/binary_consensus_loop.rs:10587: trailing whitespace.
++                    handle_restore_catchup_request(
+crates/qbind-node/src/binary_consensus_loop.rs:10588: trailing whitespace.
++                        &engine, RestoreCatchupRequest {
+crates/qbind-node/src/binary_consensus_loop.rs:10589: trailing whitespace.
++                            requester_validator_index: 1,
+crates/qbind-node/src/binary_consensus_loop.rs:10590: trailing whitespace.
++                            from_height: 5,
+crates/qbind-node/src/binary_consensus_loop.rs:10591: trailing whitespace.
++                            from_block_id: [0xE5; 32],
+crates/qbind-node/src/binary_consensus_loop.rs:10592: trailing whitespace.
++                        }, &mut stats, Some(&out), ValidatorId::new(0),
+crates/qbind-node/src/binary_consensus_loop.rs:10593: trailing whitespace.
++                    );
+crates/qbind-node/src/binary_consensus_loop.rs:10594: trailing whitespace.
++                    assert_eq!(a17_check_protected(
+crates/qbind-node/src/binary_consensus_loop.rs:10595: trailing whitespace.
++                        &before, &a17_protected_observation(&engine, &mode, &out),
+crates/qbind-node/src/binary_consensus_loop.rs:10596: trailing whitespace.
++                    ), Ok(()), "honest empty export sends no response");
+crates/qbind-node/src/binary_consensus_loop.rs:10597: trailing whitespace.
++                    assert_eq!(stats.restore_catchup_responses_sent, 0);
+crates/qbind-node/src/binary_consensus_loop.rs:10598: trailing whitespace.
++                }
+crates/qbind-node/src/binary_consensus_loop.rs:10599: trailing whitespace.
++            }
+crates/qbind-node/src/binary_consensus_loop.rs:10600: trailing whitespace.
++        }
+crates/qbind-node/src/binary_consensus_loop.rs:10601: trailing whitespace.
++    }
+crates/qbind-node/src/binary_consensus_loop.rs:10602: trailing whitespace.
++
+crates/qbind-node/src/binary_consensus_loop.rs:10603: trailing whitespace.
++    #[test]
+crates/qbind-node/src/binary_consensus_loop.rs:10604: trailing whitespace.
++    fn empty_containment_d2_proposal_deferral_requires_independent_current_authority() {
+crates/qbind-node/src/binary_consensus_loop.rs:10605: trailing whitespace.
++        use qbind_crypto::ml_dsa44::MlDsa44Backend;
+crates/qbind-node/src/binary_consensus_loop.rs:10606: trailing whitespace.
++        use qbind_wire::consensus::BlockHeader;
+crates/qbind-node/src/binary_consensus_loop.rs:10607: trailing whitespace.
++        use qbind_wire::io::WireEncode;
+crates/qbind-node/src/binary_consensus_loop.rs:10608: trailing whitespace.
++        let fixture = run030::make_fixture(4);
+crates/qbind-node/src/binary_consensus_loop.rs:10609: trailing whitespace.
++        let timeout = run030::make_ctx(&fixture, None);
+crates/qbind-node/src/binary_consensus_loop.rs:10610: trailing whitespace.
++        let pv = ProposalVoteAuthority {
+crates/qbind-node/src/binary_consensus_loop.rs:10611: trailing whitespace.
++            validators: Arc::clone(&timeout.validators),
+crates/qbind-node/src/binary_consensus_loop.rs:10612: trailing whitespace.
++            key_provider: Arc::clone(&timeout.key_provider),
+crates/qbind-node/src/binary_consensus_loop.rs:10613: trailing whitespace.
++            backend_registry: Arc::clone(&timeout.backend_registry),
+crates/qbind-node/src/binary_consensus_loop.rs:10614: trailing whitespace.
++            chain_id: timeout.chain_id,
+crates/qbind-node/src/binary_consensus_loop.rs:10615: trailing whitespace.
++            signer: None,
+crates/qbind-node/src/binary_consensus_loop.rs:10616: trailing whitespace.
++            signing_domain: ProposalVoteSigningDomainV2::try_new(
+crates/qbind-node/src/binary_consensus_loop.rs:10617: trailing whitespace.
++                timeout.chain_id, 0, [0x31; 32], [0x42; 32],
+crates/qbind-node/src/binary_consensus_loop.rs:10618: trailing whitespace.
++            ).unwrap(),
+crates/qbind-node/src/binary_consensus_loop.rs:10619: trailing whitespace.
++        };
+crates/qbind-node/src/binary_consensus_loop.rs:10620: trailing whitespace.
++        let snapshot = a17_admitted_snapshot(&pv);
+crates/qbind-node/src/binary_consensus_loop.rs:10621: trailing whitespace.
++        for active in [false, true] {
+crates/qbind-node/src/binary_consensus_loop.rs:10622: trailing whitespace.
++            // Near/correct, near/wrong-parent, far. No embedded QC is fabricated.
+crates/qbind-node/src/binary_consensus_loop.rs:10623: trailing whitespace.
++            for (height, parent, should_defer) in [(6, [0xE6; 32], false), (6, [0xFF; 32], true), (8, [0xE6; 32], true)] {
+crates/qbind-node/src/binary_consensus_loop.rs:10624: trailing whitespace.
++                for authority in 0..3 {
+crates/qbind-node/src/binary_consensus_loop.rs:10625: trailing whitespace.
++                    let mut engine = a17_engine(Some((5, [0xE6; 32])));
+crates/qbind-node/src/binary_consensus_loop.rs:10626: trailing whitespace.
++                    let mut mode = a17_mode(Some((5, [0xE6; 32])));
+crates/qbind-node/src/binary_consensus_loop.rs:10627: trailing whitespace.
++                    mode.active = active;
+crates/qbind-node/src/binary_consensus_loop.rs:10628: trailing whitespace.
++                    let mut stats = BinaryConsensusLoopInboundStats::default();
+crates/qbind-node/src/binary_consensus_loop.rs:10629: trailing whitespace.
++                    let out = A17RecordingFacade::default();
+crates/qbind-node/src/binary_consensus_loop.rs:10630: trailing whitespace.
++                    assert_eq!(empty_containment_dispatch(
+crates/qbind-node/src/binary_consensus_loop.rs:10631: trailing whitespace.
++                        &mut engine, &mut mode, &mut stats,
+crates/qbind-node/src/binary_consensus_loop.rs:10632: trailing whitespace.
++                        a17_response(1, 5, [0xE6; 32], Some(5), vec![]),
+crates/qbind-node/src/binary_consensus_loop.rs:10633: trailing whitespace.
++                        Some(&a17_origin(1)), Some(&a17_binding_gate(4)), &out,
+crates/qbind-node/src/binary_consensus_loop.rs:10634: trailing whitespace.
++                    ), Ok(()));
+crates/qbind-node/src/binary_consensus_loop.rs:10635: trailing whitespace.
++                    let proposer = engine.leader_for_view(height);
+crates/qbind-node/src/binary_consensus_loop.rs:10636: trailing whitespace.
++                    let mut proposal = BlockProposal {
+crates/qbind-node/src/binary_consensus_loop.rs:10637: trailing whitespace.
++                        header: BlockHeader {
+crates/qbind-node/src/binary_consensus_loop.rs:10638: trailing whitespace.
++                            version: 1, chain_id: pv.signing_domain.expected_wire_chain_id(),
+crates/qbind-node/src/binary_consensus_loop.rs:10639: trailing whitespace.
++                            epoch: 0, height, round: height, parent_block_id: parent,
+crates/qbind-node/src/binary_consensus_loop.rs:10640: trailing whitespace.
++                            payload_hash: [0; 32], proposer_index: proposer.0 as u16,
+crates/qbind-node/src/binary_consensus_loop.rs:10641: trailing whitespace.
++                            suite_id: 100, tx_count: 0, timestamp: 0,
+crates/qbind-node/src/binary_consensus_loop.rs:10642: trailing whitespace.
++                            payload_kind: 0, next_epoch: 0, batch_commitment: [0; 32],
+crates/qbind-node/src/binary_consensus_loop.rs:10643: trailing whitespace.
++                        }, qc: None, txs: vec![], signature: vec![],
+crates/qbind-node/src/binary_consensus_loop.rs:10644: trailing whitespace.
++                    };
+crates/qbind-node/src/binary_consensus_loop.rs:10645: trailing whitespace.
++                    proposal.signature = MlDsa44Backend::sign(
+crates/qbind-node/src/binary_consensus_loop.rs:10646: trailing whitespace.
++                        fixture.sks.get(&proposer).unwrap(), &pv.proposal_preimage(&proposal),
+crates/qbind-node/src/binary_consensus_loop.rs:10647: trailing whitespace.
++                    ).unwrap();
+crates/qbind-node/src/binary_consensus_loop.rs:10648: trailing whitespace.
++                    let mut bytes = vec![];
+crates/qbind-node/src/binary_consensus_loop.rs:10649: trailing whitespace.
++                    proposal.encode(&mut bytes);
+crates/qbind-node/src/binary_consensus_loop.rs:10650: trailing whitespace.
++                    let before = a17_protected_observation(&engine, &mode, &out);
+crates/qbind-node/src/binary_consensus_loop.rs:10651: trailing whitespace.
++                    handle_inbound_consensus_msg(
+crates/qbind-node/src/binary_consensus_loop.rs:10652: trailing whitespace.
++                        &mut engine, ConsensusNetMsg::Proposal(bytes), &mut stats,
+crates/qbind-node/src/binary_consensus_loop.rs:10653: trailing whitespace.
++                        Some(&out), &Arc::new(NodeMetrics::new()), ValidatorId::new(0),
+crates/qbind-node/src/binary_consensus_loop.rs:10654: trailing whitespace.
++                        &mut mode, Some(&timeout),
+crates/qbind-node/src/binary_consensus_loop.rs:10655: trailing whitespace.
++                        if authority == 0 { None } else { Some(&pv) },
+crates/qbind-node/src/binary_consensus_loop.rs:10656: trailing whitespace.
++                        if authority == 2 { Some(&snapshot) } else { None },
+crates/qbind-node/src/binary_consensus_loop.rs:10657: trailing whitespace.
++                        &mut BinaryReconfigDetector::default(),
+crates/qbind-node/src/binary_consensus_loop.rs:10658: trailing whitespace.
++                        Some(&a17_origin(proposer.0)), Some(&a17_binding_gate(4)),
+crates/qbind-node/src/binary_consensus_loop.rs:10659: trailing whitespace.
++                        None, ConsensusVerificationPolicy::Required,
+crates/qbind-node/src/binary_consensus_loop.rs:10660: trailing whitespace.
++                    );
+crates/qbind-node/src/binary_consensus_loop.rs:10661: trailing whitespace.
++                    let deferred = authority == 2 && active && should_defer;
+crates/qbind-node/src/binary_consensus_loop.rs:10662: trailing whitespace.
++                    assert_eq!(stats.restore_catchup_proposals_deferred, u64::from(deferred));
+crates/qbind-node/src/binary_consensus_loop.rs:10663: trailing whitespace.
++                    assert_eq!(stats.inbound_proposal_verify_accepted, u64::from(authority == 2));
+crates/qbind-node/src/binary_consensus_loop.rs:10664: trailing whitespace.
++                    assert_eq!(stats.inbound_proposals_delivered, u64::from(authority == 2 && !deferred));
+crates/qbind-node/src/binary_consensus_loop.rs:10665: trailing whitespace.
++                    if authority == 0 {
+crates/qbind-node/src/binary_consensus_loop.rs:10666: trailing whitespace.
++                        assert_eq!(stats.inbound_proposal_verification_context_unavailable_total, 1);
+crates/qbind-node/src/binary_consensus_loop.rs:10667: trailing whitespace.
++                    } else if authority == 1 {
+crates/qbind-node/src/binary_consensus_loop.rs:10668: trailing whitespace.
++                        assert_eq!(stats.inbound_proposal_current_state_unavailable_total, 1);
+crates/qbind-node/src/binary_consensus_loop.rs:10669: trailing whitespace.
++                    }
+crates/qbind-node/src/binary_consensus_loop.rs:10670: trailing whitespace.
++                    if authority != 2 || deferred {
+crates/qbind-node/src/binary_consensus_loop.rs:10671: trailing whitespace.
++                        assert_eq!(a17_check_protected(
+crates/qbind-node/src/binary_consensus_loop.rs:10672: trailing whitespace.
++                            &before, &a17_protected_observation(&engine, &mode, &out),
+crates/qbind-node/src/binary_consensus_loop.rs:10673: trailing whitespace.
++                        ), Ok(()));
+crates/qbind-node/src/binary_consensus_loop.rs:10674: trailing whitespace.
++                    }
+crates/qbind-node/src/binary_consensus_loop.rs:10675: trailing whitespace.
++                    assert!(out.calls.lock().unwrap().is_empty(), "no PV signer/journal is wired");
+crates/qbind-node/src/binary_consensus_loop.rs:10676: trailing whitespace.
++                    assert_eq!(stats.outbound_proposal_signing_success, 0);
+crates/qbind-node/src/binary_consensus_loop.rs:10677: trailing whitespace.
++                    assert_eq!(stats.outbound_vote_signing_success, 0);
+crates/qbind-node/src/binary_consensus_loop.rs:10678: trailing whitespace.
++                }
+crates/qbind-node/src/binary_consensus_loop.rs:10679: trailing whitespace.
++            }
+crates/qbind-node/src/binary_consensus_loop.rs:10680: trailing whitespace.
++        }
+crates/qbind-node/src/binary_consensus_loop.rs:10681: trailing whitespace.
++    }
+crates/qbind-node/src/binary_consensus_loop.rs:10682: trailing whitespace.
++
+crates/qbind-node/src/binary_consensus_loop.rs:10683: trailing whitespace.
++    #[test]
+crates/qbind-node/src/binary_consensus_loop.rs:10684: trailing whitespace.
++    fn empty_containment_d3_timeout_active_suppression_and_inactive_prerequisites() {
+crates/qbind-node/src/binary_consensus_loop.rs:10685: trailing whitespace.
++        let fixture = run030::make_fixture(4);
+crates/qbind-node/src/binary_consensus_loop.rs:10686: trailing whitespace.
++        let valid = run030::make_ctx(&fixture, Some(ValidatorId::new(0)));
+crates/qbind-node/src/binary_consensus_loop.rs:10687: trailing whitespace.
++        let missing_signer = run030::make_ctx(&fixture, None);
+crates/qbind-node/src/binary_consensus_loop.rs:10688: trailing whitespace.
++        let wrong_identity = run030::make_ctx(&fixture, Some(ValidatorId::new(1)));
+crates/qbind-node/src/binary_consensus_loop.rs:10689: trailing whitespace.
++        for (active, threshold, facade, tick, ctx, emitted, failure) in [
+crates/qbind-node/src/binary_consensus_loop.rs:10690: trailing whitespace.
++            (true, Some(5), true, 5, Some(&valid), 0, 0),
+crates/qbind-node/src/binary_consensus_loop.rs:10691: trailing whitespace.
++            (false, None, true, 5, Some(&valid), 0, 0),
+crates/qbind-node/src/binary_consensus_loop.rs:10692: trailing whitespace.
++            (false, Some(5), false, 5, Some(&valid), 0, 0),
+crates/qbind-node/src/binary_consensus_loop.rs:10693: trailing whitespace.
++            (false, Some(5), true, 4, Some(&valid), 0, 0),
+crates/qbind-node/src/binary_consensus_loop.rs:10694: trailing whitespace.
++            (false, Some(5), true, 5, None, 0, 1),
+crates/qbind-node/src/binary_consensus_loop.rs:10695: trailing whitespace.
++            (false, Some(5), true, 5, Some(&missing_signer), 0, 1),
+crates/qbind-node/src/binary_consensus_loop.rs:10696: trailing whitespace.
++            (false, Some(5), true, 5, Some(&wrong_identity), 0, 1),
+crates/qbind-node/src/binary_consensus_loop.rs:10697: trailing whitespace.
++            (false, Some(5), true, 5, Some(&valid), 1, 0),
+crates/qbind-node/src/binary_consensus_loop.rs:10698: trailing whitespace.
++        ] {
+crates/qbind-node/src/binary_consensus_loop.rs:10699: trailing whitespace.
++            let mut engine = a17_engine(Some((5, [0xE7; 32])));
+crates/qbind-node/src/binary_consensus_loop.rs:10700: trailing whitespace.
++            let mut mode = a17_mode(Some((5, [0xE7; 32])));
+crates/qbind-node/src/binary_consensus_loop.rs:10701: trailing whitespace.
++            mode.active = active;
+crates/qbind-node/src/binary_consensus_loop.rs:10702: trailing whitespace.
++            let mut stats = BinaryConsensusLoopInboundStats::default();
+crates/qbind-node/src/binary_consensus_loop.rs:10703: trailing whitespace.
++            let out = A17RecordingFacade::default();
+crates/qbind-node/src/binary_consensus_loop.rs:10704: trailing whitespace.
++            assert_eq!(empty_containment_dispatch(
+crates/qbind-node/src/binary_consensus_loop.rs:10705: trailing whitespace.
++                &mut engine, &mut mode, &mut stats,
+crates/qbind-node/src/binary_consensus_loop.rs:10706: trailing whitespace.
++                a17_response(1, 999, [0xFF; 32], Some(5), vec![]),
+crates/qbind-node/src/binary_consensus_loop.rs:10707: trailing whitespace.
++                Some(&a17_origin(1)), Some(&a17_binding_gate(4)), &out,
+crates/qbind-node/src/binary_consensus_loop.rs:10708: trailing whitespace.
++            ), Ok(()));
+crates/qbind-node/src/binary_consensus_loop.rs:10709: trailing whitespace.
++            let before = a17_protected_observation(&engine, &mode, &out);
+crates/qbind-node/src/binary_consensus_loop.rs:10710: trailing whitespace.
++            let mut state = ViewTimeoutState::new(engine.current_view(), engine.commit_log().len() as u64);
+crates/qbind-node/src/binary_consensus_loop.rs:10711: trailing whitespace.
++            let mut backoff = ViewTimeoutBackoffState::no_growth(threshold);
+crates/qbind-node/src/binary_consensus_loop.rs:10712: trailing whitespace.
++            maybe_emit_view_timeout(
+crates/qbind-node/src/binary_consensus_loop.rs:10713: trailing whitespace.
++                &mut engine, &mut state, tick, &mut backoff, mode.is_active(),
+crates/qbind-node/src/binary_consensus_loop.rs:10714: trailing whitespace.
++                if facade { Some(&out) } else { None }, &mut stats, ctx,
+crates/qbind-node/src/binary_consensus_loop.rs:10715: trailing whitespace.
++            );
+crates/qbind-node/src/binary_consensus_loop.rs:10716: trailing whitespace.
++            assert_eq!(stats.view_timeouts_emitted, emitted);
+crates/qbind-node/src/binary_consensus_loop.rs:10717: trailing whitespace.
++            assert_eq!(stats.outbound_timeout_signing_success, emitted);
+crates/qbind-node/src/binary_consensus_loop.rs:10718: trailing whitespace.
++            assert_eq!(stats.outbound_timeout_signing_failure, failure);
+crates/qbind-node/src/binary_consensus_loop.rs:10719: trailing whitespace.
++            if emitted == 0 {
+crates/qbind-node/src/binary_consensus_loop.rs:10720: trailing whitespace.
++                assert_eq!(a17_check_protected(&before, &a17_protected_observation(&engine, &mode, &out)), Ok(()));
+crates/qbind-node/src/binary_consensus_loop.rs:10721: trailing whitespace.
++            } else {
+crates/qbind-node/src/binary_consensus_loop.rs:10722: trailing whitespace.
++                assert!(engine.timeout_emitted_in_view());
+crates/qbind-node/src/binary_consensus_loop.rs:10723: trailing whitespace.
++                assert_eq!(out.calls.lock().unwrap().len(), 1);
+crates/qbind-node/src/binary_consensus_loop.rs:10724: trailing whitespace.
++                assert_eq!(stats.retained_qc_admission_rejected_total, 0, "NoQc is distinct from authenticated retained proof");
+crates/qbind-node/src/binary_consensus_loop.rs:10725: trailing whitespace.
++                maybe_emit_view_timeout(
+crates/qbind-node/src/binary_consensus_loop.rs:10726: trailing whitespace.
++                    &mut engine, &mut state, tick + 1, &mut backoff, mode.is_active(),
+crates/qbind-node/src/binary_consensus_loop.rs:10727: trailing whitespace.
++                    Some(&out), &mut stats, ctx,
+crates/qbind-node/src/binary_consensus_loop.rs:10728: trailing whitespace.
++                );
+crates/qbind-node/src/binary_consensus_loop.rs:10729: trailing whitespace.
++                assert_eq!(out.calls.lock().unwrap().len(), 1, "one timeout per view");
+crates/qbind-node/src/binary_consensus_loop.rs:10730: trailing whitespace.
++            }
+crates/qbind-node/src/binary_consensus_loop.rs:10731: trailing whitespace.
++        }
+crates/qbind-node/src/binary_consensus_loop.rs:10732: trailing whitespace.
++        // Actual present logical lock, but no admitted/retained QC authority:
+crates/qbind-node/src/binary_consensus_loop.rs:10733: trailing whitespace.
++        // inactive mode must not make it eligible to sign.
+crates/qbind-node/src/binary_consensus_loop.rs:10734: trailing whitespace.
++        let mut engine = a17_engine(Some((5, [0xE7; 32])));
+crates/qbind-node/src/binary_consensus_loop.rs:10735: trailing whitespace.
++        for id in 0..3 {
+crates/qbind-node/src/binary_consensus_loop.rs:10736: trailing whitespace.
++            engine.state_mut().on_vote(ValidatorId::new(id), 5, &[0xE7; 32]).unwrap();
+crates/qbind-node/src/binary_consensus_loop.rs:10737: trailing whitespace.
++        }
+crates/qbind-node/src/binary_consensus_loop.rs:10738: trailing whitespace.
++        assert!(engine.locked_qc().is_some());
+crates/qbind-node/src/binary_consensus_loop.rs:10739: trailing whitespace.
++        let mode = a17_mode(None);
+crates/qbind-node/src/binary_consensus_loop.rs:10740: trailing whitespace.
++        let out = A17RecordingFacade::default();
+crates/qbind-node/src/binary_consensus_loop.rs:10741: trailing whitespace.
++        let before = a17_protected_observation(&engine, &mode, &out);
+crates/qbind-node/src/binary_consensus_loop.rs:10742: trailing whitespace.
++        let mut stats = BinaryConsensusLoopInboundStats::default();
+crates/qbind-node/src/binary_consensus_loop.rs:10743: trailing whitespace.
++        let mut state = ViewTimeoutState::new(engine.current_view(), engine.commit_log().len() as u64);
+crates/qbind-node/src/binary_consensus_loop.rs:10744: trailing whitespace.
++        maybe_emit_view_timeout(
+crates/qbind-node/src/binary_consensus_loop.rs:10745: trailing whitespace.
++            &mut engine, &mut state, 5, &mut ViewTimeoutBackoffState::no_growth(Some(5)),
+crates/qbind-node/src/binary_consensus_loop.rs:10746: trailing whitespace.
++            false, Some(&out), &mut stats, Some(&valid),
+crates/qbind-node/src/binary_consensus_loop.rs:10747: trailing whitespace.
++        );
+crates/qbind-node/src/binary_consensus_loop.rs:10748: trailing whitespace.
++        assert_eq!(stats.retained_qc_admission_rejected_total, 1);
+crates/qbind-node/src/binary_consensus_loop.rs:10749: trailing whitespace.
++        assert_eq!(stats.outbound_timeout_signing_success, 0);
+crates/qbind-node/src/binary_consensus_loop.rs:10750: trailing whitespace.
++        assert_eq!(a17_check_protected(&before, &a17_protected_observation(&engine, &mode, &out)), Ok(()));
+crates/qbind-node/src/binary_consensus_loop.rs:10751: trailing whitespace.
++    }
+crates/qbind-node/src/binary_consensus_loop.rs:10752: trailing whitespace.
++
+crates/qbind-node/src/binary_consensus_loop.rs:10753: trailing whitespace.
++    #[test]
+crates/qbind-node/src/binary_consensus_loop.rs:10754: trailing whitespace.
++    fn empty_containment_d4_single_validator_leader_progress_is_not_bound_peer_evidence() {
+crates/qbind-node/src/binary_consensus_loop.rs:10755: trailing whitespace.
++        for active in [false, true] {
+crates/qbind-node/src/binary_consensus_loop.rs:10756: trailing whitespace.
++            let mut engine = b14_make_engine(1, 0);
+crates/qbind-node/src/binary_consensus_loop.rs:10757: trailing whitespace.
++            engine.initialize_from_snapshot_baseline([0xE8; 32], 5);
+crates/qbind-node/src/binary_consensus_loop.rs:10758: trailing whitespace.
++            let mut mode = a17_mode(Some((5, [0xE8; 32])));
+crates/qbind-node/src/binary_consensus_loop.rs:10759: trailing whitespace.
++            mode.active = active;
+crates/qbind-node/src/binary_consensus_loop.rs:10760: trailing whitespace.
++            let out = A17RecordingFacade::default();
+crates/qbind-node/src/binary_consensus_loop.rs:10761: trailing whitespace.
++            let before = a17_protected_observation(&engine, &mode, &out);
+crates/qbind-node/src/binary_consensus_loop.rs:10762: trailing whitespace.
++            let mut stats = BinaryConsensusLoopInboundStats::default();
+crates/qbind-node/src/binary_consensus_loop.rs:10763: trailing whitespace.
++            let mut proposals = 0;
+crates/qbind-node/src/binary_consensus_loop.rs:10764: trailing whitespace.
++            let mut cached_p = None;
+crates/qbind-node/src/binary_consensus_loop.rs:10765: trailing whitespace.
++            let mut cached_v = None;
+crates/qbind-node/src/binary_consensus_loop.rs:10766: trailing whitespace.
++            for _ in 0..6 {
+crates/qbind-node/src/binary_consensus_loop.rs:10767: trailing whitespace.
++                do_leader_tick(
+crates/qbind-node/src/binary_consensus_loop.rs:10768: trailing whitespace.
++                    &mut engine, &mut proposals, &Arc::new(NodeMetrics::new()), &mut stats,
+crates/qbind-node/src/binary_consensus_loop.rs:10769: trailing whitespace.
++                    Some(&out), &mut cached_p, &mut cached_v, &mut BinaryReconfigDetector::default(),
+crates/qbind-node/src/binary_consensus_loop.rs:10770: trailing whitespace.
++                    None, None, None, ConsensusVerificationPolicy::Required,
+crates/qbind-node/src/binary_consensus_loop.rs:10771: trailing whitespace.
++                );
+crates/qbind-node/src/binary_consensus_loop.rs:10772: trailing whitespace.
++            }
+crates/qbind-node/src/binary_consensus_loop.rs:10773: trailing whitespace.
++            assert!(engine.committed_height().unwrap() > 5);
+crates/qbind-node/src/binary_consensus_loop.rs:10774: trailing whitespace.
++            assert!(proposals > 0);
+crates/qbind-node/src/binary_consensus_loop.rs:10775: trailing whitespace.
++            assert_eq!(a17_check_protected(&before, &a17_protected_observation(&engine, &mode, &out)), Err(vec!["engine"]));
+crates/qbind-node/src/binary_consensus_loop.rs:10776: trailing whitespace.
++            assert!(out.calls.lock().unwrap().is_empty(), "Required policy lacks current PV authority");
+crates/qbind-node/src/binary_consensus_loop.rs:10777: trailing whitespace.
++            assert_eq!(stats.outbound_proposal_signing_success, 0);
+crates/qbind-node/src/binary_consensus_loop.rs:10778: trailing whitespace.
++            assert_eq!(stats.outbound_vote_signing_success, 0);
+crates/qbind-node/src/binary_consensus_loop.rs:10779: trailing whitespace.
++            assert!(stats.outbound_proposal_current_state_unavailable_total > 0);
+crates/qbind-node/src/binary_consensus_loop.rs:10780: trailing whitespace.
++        }
+crates/qbind-node/src/binary_consensus_loop.rs:10781: trailing whitespace.
++        // H1's admissible non-self inputs use a four-validator engine/map.
+crates/qbind-node/src/binary_consensus_loop.rs:10782: trailing whitespace.
++        // No non-self responder is inserted into this one-validator fixture.
+crates/qbind-node/src/binary_consensus_loop.rs:10783: trailing whitespace.
++    }
+crates/qbind-node/src/binary_consensus_loop.rs:10784: trailing whitespace.
++
+crates/qbind-node/src/binary_consensus_loop.rs:10785: trailing whitespace.
++    #[test]
+crates/qbind-node/src/binary_consensus_loop.rs:10786: trailing whitespace.
++    fn empty_containment_downstream_inbound_timeout_newview_are_not_mode_fenced() {
+crates/qbind-node/src/binary_consensus_loop.rs:10787: trailing whitespace.
++        let fixture = run030::make_fixture(4);
+crates/qbind-node/src/binary_consensus_loop.rs:10788: trailing whitespace.
++        let ctx = run030::make_ctx(&fixture, None);
+crates/qbind-node/src/binary_consensus_loop.rs:10789: trailing whitespace.
++        for active in [false, true] {
+crates/qbind-node/src/binary_consensus_loop.rs:10790: trailing whitespace.
++            for newview in [false, true] {
+crates/qbind-node/src/binary_consensus_loop.rs:10791: trailing whitespace.
++                let mut engine = a17_engine(Some((5, [0xE9; 32])));
+crates/qbind-node/src/binary_consensus_loop.rs:10792: trailing whitespace.
++                let mut mode = a17_mode(Some((5, [0xE9; 32])));
+crates/qbind-node/src/binary_consensus_loop.rs:10793: trailing whitespace.
++                mode.active = active;
+crates/qbind-node/src/binary_consensus_loop.rs:10794: trailing whitespace.
++                let mut stats = BinaryConsensusLoopInboundStats::default();
+crates/qbind-node/src/binary_consensus_loop.rs:10795: trailing whitespace.
++                let out = A17RecordingFacade::default();
+crates/qbind-node/src/binary_consensus_loop.rs:10796: trailing whitespace.
++                let gate = a17_binding_gate(4);
+crates/qbind-node/src/binary_consensus_loop.rs:10797: trailing whitespace.
++                assert_eq!(empty_containment_dispatch(
+crates/qbind-node/src/binary_consensus_loop.rs:10798: trailing whitespace.
++                    &mut engine, &mut mode, &mut stats,
+crates/qbind-node/src/binary_consensus_loop.rs:10799: trailing whitespace.
++                    a17_response(1, 0, [0; 32], Some(u64::MAX), vec![]),
+crates/qbind-node/src/binary_consensus_loop.rs:10800: trailing whitespace.
++                    Some(&a17_origin(1)), Some(&gate), &out,
+crates/qbind-node/src/binary_consensus_loop.rs:10801: trailing whitespace.
++                ), Ok(()));
+crates/qbind-node/src/binary_consensus_loop.rs:10802: trailing whitespace.
++                let view = engine.current_view();
+crates/qbind-node/src/binary_consensus_loop.rs:10803: trailing whitespace.
++                let before = a17_protected_observation(&engine, &mode, &out);
+crates/qbind-node/src/binary_consensus_loop.rs:10804: trailing whitespace.
++                for id in 1..=if newview { 1 } else { 3 } {
+crates/qbind-node/src/binary_consensus_loop.rs:10805: trailing whitespace.
++                    let msg = if newview {
+crates/qbind-node/src/binary_consensus_loop.rs:10806: trailing whitespace.
++                        ConsensusNetMsg::NewView(bincode::serialize(&run030::build_valid_tc(&fixture, view)).unwrap())
+crates/qbind-node/src/binary_consensus_loop.rs:10807: trailing whitespace.
++                    } else {
+crates/qbind-node/src/binary_consensus_loop.rs:10808: trailing whitespace.
++                        ConsensusNetMsg::Timeout(bincode::serialize(
+crates/qbind-node/src/binary_consensus_loop.rs:10809: trailing whitespace.
++                            &run030::signed_timeout(view, ValidatorId::new(id), &fixture.sks),
+crates/qbind-node/src/binary_consensus_loop.rs:10810: trailing whitespace.
++                        ).unwrap())
+crates/qbind-node/src/binary_consensus_loop.rs:10811: trailing whitespace.
++                    };
+crates/qbind-node/src/binary_consensus_loop.rs:10812: trailing whitespace.
++                    handle_inbound_consensus_msg(
+crates/qbind-node/src/binary_consensus_loop.rs:10813: trailing whitespace.
++                        &mut engine, msg, &mut stats, Some(&out), &Arc::new(NodeMetrics::new()),
+crates/qbind-node/src/binary_consensus_loop.rs:10814: trailing whitespace.
++                        ValidatorId::new(0), &mut mode, Some(&ctx), None, None,
+crates/qbind-node/src/binary_consensus_loop.rs:10815: trailing whitespace.
++                        &mut BinaryReconfigDetector::default(), Some(&a17_origin(id)),
+crates/qbind-node/src/binary_consensus_loop.rs:10816: trailing whitespace.
++                        Some(&gate), None, ConsensusVerificationPolicy::Required,
+crates/qbind-node/src/binary_consensus_loop.rs:10817: trailing whitespace.
++                    );
+crates/qbind-node/src/binary_consensus_loop.rs:10818: trailing whitespace.
++                }
+crates/qbind-node/src/binary_consensus_loop.rs:10819: trailing whitespace.
++                assert_eq!(engine.current_view(), view + 1);
+crates/qbind-node/src/binary_consensus_loop.rs:10820: trailing whitespace.
++                assert_eq!(mode.is_active(), active);
+crates/qbind-node/src/binary_consensus_loop.rs:10821: trailing whitespace.
++                let effects = a17_check_protected(&before, &a17_protected_observation(&engine, &mode, &out)).unwrap_err();
+crates/qbind-node/src/binary_consensus_loop.rs:10822: trailing whitespace.
++                assert!(effects.contains(&"engine"), "mode does not fence independently verified Timeout/NewView");
+crates/qbind-node/src/binary_consensus_loop.rs:10823: trailing whitespace.
++                assert!(!effects.contains(&"restore_mode"));
+crates/qbind-node/src/binary_consensus_loop.rs:10824: trailing whitespace.
++                assert_eq!(stats.outbound_timeout_signing_success, 0, "inbound evidence uses peer test keys, no local signer");
+crates/qbind-node/src/binary_consensus_loop.rs:10825: trailing whitespace.
++            }
+crates/qbind-node/src/binary_consensus_loop.rs:10826: trailing whitespace.
++        }
+crates/qbind-node/src/binary_consensus_loop.rs:10827: trailing whitespace.
++    }
+crates/qbind-node/src/binary_consensus_loop.rs:10828: trailing whitespace.
++
+crates/qbind-node/src/binary_consensus_loop.rs:11400: trailing whitespace.
++    fn a17_empty_responses_cannot_track_progress_exit_or_bypass_as_self() {
+crates/qbind-node/src/binary_consensus_loop.rs:11405: trailing whitespace.
++        // Direct engine import establishes only a fixture-progress state.
+crates/qbind-node/src/binary_consensus_loop.rs:11406: trailing whitespace.
++        // An admitted empty response must no longer clear or track it.
+crates/qbind-node/src/binary_consensus_loop.rs:11442: trailing whitespace.
++        assert!(exited_mode.is_active());
+crates/qbind-node/src/binary_consensus_loop.rs:11443: trailing whitespace.
++        assert_eq!(exited_mode.peer_max_observed_committed_height, None);
+crates/qbind-node/src/binary_consensus_loop.rs:11444: trailing whitespace.
++        assert_eq!(exited_stats.restore_catchup_mode_exited_at_height, 0);
+crates/qbind-node/src/binary_consensus_loop.rs:11445: trailing whitespace.
++        assert_eq!(exited_stats.restore_catchup_empty_responses_ignored_total, 1);
+crates/qbind-node/src/binary_consensus_loop.rs:11448: trailing whitespace.
++        // At the baseline, no peer progress is recorded either.
+crates/qbind-node/src/binary_consensus_loop.rs:11464: trailing whitespace.
++        assert_eq!(active_mode.peer_max_observed_committed_height, None);
+crates/qbind-node/src/binary_consensus_loop.rs:11465: trailing whitespace.
++        assert_eq!(active_stats.restore_catchup_empty_responses_ignored_total, 1);
+crates/qbind-node/src/binary_consensus_loop.rs:11468: trailing whitespace.
++        // The admitted local-origin fixture is counted and ignored too.
+crates/qbind-node/src/binary_consensus_loop.rs:11487: trailing whitespace.
++        assert_eq!(self_stats.restore_catchup_empty_responses_ignored_total, 1);
+
+EXIT STATUS: 2 (git diff --check treats the preserved CRLF source as trailing whitespace; later chained commands not run)

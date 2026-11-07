@@ -1,0 +1,556 @@
+COMMAND: python3 /root/.copilot/session-state/e67bb11721be436b995a7699c07498aa/files/validate_empty_restore_implementation.py
+Exact executed script follows:
+import hashlib
+import re
+import subprocess
+from pathlib import Path
+
+BASE = "30a79a21996c11f97f1c496082551dba4cbd3a45"
+MAIN = "541d9a6c9a43fe10410260d9c2494a5fc4416c7a"
+BRANCH = "investigation/empty-restore-response-20261107"
+PACKAGE = Path("docs/security/evidence/empty-restore-response/implementation-20261107")
+PLAN = "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md"
+SOURCE = "crates/qbind-node/src/binary_consensus_loop.rs"
+METRICS = "crates/qbind-node/src/metrics.rs"
+
+
+def git(*args):
+    return subprocess.run(
+        ["git", *args], check=True, capture_output=True
+    ).stdout
+
+
+def blob(rev, path):
+    return git("show", f"{rev}:{path}")
+
+
+assert git("branch", "--show-current").decode().strip() == BRANCH
+assert git("rev-parse", "HEAD").decode().strip() == BASE
+assert git("rev-parse", f"{BASE}^{{tree}}").decode().strip() == "d903a8671192f09be763fdb6c11b7ad4c883d62e"
+assert git("rev-parse", f"{MAIN}^{{tree}}").decode().strip() == "0b0e597a29dc8f2d95d93f9bd04364cc140a9db1"
+git("merge-base", "--is-ancestor", MAIN, BASE)
+remote = git("ls-remote", "origin", "refs/heads/main", f"refs/heads/{BRANCH}").decode()
+assert f"{MAIN}\trefs/heads/main\n" in remote
+assert f"{BASE}\trefs/heads/{BRANCH}\n" in remote
+print("PASS: branch/base/tree/ancestry and direct remote refs")
+print(remote, end="")
+
+plan_before = blob(BASE, PLAN)
+assert Path(PLAN).read_bytes().startswith(plan_before)
+print(f"PASS: unchanged starting plan prefix: {len(plan_before)} bytes, SHA256 {hashlib.sha256(plan_before).hexdigest()}")
+historical = git("ls-tree", "-r", "--name-only", BASE, "docs/security/evidence/empty-restore-response").decode().splitlines()
+for path in historical:
+    old = blob(BASE, path)
+    assert Path(path).read_bytes() == old, path
+    print(f"PASS historical byte identity: {hashlib.sha256(old).hexdigest()}  {path}")
+for rev, manifest in [
+    ("fb29cef67ba4d7c918f4299a9b60de79cd6f41ef", "docs/security/evidence/empty-restore-response/SHA256SUMS"),
+    (BASE, "docs/security/evidence/empty-restore-response/containment-contract-20261107/SHA256SUMS"),
+]:
+    lines = blob(rev, manifest).decode().splitlines()
+    for line in lines:
+        digest, path = line.split("  ", 1)
+        assert hashlib.sha256(blob(rev, path)).hexdigest() == digest, (rev, path)
+    print(f"PASS: {len(lines)} historical manifest entries verified at producing revision {rev}")
+
+old_source = blob(BASE, SOURCE).decode()
+source = Path(SOURCE).read_bytes().decode()
+
+
+def nonempty_guard(text):
+    arm = text.index("ConsensusNetMsg::RestoreCatchupResponse(resp) =>")
+    start = text.index("if !resp.blocks.is_empty() {", arm)
+    end = start
+    depth = 0
+    for end in range(text.index("{", start), len(text)):
+        if text[end] == "{":
+            depth += 1
+        elif text[end] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:end + 1]
+    raise AssertionError("guard end not found")
+
+
+assert nonempty_guard(old_source) == nonempty_guard(source)
+old_helper = old_source[old_source.index("fn handle_restore_catchup_response("):old_source.index("fn evaluate_restore_mode_transition(")]
+helper = source[source.index("fn handle_restore_catchup_response("):source.index("fn evaluate_restore_mode_transition(")]
+assert helper == old_helper
+old_binding = old_source[old_source.index("let bind_sender ="):old_source.index("stats.inbound_msgs_received =")]
+binding = source[source.index("let bind_sender ="):source.index("stats.inbound_msgs_received =")]
+assert binding == old_binding
+print("PASS: non-empty guard, direct-helper body and binding closure unchanged byte-for-byte")
+
+arm_start = source.index("ConsensusNetMsg::RestoreCatchupResponse(resp) =>")
+arm_end = source.index("/// Run 035", arm_start)
+arm = source[arm_start:arm_end]
+production_arm = re.sub(
+    r"            #\[cfg\(test\)\]\r?\n            if tests::empty_response_sensitivity_before_guard\(.*?            \}\r?\n",
+    "", arm, flags=re.S,
+)
+assert "tests::" not in production_arm
+assert "handle_restore_catchup_response(" not in production_arm
+assert "evaluate_restore_mode_transition(" not in production_arm
+tail = production_arm[production_arm.index("stats.restore_catchup_empty_responses_ignored_total ="):]
+assert ".saturating_add(1);" in tail and "return;" in tail
+assert "eprintln!" not in tail
+print("PASS: production empty tail saturates and returns; no helper/evaluation/log or test defect")
+
+modified = set(git("diff", "--name-only", BASE).decode().splitlines())
+assert modified == {SOURCE, METRICS, PLAN}, modified
+listed = (PACKAGE / "CHANGED_PATHS.txt").read_text().splitlines()
+assert len(listed) == len(set(listed))
+assert set(listed) == {SOURCE, METRICS, PLAN} | {str(p) for p in PACKAGE.iterdir() if p.is_file()}
+print(f"PASS: exact {len(listed)}-path allowlist; no audit-register/engine/main/configuration changes")
+
+for path in listed:
+    if path.endswith(".log"):
+        continue  # Captured diagnostics must retain original bytes.
+    data = Path(path).read_bytes()
+    data.decode("utf-8")
+    assert data.endswith(b"\n"), path
+    lines = data.replace(b"\r\n", b"\n").splitlines()
+    assert not any(line.endswith((b" ", b"\t")) for line in lines), path
+    if path == SOURCE:
+        assert data.count(b"\r\n") == data.count(b"\n"), path
+    else:
+        assert b"\r" not in data, path
+print("PASS: source CRLF and document/metrics LF preserved; UTF-8/final newline/no trailing whitespace")
+git("-c", "core.whitespace=cr-at-eol", "diff", "--check")
+print("PASS: git -c core.whitespace=cr-at-eol diff --check (exit 0)")
+
+urls = re.findall(r"https://github\.com/olivexo28/QBIND/blob/([0-9a-f]{40})/([^#)]+)#L([0-9]+)-L([0-9]+)", (PACKAGE / "README.md").read_text())
+for rev, path, start, end in urls:
+    assert rev == MAIN
+    assert 1 <= int(start) <= int(end) <= len(blob(rev, path).splitlines())
+assert len(urls) == 4
+print("PASS: four new pinned source references and line ranges resolve")
+
+all_tests = []
+for name, expected, exits in [
+    ("focused-verified.log", 10, 1),
+    ("regressions-verified.log", 31, 6),
+    ("production-verified.log", 3, 2),
+]:
+    log = (PACKAGE / name).read_text()
+    tests = re.findall(r"^test (\S+) \.\.\. ok$", log, re.M)
+    assert len(tests) == len(set(tests)) == expected, name
+    assert re.findall(r"^EXIT STATUS: (\d+)$", log, re.M) == ["0"] * exits, name
+    all_tests.extend(tests)
+    print(f"PASS: {name}: {expected} passed; {exits} commands exited 0")
+assert len(set(all_tests)) == 44
+print("PASS: 44 distinct final-selection tests; no full-suite/exploit/production-runtime claim")
+for path in [SOURCE, METRICS]:
+    digest = hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    for log_name in ["regressions-verified.log", "production-verified.log"]:
+        assert f"{digest}  {path}" in (PACKAGE / log_name).read_text()
+    print(f"PASS final-source execution binding: {digest}  {path}")
+
+VALIDATOR OUTPUT:
+PASS: branch/base/tree/ancestry and direct remote refs
+30a79a21996c11f97f1c496082551dba4cbd3a45	refs/heads/investigation/empty-restore-response-20261107
+541d9a6c9a43fe10410260d9c2494a5fc4416c7a	refs/heads/main
+PASS: unchanged starting plan prefix: 377186 bytes, SHA256 898bacc5783591563050d318b55d288bfe47f0963a3239aebe2e1794f5cb026e
+PASS historical byte identity: 2d5f2bbbbfde48758afb6bb4bcb049142655388400ee271bd74ebd75d1f980ec  docs/security/evidence/empty-restore-response/CHANGED_PATHS.txt
+PASS historical byte identity: 34a57fe8aecce451f9d4e72fdd823dcddcdd130ee62369f8b9d351a43b489258  docs/security/evidence/empty-restore-response/README.md
+PASS historical byte identity: f2cb27267f33a5378a8957038bfe01d24be1298b774be3013ea581e337f44e4a  docs/security/evidence/empty-restore-response/SHA256SUMS
+PASS historical byte identity: 513a842add12409b919884b77e7dca19566a7db00ebc0bc3b160b4551b1e6bcd  docs/security/evidence/empty-restore-response/containment-contract-20261107/CHANGED_PATHS.txt
+PASS historical byte identity: 73c44b171ed0cf0f295bfcdc722bc631a4596695b4beb6b75ead0264a49fc5bf  docs/security/evidence/empty-restore-response/containment-contract-20261107/README.md
+PASS historical byte identity: 3b0569caa2af12631d67c154c1bce40cf8b59fa18101ff1adbf6bf6a5079d1e8  docs/security/evidence/empty-restore-response/containment-contract-20261107/SHA256SUMS
+PASS historical byte identity: e0976fe2059faac838236b02edb4ab847ced86540b6fbefe5a0bb3518d07942f  docs/security/evidence/empty-restore-response/containment-contract-20261107/documentation-checks.log
+PASS historical byte identity: aec28823bb8d4f279c8ca1825f05bbe24237b75b8b2dce74791fc21daefe2595  docs/security/evidence/empty-restore-response/documentation-checks.log
+PASS: 4 historical manifest entries verified at producing revision fb29cef67ba4d7c918f4299a9b60de79cd6f41ef
+PASS: 8 historical manifest entries verified at producing revision 30a79a21996c11f97f1c496082551dba4cbd3a45
+PASS: non-empty guard, direct-helper body and binding closure unchanged byte-for-byte
+PASS: production empty tail saturates and returns; no helper/evaluation/log or test defect
+PASS: exact 21-path allowlist; no audit-register/engine/main/configuration changes
+Traceback (most recent call last):
+  File "/root/.copilot/session-state/e67bb11721be436b995a7699c07498aa/files/validate_empty_restore_implementation.py", line 109, in <module>
+    assert data.endswith(b"\n"), path
+           ^^^^^^^^^^^^^^^^^^^^
+AssertionError: crates/qbind-node/src/binary_consensus_loop.rs
+
+EXIT STATUS: 1
+
+ATTEMPT 2: preserve reviewed source EOF convention rather than requiring a new terminal newline.
+COMMAND: python3 /root/.copilot/session-state/e67bb11721be436b995a7699c07498aa/files/validate_empty_restore_implementation.py
+Exact revised script follows:
+import hashlib
+import re
+import subprocess
+from pathlib import Path
+
+BASE = "30a79a21996c11f97f1c496082551dba4cbd3a45"
+MAIN = "541d9a6c9a43fe10410260d9c2494a5fc4416c7a"
+BRANCH = "investigation/empty-restore-response-20261107"
+PACKAGE = Path("docs/security/evidence/empty-restore-response/implementation-20261107")
+PLAN = "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md"
+SOURCE = "crates/qbind-node/src/binary_consensus_loop.rs"
+METRICS = "crates/qbind-node/src/metrics.rs"
+
+
+def git(*args):
+    return subprocess.run(
+        ["git", *args], check=True, capture_output=True
+    ).stdout
+
+
+def blob(rev, path):
+    return git("show", f"{rev}:{path}")
+
+
+assert git("branch", "--show-current").decode().strip() == BRANCH
+assert git("rev-parse", "HEAD").decode().strip() == BASE
+assert git("rev-parse", f"{BASE}^{{tree}}").decode().strip() == "d903a8671192f09be763fdb6c11b7ad4c883d62e"
+assert git("rev-parse", f"{MAIN}^{{tree}}").decode().strip() == "0b0e597a29dc8f2d95d93f9bd04364cc140a9db1"
+git("merge-base", "--is-ancestor", MAIN, BASE)
+remote = git("ls-remote", "origin", "refs/heads/main", f"refs/heads/{BRANCH}").decode()
+assert f"{MAIN}\trefs/heads/main\n" in remote
+assert f"{BASE}\trefs/heads/{BRANCH}\n" in remote
+print("PASS: branch/base/tree/ancestry and direct remote refs")
+print(remote, end="")
+
+plan_before = blob(BASE, PLAN)
+assert Path(PLAN).read_bytes().startswith(plan_before)
+print(f"PASS: unchanged starting plan prefix: {len(plan_before)} bytes, SHA256 {hashlib.sha256(plan_before).hexdigest()}")
+historical = git("ls-tree", "-r", "--name-only", BASE, "docs/security/evidence/empty-restore-response").decode().splitlines()
+for path in historical:
+    old = blob(BASE, path)
+    assert Path(path).read_bytes() == old, path
+    print(f"PASS historical byte identity: {hashlib.sha256(old).hexdigest()}  {path}")
+for rev, manifest in [
+    ("fb29cef67ba4d7c918f4299a9b60de79cd6f41ef", "docs/security/evidence/empty-restore-response/SHA256SUMS"),
+    (BASE, "docs/security/evidence/empty-restore-response/containment-contract-20261107/SHA256SUMS"),
+]:
+    lines = blob(rev, manifest).decode().splitlines()
+    for line in lines:
+        digest, path = line.split("  ", 1)
+        assert hashlib.sha256(blob(rev, path)).hexdigest() == digest, (rev, path)
+    print(f"PASS: {len(lines)} historical manifest entries verified at producing revision {rev}")
+
+old_source = blob(BASE, SOURCE).decode()
+source = Path(SOURCE).read_bytes().decode()
+
+
+def nonempty_guard(text):
+    arm = text.index("ConsensusNetMsg::RestoreCatchupResponse(resp) =>")
+    start = text.index("if !resp.blocks.is_empty() {", arm)
+    end = start
+    depth = 0
+    for end in range(text.index("{", start), len(text)):
+        if text[end] == "{":
+            depth += 1
+        elif text[end] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:end + 1]
+    raise AssertionError("guard end not found")
+
+
+assert nonempty_guard(old_source) == nonempty_guard(source)
+old_helper = old_source[old_source.index("fn handle_restore_catchup_response("):old_source.index("fn evaluate_restore_mode_transition(")]
+helper = source[source.index("fn handle_restore_catchup_response("):source.index("fn evaluate_restore_mode_transition(")]
+assert helper == old_helper
+old_binding = old_source[old_source.index("let bind_sender ="):old_source.index("stats.inbound_msgs_received =")]
+binding = source[source.index("let bind_sender ="):source.index("stats.inbound_msgs_received =")]
+assert binding == old_binding
+print("PASS: non-empty guard, direct-helper body and binding closure unchanged byte-for-byte")
+
+arm_start = source.index("ConsensusNetMsg::RestoreCatchupResponse(resp) =>")
+arm_end = source.index("/// Run 035", arm_start)
+arm = source[arm_start:arm_end]
+production_arm = re.sub(
+    r"            #\[cfg\(test\)\]\r?\n            if tests::empty_response_sensitivity_before_guard\(.*?            \}\r?\n",
+    "", arm, flags=re.S,
+)
+assert "tests::" not in production_arm
+assert "handle_restore_catchup_response(" not in production_arm
+assert "evaluate_restore_mode_transition(" not in production_arm
+tail = production_arm[production_arm.index("stats.restore_catchup_empty_responses_ignored_total ="):]
+assert ".saturating_add(1);" in tail and "return;" in tail
+assert "eprintln!" not in tail
+print("PASS: production empty tail saturates and returns; no helper/evaluation/log or test defect")
+
+modified = set(git("diff", "--name-only", BASE).decode().splitlines())
+assert modified == {SOURCE, METRICS, PLAN}, modified
+listed = (PACKAGE / "CHANGED_PATHS.txt").read_text().splitlines()
+assert len(listed) == len(set(listed))
+assert set(listed) == {SOURCE, METRICS, PLAN} | {str(p) for p in PACKAGE.iterdir() if p.is_file()}
+print(f"PASS: exact {len(listed)}-path allowlist; no audit-register/engine/main/configuration changes")
+
+for path in listed:
+    if path.endswith(".log"):
+        continue  # Captured diagnostics must retain original bytes.
+    data = Path(path).read_bytes()
+    data.decode("utf-8")
+    lines = data.replace(b"\r\n", b"\n").splitlines()
+    assert not any(line.endswith((b" ", b"\t")) for line in lines), path
+    if path == SOURCE:
+        assert data.count(b"\r\n") == data.count(b"\n"), path
+        assert data.endswith(b"\n") == blob(BASE, path).endswith(b"\n"), path
+    else:
+        assert data.endswith(b"\n"), path
+        assert b"\r" not in data, path
+print("PASS: source CRLF/EOF convention and document/metrics LF preserved; UTF-8/no trailing whitespace")
+git("-c", "core.whitespace=cr-at-eol", "diff", "--check")
+print("PASS: git -c core.whitespace=cr-at-eol diff --check (exit 0)")
+
+urls = re.findall(r"https://github\.com/olivexo28/QBIND/blob/([0-9a-f]{40})/([^#)]+)#L([0-9]+)-L([0-9]+)", (PACKAGE / "README.md").read_text())
+for rev, path, start, end in urls:
+    assert rev == MAIN
+    assert 1 <= int(start) <= int(end) <= len(blob(rev, path).splitlines())
+assert len(urls) == 4
+print("PASS: four new pinned source references and line ranges resolve")
+
+all_tests = []
+for name, expected, exits in [
+    ("focused-verified.log", 10, 1),
+    ("regressions-verified.log", 31, 6),
+    ("production-verified.log", 3, 2),
+]:
+    log = (PACKAGE / name).read_text()
+    tests = re.findall(r"^test (\S+) \.\.\. ok$", log, re.M)
+    assert len(tests) == len(set(tests)) == expected, name
+    assert re.findall(r"^EXIT STATUS: (\d+)$", log, re.M) == ["0"] * exits, name
+    all_tests.extend(tests)
+    print(f"PASS: {name}: {expected} passed; {exits} commands exited 0")
+assert len(set(all_tests)) == 44
+print("PASS: 44 distinct final-selection tests; no full-suite/exploit/production-runtime claim")
+for path in [SOURCE, METRICS]:
+    digest = hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    for log_name in ["regressions-verified.log", "production-verified.log"]:
+        assert f"{digest}  {path}" in (PACKAGE / log_name).read_text()
+    print(f"PASS final-source execution binding: {digest}  {path}")
+
+VALIDATOR OUTPUT:
+PASS: branch/base/tree/ancestry and direct remote refs
+30a79a21996c11f97f1c496082551dba4cbd3a45	refs/heads/investigation/empty-restore-response-20261107
+541d9a6c9a43fe10410260d9c2494a5fc4416c7a	refs/heads/main
+PASS: unchanged starting plan prefix: 377186 bytes, SHA256 898bacc5783591563050d318b55d288bfe47f0963a3239aebe2e1794f5cb026e
+PASS historical byte identity: 2d5f2bbbbfde48758afb6bb4bcb049142655388400ee271bd74ebd75d1f980ec  docs/security/evidence/empty-restore-response/CHANGED_PATHS.txt
+PASS historical byte identity: 34a57fe8aecce451f9d4e72fdd823dcddcdd130ee62369f8b9d351a43b489258  docs/security/evidence/empty-restore-response/README.md
+PASS historical byte identity: f2cb27267f33a5378a8957038bfe01d24be1298b774be3013ea581e337f44e4a  docs/security/evidence/empty-restore-response/SHA256SUMS
+PASS historical byte identity: 513a842add12409b919884b77e7dca19566a7db00ebc0bc3b160b4551b1e6bcd  docs/security/evidence/empty-restore-response/containment-contract-20261107/CHANGED_PATHS.txt
+PASS historical byte identity: 73c44b171ed0cf0f295bfcdc722bc631a4596695b4beb6b75ead0264a49fc5bf  docs/security/evidence/empty-restore-response/containment-contract-20261107/README.md
+PASS historical byte identity: 3b0569caa2af12631d67c154c1bce40cf8b59fa18101ff1adbf6bf6a5079d1e8  docs/security/evidence/empty-restore-response/containment-contract-20261107/SHA256SUMS
+PASS historical byte identity: e0976fe2059faac838236b02edb4ab847ced86540b6fbefe5a0bb3518d07942f  docs/security/evidence/empty-restore-response/containment-contract-20261107/documentation-checks.log
+PASS historical byte identity: aec28823bb8d4f279c8ca1825f05bbe24237b75b8b2dce74791fc21daefe2595  docs/security/evidence/empty-restore-response/documentation-checks.log
+PASS: 4 historical manifest entries verified at producing revision fb29cef67ba4d7c918f4299a9b60de79cd6f41ef
+PASS: 8 historical manifest entries verified at producing revision 30a79a21996c11f97f1c496082551dba4cbd3a45
+PASS: non-empty guard, direct-helper body and binding closure unchanged byte-for-byte
+PASS: production empty tail saturates and returns; no helper/evaluation/log or test defect
+PASS: exact 21-path allowlist; no audit-register/engine/main/configuration changes
+Traceback (most recent call last):
+  File "/root/.copilot/session-state/e67bb11721be436b995a7699c07498aa/files/validate_empty_restore_implementation.py", line 115, in <module>
+    assert data.endswith(b"\n"), path
+           ^^^^^^^^^^^^^^^^^^^^
+AssertionError: crates/qbind-node/src/metrics.rs
+
+EXIT STATUS: 1
+
+ATTEMPT 3: preserve EOF conventions for both reviewed production source files.
+COMMAND: python3 /root/.copilot/session-state/e67bb11721be436b995a7699c07498aa/files/validate_empty_restore_implementation.py
+Exact revised script follows:
+import hashlib
+import re
+import subprocess
+from pathlib import Path
+
+BASE = "30a79a21996c11f97f1c496082551dba4cbd3a45"
+MAIN = "541d9a6c9a43fe10410260d9c2494a5fc4416c7a"
+BRANCH = "investigation/empty-restore-response-20261107"
+PACKAGE = Path("docs/security/evidence/empty-restore-response/implementation-20261107")
+PLAN = "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md"
+SOURCE = "crates/qbind-node/src/binary_consensus_loop.rs"
+METRICS = "crates/qbind-node/src/metrics.rs"
+
+
+def git(*args):
+    return subprocess.run(
+        ["git", *args], check=True, capture_output=True
+    ).stdout
+
+
+def blob(rev, path):
+    return git("show", f"{rev}:{path}")
+
+
+assert git("branch", "--show-current").decode().strip() == BRANCH
+assert git("rev-parse", "HEAD").decode().strip() == BASE
+assert git("rev-parse", f"{BASE}^{{tree}}").decode().strip() == "d903a8671192f09be763fdb6c11b7ad4c883d62e"
+assert git("rev-parse", f"{MAIN}^{{tree}}").decode().strip() == "0b0e597a29dc8f2d95d93f9bd04364cc140a9db1"
+git("merge-base", "--is-ancestor", MAIN, BASE)
+remote = git("ls-remote", "origin", "refs/heads/main", f"refs/heads/{BRANCH}").decode()
+assert f"{MAIN}\trefs/heads/main\n" in remote
+assert f"{BASE}\trefs/heads/{BRANCH}\n" in remote
+print("PASS: branch/base/tree/ancestry and direct remote refs")
+print(remote, end="")
+
+plan_before = blob(BASE, PLAN)
+assert Path(PLAN).read_bytes().startswith(plan_before)
+print(f"PASS: unchanged starting plan prefix: {len(plan_before)} bytes, SHA256 {hashlib.sha256(plan_before).hexdigest()}")
+historical = git("ls-tree", "-r", "--name-only", BASE, "docs/security/evidence/empty-restore-response").decode().splitlines()
+for path in historical:
+    old = blob(BASE, path)
+    assert Path(path).read_bytes() == old, path
+    print(f"PASS historical byte identity: {hashlib.sha256(old).hexdigest()}  {path}")
+for rev, manifest in [
+    ("fb29cef67ba4d7c918f4299a9b60de79cd6f41ef", "docs/security/evidence/empty-restore-response/SHA256SUMS"),
+    (BASE, "docs/security/evidence/empty-restore-response/containment-contract-20261107/SHA256SUMS"),
+]:
+    lines = blob(rev, manifest).decode().splitlines()
+    for line in lines:
+        digest, path = line.split("  ", 1)
+        assert hashlib.sha256(blob(rev, path)).hexdigest() == digest, (rev, path)
+    print(f"PASS: {len(lines)} historical manifest entries verified at producing revision {rev}")
+
+old_source = blob(BASE, SOURCE).decode()
+source = Path(SOURCE).read_bytes().decode()
+
+
+def nonempty_guard(text):
+    arm = text.index("ConsensusNetMsg::RestoreCatchupResponse(resp) =>")
+    start = text.index("if !resp.blocks.is_empty() {", arm)
+    end = start
+    depth = 0
+    for end in range(text.index("{", start), len(text)):
+        if text[end] == "{":
+            depth += 1
+        elif text[end] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:end + 1]
+    raise AssertionError("guard end not found")
+
+
+assert nonempty_guard(old_source) == nonempty_guard(source)
+old_helper = old_source[old_source.index("fn handle_restore_catchup_response("):old_source.index("fn evaluate_restore_mode_transition(")]
+helper = source[source.index("fn handle_restore_catchup_response("):source.index("fn evaluate_restore_mode_transition(")]
+assert helper == old_helper
+old_binding = old_source[old_source.index("let bind_sender ="):old_source.index("stats.inbound_msgs_received =")]
+binding = source[source.index("let bind_sender ="):source.index("stats.inbound_msgs_received =")]
+assert binding == old_binding
+print("PASS: non-empty guard, direct-helper body and binding closure unchanged byte-for-byte")
+
+arm_start = source.index("ConsensusNetMsg::RestoreCatchupResponse(resp) =>")
+arm_end = source.index("/// Run 035", arm_start)
+arm = source[arm_start:arm_end]
+production_arm = re.sub(
+    r"            #\[cfg\(test\)\]\r?\n            if tests::empty_response_sensitivity_before_guard\(.*?            \}\r?\n",
+    "", arm, flags=re.S,
+)
+assert "tests::" not in production_arm
+assert "handle_restore_catchup_response(" not in production_arm
+assert "evaluate_restore_mode_transition(" not in production_arm
+tail = production_arm[production_arm.index("stats.restore_catchup_empty_responses_ignored_total ="):]
+assert ".saturating_add(1);" in tail and "return;" in tail
+assert "eprintln!" not in tail
+print("PASS: production empty tail saturates and returns; no helper/evaluation/log or test defect")
+
+modified = set(git("diff", "--name-only", BASE).decode().splitlines())
+assert modified == {SOURCE, METRICS, PLAN}, modified
+listed = (PACKAGE / "CHANGED_PATHS.txt").read_text().splitlines()
+assert len(listed) == len(set(listed))
+assert set(listed) == {SOURCE, METRICS, PLAN} | {str(p) for p in PACKAGE.iterdir() if p.is_file()}
+print(f"PASS: exact {len(listed)}-path allowlist; no audit-register/engine/main/configuration changes")
+
+for path in listed:
+    if path.endswith(".log"):
+        continue  # Captured diagnostics must retain original bytes.
+    data = Path(path).read_bytes()
+    data.decode("utf-8")
+    lines = data.replace(b"\r\n", b"\n").splitlines()
+    assert not any(line.endswith((b" ", b"\t")) for line in lines), path
+    if path == SOURCE:
+        assert data.count(b"\r\n") == data.count(b"\n"), path
+        assert data.endswith(b"\n") == blob(BASE, path).endswith(b"\n"), path
+    elif path == METRICS:
+        assert b"\r" not in data, path
+        assert data.endswith(b"\n") == blob(BASE, path).endswith(b"\n"), path
+    else:
+        assert data.endswith(b"\n"), path
+        assert b"\r" not in data, path
+print("PASS: source CRLF/EOF convention and document/metrics LF preserved; UTF-8/no trailing whitespace")
+git("-c", "core.whitespace=cr-at-eol", "diff", "--check")
+print("PASS: git -c core.whitespace=cr-at-eol diff --check (exit 0)")
+
+urls = re.findall(r"https://github\.com/olivexo28/QBIND/blob/([0-9a-f]{40})/([^#)]+)#L([0-9]+)-L([0-9]+)", (PACKAGE / "README.md").read_text())
+for rev, path, start, end in urls:
+    assert rev == MAIN
+    assert 1 <= int(start) <= int(end) <= len(blob(rev, path).splitlines())
+assert len(urls) == 4
+print("PASS: four new pinned source references and line ranges resolve")
+
+all_tests = []
+for name, expected, exits in [
+    ("focused-verified.log", 10, 1),
+    ("regressions-verified.log", 31, 6),
+    ("production-verified.log", 3, 2),
+]:
+    log = (PACKAGE / name).read_text()
+    tests = re.findall(r"^test (\S+) \.\.\. ok$", log, re.M)
+    assert len(tests) == len(set(tests)) == expected, name
+    assert re.findall(r"^EXIT STATUS: (\d+)$", log, re.M) == ["0"] * exits, name
+    all_tests.extend(tests)
+    print(f"PASS: {name}: {expected} passed; {exits} commands exited 0")
+assert len(set(all_tests)) == 44
+print("PASS: 44 distinct final-selection tests; no full-suite/exploit/production-runtime claim")
+for path in [SOURCE, METRICS]:
+    digest = hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    for log_name in ["regressions-verified.log", "production-verified.log"]:
+        assert f"{digest}  {path}" in (PACKAGE / log_name).read_text()
+    print(f"PASS final-source execution binding: {digest}  {path}")
+
+VALIDATOR OUTPUT:
+PASS: branch/base/tree/ancestry and direct remote refs
+30a79a21996c11f97f1c496082551dba4cbd3a45	refs/heads/investigation/empty-restore-response-20261107
+541d9a6c9a43fe10410260d9c2494a5fc4416c7a	refs/heads/main
+PASS: unchanged starting plan prefix: 377186 bytes, SHA256 898bacc5783591563050d318b55d288bfe47f0963a3239aebe2e1794f5cb026e
+PASS historical byte identity: 2d5f2bbbbfde48758afb6bb4bcb049142655388400ee271bd74ebd75d1f980ec  docs/security/evidence/empty-restore-response/CHANGED_PATHS.txt
+PASS historical byte identity: 34a57fe8aecce451f9d4e72fdd823dcddcdd130ee62369f8b9d351a43b489258  docs/security/evidence/empty-restore-response/README.md
+PASS historical byte identity: f2cb27267f33a5378a8957038bfe01d24be1298b774be3013ea581e337f44e4a  docs/security/evidence/empty-restore-response/SHA256SUMS
+PASS historical byte identity: 513a842add12409b919884b77e7dca19566a7db00ebc0bc3b160b4551b1e6bcd  docs/security/evidence/empty-restore-response/containment-contract-20261107/CHANGED_PATHS.txt
+PASS historical byte identity: 73c44b171ed0cf0f295bfcdc722bc631a4596695b4beb6b75ead0264a49fc5bf  docs/security/evidence/empty-restore-response/containment-contract-20261107/README.md
+PASS historical byte identity: 3b0569caa2af12631d67c154c1bce40cf8b59fa18101ff1adbf6bf6a5079d1e8  docs/security/evidence/empty-restore-response/containment-contract-20261107/SHA256SUMS
+PASS historical byte identity: e0976fe2059faac838236b02edb4ab847ced86540b6fbefe5a0bb3518d07942f  docs/security/evidence/empty-restore-response/containment-contract-20261107/documentation-checks.log
+PASS historical byte identity: aec28823bb8d4f279c8ca1825f05bbe24237b75b8b2dce74791fc21daefe2595  docs/security/evidence/empty-restore-response/documentation-checks.log
+PASS: 4 historical manifest entries verified at producing revision fb29cef67ba4d7c918f4299a9b60de79cd6f41ef
+PASS: 8 historical manifest entries verified at producing revision 30a79a21996c11f97f1c496082551dba4cbd3a45
+PASS: non-empty guard, direct-helper body and binding closure unchanged byte-for-byte
+PASS: production empty tail saturates and returns; no helper/evaluation/log or test defect
+PASS: exact 21-path allowlist; no audit-register/engine/main/configuration changes
+PASS: source CRLF/EOF convention and document/metrics LF preserved; UTF-8/no trailing whitespace
+PASS: git -c core.whitespace=cr-at-eol diff --check (exit 0)
+PASS: four new pinned source references and line ranges resolve
+PASS: focused-verified.log: 10 passed; 1 commands exited 0
+PASS: regressions-verified.log: 31 passed; 6 commands exited 0
+PASS: production-verified.log: 3 passed; 2 commands exited 0
+PASS: 44 distinct final-selection tests; no full-suite/exploit/production-runtime claim
+PASS final-source execution binding: c3144dcaf5e2afb785062be8828df66ed8e680bd199b7f9ad4e2f01db15496c1  crates/qbind-node/src/binary_consensus_loop.rs
+PASS final-source execution binding: 800195ef46e4df0f833c75364188813c81d5b2e73b3b707c0bd774592bae57fe  crates/qbind-node/src/metrics.rs
+
+EXIT STATUS: 0
+
+COMMAND: sha256sum -c docs/security/evidence/empty-restore-response/implementation-20261107/SHA256SUMS
+crates/qbind-node/src/binary_consensus_loop.rs: OK
+crates/qbind-node/src/metrics.rs: OK
+docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md: OK
+docs/security/evidence/empty-restore-response/implementation-20261107/CHANGED_PATHS.txt: OK
+docs/security/evidence/empty-restore-response/implementation-20261107/QUALIFICATIONS.md: OK
+docs/security/evidence/empty-restore-response/implementation-20261107/README.md: OK
+docs/security/evidence/empty-restore-response/implementation-20261107/build-dependency-install.log: OK
+docs/security/evidence/empty-restore-response/implementation-20261107/documentation-checks.log: OK
+docs/security/evidence/empty-restore-response/implementation-20261107/focused-attempt-1.log: OK
+docs/security/evidence/empty-restore-response/implementation-20261107/focused-attempt-2.log: OK
+docs/security/evidence/empty-restore-response/implementation-20261107/focused-complete.log: OK
+docs/security/evidence/empty-restore-response/implementation-20261107/focused-final.log: OK
+docs/security/evidence/empty-restore-response/implementation-20261107/focused-verified.log: OK
+docs/security/evidence/empty-restore-response/implementation-20261107/production-check.log: OK
+docs/security/evidence/empty-restore-response/implementation-20261107/production-policy-source-tests.log: OK
+docs/security/evidence/empty-restore-response/implementation-20261107/production-verified.log: OK
+docs/security/evidence/empty-restore-response/implementation-20261107/regressions-verified.log: OK
+docs/security/evidence/empty-restore-response/implementation-20261107/regressions.log: OK
+docs/security/evidence/empty-restore-response/implementation-20261107/tooling-attempts.log: OK
+docs/security/evidence/empty-restore-response/implementation-20261107/whitespace-attempt.log: OK
+EXIT STATUS: 0
+Manifest refreshed after recording checksum output; final external verification avoids self-reference.
