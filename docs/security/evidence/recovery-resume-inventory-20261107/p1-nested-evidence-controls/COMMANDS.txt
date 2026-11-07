@@ -1,0 +1,143 @@
+P1 NESTED EVIDENCE CONTROL CORRECTION — DOCUMENTATION-ONLY COMMANDS
+
+Working directory: /workspaces/QBIND/olivexo28/QBIND
+Supplied task tip:
+  commit 4c9b39fe17e7879fa6555dcf5adc151eea627e2a
+  tree   7b7ed674aacda3282b76aeb4f61d6361e19b6a6b
+Protected main:
+  commit 9bf0eb43e4e3c601d02d3886d220b0abeb3a103e
+  tree   56509b20084ee1cbe2c42fda9d73d87e4c82c33f
+
+Initial exact identity and clean-state check:
+$ printf 'origin=' && git remote get-url origin && printf 'branch=' && git branch --show-current && printf 'HEAD=' && git rev-parse HEAD && printf 'tree=' && git rev-parse 'HEAD^{tree}' && printf 'parent=' && git rev-parse 'HEAD^' && printf '%s\n' 'remote refs:' && git ls-remote --heads origin refs/heads/docs/authenticated-recovery-resume-inventory refs/heads/main && printf 'main_tree=' && git rev-parse '9bf0eb43e4e3c601d02d3886d220b0abeb3a103e^{tree}' && git merge-base --is-ancestor 9bf0eb43e4e3c601d02d3886d220b0abeb3a103e HEAD && printf '%s\n' 'ancestry=protected main ancestor' && printf '%s\n' 'status:' && git status --short --branch && printf '%s\n' 'staged:' && git diff --cached --name-only
+Exit0. Exact repository, branch, tip, tree, parent, direct task/main refs,
+protected-main tree and ancestry matched; worktree and staging were clean.
+
+User-supplied review status carried forward exactly: P1-SPEC-1 and P1-SPEC-2
+PASSED/CLOSED at specification level; P1-SPEC-3 framing, segmentation,
+descriptor correspondence and arithmetic accepted; only nested
+evidence-limit-control isolation open. No reviewer identity/raw artifact is
+asserted or invented.
+
+Initial documentation integrity attempt:
+$ python3 docs/security/evidence/recovery-resume-inventory-20261107/p1-nested-evidence-controls/check_artifacts.py
+Exit1. Stdout:
+```text
+PASS: four exact append-only prefixes at supplied task tip
+PASS: 150 prior evidence files and audit register unchanged
+PASS: prior P1 correction manifest's 31 entries verified at producing tip
+PASS: exact scanner fixture bytes: 37, 40, 2435, 2436; totals/counts consistent
+```
+Stderr:
+```text
+Traceback (most recent call last):
+  File "/workspaces/QBIND/olivexo28/QBIND/docs/security/evidence/recovery-resume-inventory-20261107/p1-nested-evidence-controls/check_artifacts.py", line 94, in <module>
+    assert refusal in DOC, refusal
+           ^^^^^^^^^^^^^^
+AssertionError: count, truncation, or trailing
+```
+The assertion failed because its phrase
+`count, truncation, or trailing` did not match the document's line-wrapped
+`truncation, or trailing bytes`. This was a checker-text mismatch, not a
+fixture or source failure. The assertion was corrected to check the actual phrase; no document scope or
+acceptance criterion was weakened.
+
+Second documentation integrity attempt:
+$ python3 docs/security/evidence/recovery-resume-inventory-20261107/p1-nested-evidence-controls/check_artifacts.py
+Exit1. It passed the four append prefixes, 150 preserved evidence/audit
+files, prior manifest and exact fixture bytes, then failed at line 99 because
+the discovery assertion expected heading `## 21. P1 nested evidence
+controls`, while the actual heading is `## 21. P1 nested evidence scanner
+controls`. The checker was corrected to match the actual heading; this was
+not a design or evidence failure.
+Stderr:
+```text
+Traceback (most recent call last):
+  File "/workspaces/QBIND/olivexo28/QBIND/docs/security/evidence/recovery-resume-inventory-20261107/p1-nested-evidence-controls/check_artifacts.py", line 99, in <module>
+    assert "## 21. P1 nested evidence controls" in index
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError
+```
+
+Final check and capture:
+```sh
+python3 docs/security/evidence/recovery-resume-inventory-20261107/p1-nested-evidence-controls/check_artifacts.py \
+  >docs/security/evidence/recovery-resume-inventory-20261107/p1-nested-evidence-controls/02-nested-check.stdout \
+  2>docs/security/evidence/recovery-resume-inventory-20261107/p1-nested-evidence-controls/02-nested-check.stderr
+result=$?
+printf '%s\n' "$result" >docs/security/evidence/recovery-resume-inventory-20261107/p1-nested-evidence-controls/02-nested-check.exit
+cat docs/security/evidence/recovery-resume-inventory-20261107/p1-nested-evidence-controls/02-nested-check.stdout \
+  docs/security/evidence/recovery-resume-inventory-20261107/p1-nested-evidence-controls/02-nested-check.stderr
+exit "$result"
+```
+It checks exact fixture byte encodings/totals, preservation of every historical
+evidence file and audit-register bytes, the previous 31-entry P1 correction
+manifest at its producing commit, append prefixes, scanner counters, accepted
+caps, documentation-only scope and whitespace. No Rust tests/builds are run.
+
+Current hash-manifest generation after final docs/checks:
+```sh
+python3 - <<'PY'
+import hashlib
+from pathlib import Path
+root = Path("docs/security/evidence/recovery-resume-inventory-20261107")
+here = root / "p1-nested-evidence-controls"
+out = here / "SHA256SUMS"
+paths = [
+    Path("Audit/QBIND_SECURITY_FINDINGS_REGISTER.md"),
+    Path("docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md"),
+    root / "README.md", root / "CHANGED_PATHS.txt", root / "commands.txt",
+    root / "p1-provider-model-specification-correction/README.md",
+    root / "p1-provider-model-specification-correction/SHA256SUMS",
+]
+paths += [p for p in here.iterdir()
+          if p.is_file() and p != out
+          and not p.name.startswith("11-manifest-check.")]
+paths = sorted(set(paths))
+out.write_text("".join(
+    f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.as_posix()}\n"
+    for p in paths
+))
+print(f"entries={len(paths)}; excludes itself and verification transcript")
+PY
+sha256sum -c docs/security/evidence/recovery-resume-inventory-20261107/p1-nested-evidence-controls/SHA256SUMS
+```
+The manifest excludes itself and its verification transcript; both hashes
+will be reported separately. All proposed cases remain FUTURE / NOT EXECUTED.
+
+The first successful `01-nested-check` output was:
+```text
+PASS: four exact append-only prefixes at supplied task tip
+PASS: 150 prior evidence files and audit register unchanged
+PASS: prior P1 correction manifest's 31 entries verified at producing tip
+PASS: exact scanner fixture bytes: 37, 40, 2435, 2436; totals/counts consistent
+PASS: nested-control oracles, preserved caps and append discoverability
+PASS: documentation-only paths and whitespace; no test/build execution
+NOT ESTABLISHED: cryptographic verification, production ingress or authority
+```
+Its `.stdout`, `.stderr`, and `.exit` are preserved. `02-nested-check.*`
+is the next successful run, repeated after initial command-log drafting.
+
+Final check after the completed command log:
+```sh
+python3 docs/security/evidence/recovery-resume-inventory-20261107/p1-nested-evidence-controls/check_artifacts.py \
+  >docs/security/evidence/recovery-resume-inventory-20261107/p1-nested-evidence-controls/10-nested-check.stdout \
+  2>docs/security/evidence/recovery-resume-inventory-20261107/p1-nested-evidence-controls/10-nested-check.stderr
+result=$?
+printf '%s\n' "$result" >docs/security/evidence/recovery-resume-inventory-20261107/p1-nested-evidence-controls/10-nested-check.exit
+cat docs/security/evidence/recovery-resume-inventory-20261107/p1-nested-evidence-controls/10-nested-check.stdout \
+  docs/security/evidence/recovery-resume-inventory-20261107/p1-nested-evidence-controls/10-nested-check.stderr
+exit "$result"
+```
+The final current manifest includes all captured successful checks and the
+inline transcripts of the two failed assertions.
+
+The final manifest verification is captured in `11-manifest-check.*`; those
+transcript files and the manifest itself are excluded from the manifest.
+
+Intermediate records are preserved and listed in `CHANGED_PATHS.txt`:
+`04-nested-check.*` is a successful checker run before the last outer-size
+wording clarification; `05-manifest-check.*` verifies the earlier 19-entry
+manifest. `06-nested-check.*` and `07-manifest-check.*` are intermediate
+successful checks; `08-nested-check.*` and `09-manifest-check.*` likewise
+precede the final check/manifest pair.

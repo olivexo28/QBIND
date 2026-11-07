@@ -5159,3 +5159,21 @@ preserved. See correction commands and integrity manifest for results.
 
 A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
 Activation DISABLED; public DevNet NO-GO.
+
+## 49. P1 nested evidence scanner-control correction — independent review pending
+
+The [focused nested-evidence addendum](evidence/recovery-resume-inventory-20261107/p1-nested-evidence-controls/README.md)
+addresses only the remaining open P1-SPEC-3 nested-control specification.
+P1-SPEC-1 and P1-SPEC-2 remain PASSED/CLOSED at specification level; the
+accepted P1-SPEC-3 framing, segmentation, descriptor correspondence and
+arithmetic are not reopened. The addendum separates outer-size refusals from
+under-cap nested count and per-entry length predicates, with exact framed
+positive/negative/restored-positive byte fixtures and stage/decoder counters.
+The 11,339-byte valid candidate envelope, 19,389-byte evidence-frame cap and
+35,773-byte combined ceiling remain unchanged. All cases remain FUTURE / NOT
+EXECUTED and scanner-only; no cryptographic verification or production/test
+code is added. Prior documentation/evidence and the audit register remain
+preserved.
+
+A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
+Activation DISABLED; public DevNet NO-GO.

@@ -1,0 +1,7 @@
+PASS: four exact append-only prefixes at supplied task tip
+PASS: 150 prior evidence files and audit register unchanged
+PASS: prior P1 correction manifest's 31 entries verified at producing tip
+PASS: exact scanner fixture bytes: 37, 40, 2435, 2436; totals/counts consistent
+PASS: nested-control oracles, preserved caps and append discoverability
+PASS: documentation-only paths and whitespace; no test/build execution
+NOT ESTABLISHED: cryptographic verification, production ingress or authority

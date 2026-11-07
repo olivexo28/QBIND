@@ -180,3 +180,24 @@ Raw correction integrity check artifacts, each .stdout/.stderr/.exit:
 07-correction-integrity
 06-manifest-check
 08-manifest-check
+
+P1 nested evidence controls — documentation-only:
+docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+docs/security/evidence/recovery-resume-inventory-20261107/README.md
+docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/commands.txt
+docs/security/evidence/recovery-resume-inventory-20261107/p1-nested-evidence-controls/README.md
+docs/security/evidence/recovery-resume-inventory-20261107/p1-nested-evidence-controls/COMMANDS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/p1-nested-evidence-controls/check_artifacts.py
+docs/security/evidence/recovery-resume-inventory-20261107/p1-nested-evidence-controls/SHA256SUMS
+Raw nested-control check artifacts, each .stdout/.stderr/.exit:
+01-nested-check
+02-nested-check
+04-nested-check
+05-manifest-check
+06-nested-check
+07-manifest-check
+08-nested-check
+09-manifest-check
+10-nested-check
+11-manifest-check

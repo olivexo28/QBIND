@@ -751,3 +751,10 @@ complete outputs/exits, producing-revision manifest verification and
 publication checks. It corrects P1-SPEC-1/2/3 without modifying the original
 specification or historical raw results. All model cases remain FUTURE /
 NOT EXECUTED. No unchanged Rust tests or builds were rerun.
+
+P1 nested evidence controls (user-supplied review: P1-SPEC-1/2
+PASSED/CLOSED; P1-SPEC-3 framing/segmentation/descriptor/arithmetic accepted;
+only nested evidence-limit isolation remained open):
+`p1-nested-evidence-controls/COMMANDS.txt` records the exact identity check,
+scanner-fixture arithmetic/preservation checks, outputs/exits, and hashes.
+This documentation-only addendum does not rerun accepted tests or builds.

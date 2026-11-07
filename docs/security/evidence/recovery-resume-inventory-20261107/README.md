@@ -552,3 +552,16 @@ wire format, or recovery/resume authority is added. Prior acceptances,
 founder-decision scope, open items and disabled activation are preserved.
 See the correction `COMMANDS.txt` and `SHA256SUMS` for checks and current
 hashes; no unchanged Rust test/build is rerun.
+
+## 21. P1 nested evidence scanner controls
+
+The [nested evidence control correction](p1-nested-evidence-controls/README.md)
+addresses only the remaining P1-SPEC-3 nested evidence-limit test
+specification. It preserves the accepted P1-SPEC-1/P1-SPEC-2 status, framing,
+segmentation, descriptor correspondence, 11,339-byte valid candidate,
+19,389-byte evidence cap and 35,773-byte combined ceiling. It separates outer
+size refusals from nested count/entry-length checks and gives exact
+37/40-byte count and 2,435/2,436-byte entry-length scanner fixtures with
+stage/decoder oracles. All cases remain FUTURE / NOT EXECUTED and are not
+cryptographic evidence. Historical records and the audit register remain
+unchanged; see the new command and integrity records.
