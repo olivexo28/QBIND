@@ -1,0 +1,490 @@
+    Updating crates.io index
+ Downloading crates ...
+  Downloaded password-hash v0.5.0
+  Downloaded chacha20 v0.9.1
+  Downloaded pbkdf2 v0.12.2
+  Downloaded bincode v1.3.3
+  Downloaded poly1305 v0.8.0
+  Downloaded base64ct v1.8.3
+  Downloaded generic-array v0.14.7
+  Downloaded keccak v0.1.5
+  Downloaded block-buffer v0.10.4
+  Downloaded cfg-if v1.0.4
+  Downloaded zeroize_derive v1.4.3
+  Downloaded aead v0.5.2
+  Downloaded cpufeatures v0.2.17
+  Downloaded crypto-common v0.1.7
+  Downloaded opaque-debug v0.3.1
+  Downloaded rand_chacha v0.3.1
+  Downloaded subtle v2.6.1
+  Downloaded universal-hash v0.5.1
+  Downloaded zeroize v1.8.2
+  Downloaded cipher v0.4.4
+  Downloaded digest v0.10.7
+  Downloaded inout v0.1.4
+  Downloaded quote v1.0.42
+  Downloaded sha2 v0.10.9
+  Downloaded unicode-ident v1.0.22
+  Downloaded version_check v0.9.5
+  Downloaded hmac v0.12.1
+  Downloaded rand v0.8.5
+  Downloaded rand_core v0.6.4
+  Downloaded getrandom v0.2.16
+  Downloaded ppv-lite86 v0.2.21
+  Downloaded chacha20poly1305 v0.10.1
+  Downloaded serde_derive v1.0.228
+  Downloaded typenum v1.19.0
+  Downloaded proc-macro2 v1.0.104
+  Downloaded serde v1.0.228
+  Downloaded serde_core v1.0.228
+  Downloaded zerocopy v0.8.31
+  Downloaded syn v2.0.112
+  Downloaded sha3 v0.10.8
+  Downloaded libc v0.2.178
+  Downloaded fips203 v0.4.3
+  Downloaded fips204 v0.4.6
+   Compiling libc v0.2.178
+   Compiling cfg-if v1.0.4
+   Compiling version_check v0.9.5
+   Compiling typenum v1.19.0
+   Compiling generic-array v0.14.7
+   Compiling getrandom v0.2.16
+   Compiling rand_core v0.6.4
+   Compiling proc-macro2 v1.0.104
+   Compiling crypto-common v0.1.7
+   Compiling quote v1.0.42
+   Compiling unicode-ident v1.0.22
+   Compiling subtle v2.6.1
+   Compiling block-buffer v0.10.4
+   Compiling digest v0.10.7
+   Compiling cpufeatures v0.2.17
+   Compiling keccak v0.1.5
+   Compiling sha3 v0.10.8
+   Compiling syn v2.0.112
+   Compiling zerocopy v0.8.31
+   Compiling inout v0.1.4
+   Compiling serde_core v1.0.228
+   Compiling sha2 v0.10.9
+   Compiling universal-hash v0.5.1
+   Compiling qbind-types v0.1.0 (/workspaces/QBIND/olivexo28/QBIND/crates/qbind-types)
+   Compiling base64ct v1.8.3
+   Compiling serde v1.0.228
+   Compiling opaque-debug v0.3.1
+   Compiling poly1305 v0.8.0
+   Compiling password-hash v0.5.0
+   Compiling qbind-wire v0.1.0 (/workspaces/QBIND/olivexo28/QBIND/crates/qbind-wire)
+   Compiling ppv-lite86 v0.2.21
+   Compiling zeroize_derive v1.4.3
+   Compiling serde_derive v1.0.228
+   Compiling zeroize v1.8.2
+   Compiling cipher v0.4.4
+   Compiling chacha20 v0.9.1
+   Compiling hmac v0.12.1
+   Compiling aead v0.5.2
+   Compiling pbkdf2 v0.12.2
+   Compiling chacha20poly1305 v0.10.1
+   Compiling fips204 v0.4.6
+   Compiling fips203 v0.4.3
+   Compiling rand_chacha v0.3.1
+   Compiling qbind-hash v0.1.0 (/workspaces/QBIND/olivexo28/QBIND/crates/qbind-hash)
+   Compiling rand v0.8.5
+   Compiling qbind-crypto v0.1.0 (/workspaces/QBIND/olivexo28/QBIND/crates/qbind-crypto)
+   Compiling bincode v1.3.3
+   Compiling qbind-consensus v0.1.0 (/workspaces/QBIND/olivexo28/QBIND/crates/qbind-consensus)
+warning: enum `VerifiedVoteInvocationRefusal` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1456:17
+     |
+1456 | pub(crate) enum VerifiedVoteInvocationRefusal {
+     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: enum `ReceivedVoteEvidenceDisposition` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1469:17
+     |
+1469 | pub(crate) enum ReceivedVoteEvidenceDisposition {
+     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `VerifiedVoteInvocation` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1479:17
+     |
+1479 | pub(crate) enum VerifiedVoteInvocation {
+     |                 ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `ReceivedVoteQcRefusalReason` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1492:17
+     |
+1492 | pub(crate) enum ReceivedVoteQcRefusalReason {
+     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedVoteQcRefusal` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1498:19
+     |
+1498 | pub(crate) struct ReceivedVoteQcRefusal {
+     |                   ^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `ReceivedVoteQcIncomplete` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1504:17
+     |
+1504 | pub(crate) enum ReceivedVoteQcIncomplete {
+     |                 ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedVoteQcEventSummary` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1518:19
+     |
+1518 | pub(crate) struct ReceivedVoteQcEventSummary {
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `ReceivedQcGateRefusal` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1528:17
+     |
+1528 | pub(crate) enum ReceivedQcGateRefusal {
+     |                 ^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `ReceivedQcGateDecision` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1534:17
+     |
+1534 | pub(crate) enum ReceivedQcGateDecision {
+     |                 ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `ReceivedQcApplication` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1540:17
+     |
+1540 | pub(crate) enum ReceivedQcApplication {
+     |                 ^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedQcEffectView` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1549:19
+     |
+1549 | pub(crate) struct ReceivedQcEffectView<'a> {
+     |                   ^^^^^^^^^^^^^^^^^^^^
+
+warning: multiple methods are never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1561:19
+     |
+1560 | impl ReceivedQcEffectView<'_> {
+     | ----------------------------- methods in this implementation
+1561 |     pub(crate) fn logical(&self) -> &QuorumCertificate<[u8; 32]> { self.logical }
+     |                   ^^^^^^^
+1562 |     pub(crate) fn wire(&self) -> &qbind_wire::consensus::QuorumCertificate { self.wire }
+     |                   ^^^^
+1563 |     pub(crate) fn locked(&self) -> Option<ReceivedVoteQcSummary> { self.locked }
+     |                   ^^^^^^
+1564 |     pub(crate) fn target_own_qc(&self) -> Option<&QuorumCertificate<[u8; 32]>> {
+     |                   ^^^^^^^^^^^^^
+...
+1567 |     pub(crate) fn committed_block(&self) -> Option<&[u8; 32]> { self.committed_block }
+     |                   ^^^^^^^^^^^^^^^
+1568 |     pub(crate) fn committed_height(&self) -> Option<u64> { self.committed_height }
+     |                   ^^^^^^^^^^^^^^^^
+1569 |     pub(crate) fn commit_log(&self) -> &[CommittedEntry<[u8; 32]>] { self.commit_log }
+     |                   ^^^^^^^^^^
+1570 |     pub(crate) fn current_view(&self) -> u64 { self.current_view }
+     |                   ^^^^^^^^^^^^
+
+warning: trait `ReceivedQcEffectGate` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1573:18
+     |
+1573 | pub(crate) trait ReceivedQcEffectGate {
+     |                  ^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedQcGateAdapter` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1577:8
+     |
+1577 | struct ReceivedQcGateAdapter<'a> {
+     |        ^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedVoteQcSummary` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1639:19
+     |
+1639 | pub(crate) struct ReceivedVoteQcSummary {
+     |                   ^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `ReceivedVoteQcOutcome` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1645:17
+     |
+1645 | pub(crate) enum ReceivedVoteQcOutcome {
+     |                 ^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedVoteQcCandidateSeal` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1689:8
+     |
+1689 | struct ReceivedVoteQcCandidateSeal {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedVoteQcRouteControlFrame` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1697:8
+     |
+1697 | struct ReceivedVoteQcRouteControlFrame {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedQcGateControlFrame` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1735:8
+     |
+1735 | struct ReceivedQcGateControlFrame {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `VerifiedVotePreflight` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1755:8
+     |
+1755 | struct VerifiedVotePreflight {
+     |        ^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `same_vote_signed_fields` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:2803:4
+     |
+2803 | fn same_vote_signed_fields(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `map_received_vote_qc_incomplete` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:2818:4
+     |
+2818 | fn map_received_vote_qc_incomplete(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `received_vote_qc_control_charge` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:2844:4
+     |
+2844 | fn received_vote_qc_control_charge() -> Result<u64, ReceivedVoteQcStageError> {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `qc_matches_projected_membership` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:2859:4
+     |
+2859 | fn qc_matches_projected_membership(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `compare_actual_qc_failure` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:2889:4
+     |
+2889 | fn compare_actual_qc_failure(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: multiple methods are never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:2938:19
+     |
+2937 | impl BasicHotStuffEngine<[u8; 32]> {
+     | ---------------------------------- methods in this implementation
+2938 |     pub(crate) fn invoke_verified_received_vote_qc(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+2945 |     pub(crate) fn invoke_verified_received_vote_qc_effect_gated(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+2953 |     fn invoke_received_vote_qc_inner(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3264 |     pub(crate) fn install_received_vote_context(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3376 |     pub(crate) fn admit_verified_received_vote(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3398 |     pub(crate) fn invoke_verified_received_vote(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3496 |     fn preflight_verified_received_vote(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedVoteQcReport` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1657:23
+     |
+1657 |     pub(crate) struct ReceivedVoteQcReport {
+     |                       ^^^^^^^^^^^^^^^^^^^^
+
+warning: associated items `new`, `actual`, and `outcome` are never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1664:23
+     |
+1663 |     impl ReceivedVoteQcReport {
+     |     ------------------------- associated items in this implementation
+1664 |         pub(super) fn new(
+     |                       ^^^
+...
+1672 |         pub(crate) fn actual(&self) -> &ReceivedVoteQcEventSummary {
+     |                       ^^^^^^
+...
+1676 |         pub(crate) fn outcome(&self) -> &ReceivedVoteQcOutcome {
+     |                       ^^^^^^^
+
+warning: field `accumulator` is never read
+   --> crates/qbind-consensus/src/hotstuff_state_engine.rs:193:16
+    |
+191 | pub(crate) struct VoteMutationReport<BlockIdT> {
+    |                   ------------------ field in this struct
+192 |     pub(crate) history: VoteHistoryOutcome<BlockIdT>,
+193 |     pub(crate) accumulator:
+    |                ^^^^^^^^^^^
+
+warning: trait `VoteQcEffectGate` is never used
+   --> crates/qbind-consensus/src/hotstuff_state_engine.rs:198:18
+    |
+198 | pub(crate) trait VoteQcEffectGate<BlockIdT: Eq + std::hash::Hash + Clone> {
+    |                  ^^^^^^^^^^^^^^^^
+
+warning: method `is_equivocation` is never used
+   --> crates/qbind-consensus/src/hotstuff_state_engine.rs:212:19
+    |
+211 | impl<BlockIdT> VoteMutationReport<BlockIdT> {
+    | ------------------------------------------- method in this implementation
+212 |     pub(crate) fn is_equivocation(&self) -> bool {
+    |                   ^^^^^^^^^^^^^^^
+
+warning: enum `VoteEvidencePreflightError` is never used
+   --> crates/qbind-consensus/src/hotstuff_state_engine.rs:218:17
+    |
+218 | pub(crate) enum VoteEvidencePreflightError {
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `VoteEvidencePlan` is never used
+   --> crates/qbind-consensus/src/hotstuff_state_engine.rs:225:17
+    |
+225 | pub(crate) enum VoteEvidencePlan {
+    |                 ^^^^^^^^^^^^^^^^
+
+warning: multiple methods are never used
+    --> crates/qbind-consensus/src/hotstuff_state_engine.rs:567:19
+     |
+ 361 | / impl<BlockIdT> HotStuffStateEngine<BlockIdT>
+ 362 | | where
+ 363 | |     BlockIdT: Eq + std::hash::Hash + Clone,
+     | |___________________________________________- methods in this implementation
+...
+ 567 |       pub(crate) fn received_vote_budget(&self) -> Option<&EvidenceBudget> {
+     |                     ^^^^^^^^^^^^^^^^^^^^
+...
+ 571 |       pub(crate) fn received_vote_evidence_table(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 577 |       pub(crate) fn install_received_vote_evidence_table(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 598 |       pub(crate) fn prepare_received_vote_evidence(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 641 |       pub(crate) fn project_received_vote_accumulator<'a>(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 651 |       pub(crate) fn has_conflicting_vote_history(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 662 |       pub(crate) fn has_vote_memberships(
+     |                     ^^^^^^^^^^^^^^^^^^^^
+...
+ 700 |       pub(crate) fn retain_received_vote_token(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 729 |       pub(crate) fn map_qc_charge_checked(&self) -> Result<u64, EvidenceRetentionError> {
+     |                     ^^^^^^^^^^^^^^^^^^^^^
+...
+ 737 |       pub(crate) fn install_received_vote_budget(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+1719 |       pub(crate) fn on_vote_detailed_effect_gated(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `VoteAccumulatorProjection` is never constructed
+   --> crates/qbind-consensus/src/vote_accumulator.rs:223:19
+    |
+223 | pub(crate) struct VoteAccumulatorProjection<'a, BlockIdT> {
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `disposition`, `projected_count`, and `next_signer` are never used
+   --> crates/qbind-consensus/src/vote_accumulator.rs:236:19
+    |
+232 | / impl<BlockIdT> VoteAccumulatorProjection<'_, BlockIdT>
+233 | | where
+234 | |     BlockIdT: Eq + std::hash::Hash + Clone,
+    | |___________________________________________- methods in this implementation
+235 |   {
+236 |       pub(crate) fn disposition(&self) -> VoteAccumulatorDisposition {
+    |                     ^^^^^^^^^^^
+...
+240 |       pub(crate) fn projected_count(&self) -> usize {
+    |                     ^^^^^^^^^^^^^^^
+...
+244 |       pub(crate) fn next_signer(&self, after: Option<ValidatorId>) -> Option<ValidatorId> {
+    |                     ^^^^^^^^^^^
+
+warning: methods `project_vote` and `will_contain_after_on_vote` are never used
+   --> crates/qbind-consensus/src/vote_accumulator.rs:438:19
+    |
+282 | / impl<BlockIdT> VoteAccumulator<BlockIdT>
+283 | | where
+284 | |     BlockIdT: Eq + std::hash::Hash + Clone,
+    | |___________________________________________- methods in this implementation
+...
+438 |       pub(crate) fn project_vote<'a>(
+    |                     ^^^^^^^^^^^^
+...
+489 |       pub(crate) fn will_contain_after_on_vote(
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `qbind-consensus` (lib) generated 37 warnings
+error[E0277]: `TestKeys` doesn't implement `Debug`
+   --> crates/qbind-consensus/tests/a33_f1_voting_ancestry_tests.rs:322:41
+    |
+322 | impl SuiteAwareValidatorKeyProvider for TestKeys {
+    |                                         ^^^^^^^^ the trait `Debug` is not implemented for `TestKeys`
+    |
+note: required by a bound in `SuiteAwareValidatorKeyProvider`
+   --> crates/qbind-consensus/src/key_registry.rs:57:57
+    |
+ 57 | pub trait SuiteAwareValidatorKeyProvider: Send + Sync + std::fmt::Debug {
+    |                                                         ^^^^^^^^^^^^^^^ required by this bound in `SuiteAwareValidatorKeyProvider`
+help: consider annotating `TestKeys` with `#[derive(Debug)]`
+    |
+320 + #[derive(Debug)]
+321 | struct TestKeys(Vec<Vec<u8>>);
+    |
+
+error[E0609]: no field `votes` on type `&BlockNode<[u8; 32]>`
+   --> crates/qbind-consensus/tests/a33_f1_voting_ancestry_tests.rs:262:30
+    |
+262 |         assert_eq!(candidate.votes.vote_count(), 0);
+    |                              ^^^^^ unknown field
+    |
+    = note: available fields are: `id`, `view`, `parent_id`, `justify_qc`, `own_qc` ... and 3 others
+
+error[E0609]: no field `votes` on type `&BlockNode<[u8; 32]>`
+   --> crates/qbind-consensus/tests/a33_f1_voting_ancestry_tests.rs:283:57
+    |
+283 |             engine.state().get_block(&good_id).unwrap().votes.vote_count(),
+    |                                                         ^^^^^ unknown field
+    |
+    = note: available fields are: `id`, `view`, `parent_id`, `justify_qc`, `own_qc` ... and 3 others
+
+error[E0609]: no field `votes` on type `&BlockNode<[u8; 32]>`
+   --> crates/qbind-consensus/tests/a33_f1_voting_ancestry_tests.rs:311:55
+    |
+311 |     assert_eq!(engine.state().get_block(&id).unwrap().votes.vote_count(), 0);
+    |                                                       ^^^^^ unknown field
+    |
+    = note: available fields are: `id`, `view`, `parent_id`, `justify_qc`, `own_qc` ... and 3 others
+
+error[E0609]: no field `votes` on type `&BlockNode<[u8; 32]>`
+   --> crates/qbind-consensus/tests/a33_f1_voting_ancestry_tests.rs:405:30
+    |
+405 |         assert_eq!(candidate.votes.vote_count(), 0);
+    |                              ^^^^^ unknown field
+    |
+    = note: available fields are: `id`, `view`, `parent_id`, `justify_qc`, `own_qc` ... and 3 others
+
+error[E0308]: mismatched types
+    --> crates/qbind-consensus/tests/a33_f1_voting_ancestry_tests.rs:416:13
+     |
+ 415 |         assert!(Arc::ptr_eq(
+     |                 ----------- arguments to this function are incorrect
+ 416 |             engine.state().verified_justification(&[1; 32]).unwrap(),
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `&Arc<VerifiedQuorumCertificate>`, found `&VerifiedQuorumCertificate`
+     |
+     = note: expected reference `&Arc<VerifiedQuorumCertificate>`
+                found reference `&VerifiedQuorumCertificate`
+note: associated function defined here
+    --> /usr/local/rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/alloc/src/sync.rs:2172:12
+     |
+2172 |     pub fn ptr_eq(this: &Self, other: &Self) -> bool {
+     |            ^^^^^^
+
+Some errors have detailed explanations: E0277, E0308, E0609.
+For more information about an error, try `rustc --explain E0277`.
+error: could not compile `qbind-consensus` (test "a33_f1_voting_ancestry_tests") due to 6 previous errors

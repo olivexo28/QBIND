@@ -1,0 +1,18 @@
+{
+  "argv": [
+    "cargo",
+    "test",
+    "--locked",
+    "-p",
+    "qbind-consensus",
+    "--test",
+    "a33_f1_voting_ancestry_tests",
+    "--no-run"
+  ],
+  "head": "644a3c69dce095458c6e9e2208c200b29fc9fe0f",
+  "tree": "c708a1dfb7362b8dcc8165970b7519b0a9194146",
+  "status": "?? crates/qbind-consensus/tests/a33_f1_voting_ancestry_tests.rs\n?? docs/security/evidence/voting_ancestry/\n",
+  "start_utc": "2026-11-07T06:58:13.445285+00:00",
+  "end_utc": "2026-11-07T06:58:23.787083+00:00",
+  "exit_code": 101
+}
