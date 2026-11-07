@@ -307,3 +307,97 @@ This inventory updates no audit-register finding. The audit register and all
 prior evidence remain byte-identical. No Rust tests, compilation, live node,
 network experiment, operational signing, activation, merge, or PR was run or
 authorized in this task.
+
+## 7. Review corrections and superseding clarifications
+
+**DOCUMENTATION CORRECTED — INDEPENDENT REVIEW PENDING.** The review outcome
+carried forward is the user-supplied **CHANGES REQUIRED**. No reviewer identity
+or raw review artifact is available in this record, so neither is attributed
+or implied. The recovery/currentness, signing-history, fencing, and separate
+resume distinctions above remain proposed design directions only; no recovery
+mechanism or authority is approved.
+
+This section is an append-only correction to the earlier inventory text. It
+supersedes any conflicting ordering or blanket no-effect wording above; the
+earlier bytes are retained as history.
+
+Integrity is revision-aware: the original `SHA256SUMS` is unchanged and was
+verified against producing task tip
+`61028eb6dbb91f0834a5235f20c935bb0ff5b549`; its inventory/plan hashes name
+the exact pre-correction bytes, not this appended version.
+`CORRECTION-SHA256SUMS` is the current manifest for the corrected documents
+and selected preserved evidence. It intentionally excludes itself and
+`commands.txt`; the command log's current hash is reported separately.
+
+### Requested-restore startup order
+
+For the normal startup path with restore requested, `main` opens the canonical
+consensus storage before checking the requested-restore RTR precondition.
+After the destination lock and CLI-exit-mode exclusion, the caller invokes
+`open_production_consensus_storage(&config)` at
+[`main.rs:2619-2629`](https://github.com/olivexo28/QBIND/blob/9bf0eb43e4e3c601d02d3886d220b0abeb3a103e/crates/qbind-node/src/main.rs#L2619-L2629).
+Only later does it evaluate the existing RTR at
+[`main.rs:2776-2808`](https://github.com/olivexo28/QBIND/blob/9bf0eb43e4e3c601d02d3886d220b0abeb3a103e/crates/qbind-node/src/main.rs#L2776-L2808).
+The caller then reuses that opened handle for the epoch precheck and later
+lifecycle; this is not an RTR check before the open.
+
+The opener derives `<data_dir>/consensus`, creates the parent directory if
+missing, and opens the production storage at
+[`production_consensus_storage.rs:391-429`](https://github.com/olivexo28/QBIND/blob/9bf0eb43e4e3c601d02d3886d220b0abeb3a103e/crates/qbind-node/src/production_consensus_storage.rs#L391-L429).
+Its RocksDB implementation sets `create_if_missing(true)` before
+`DB::open` at
+[`storage.rs:746-763`](https://github.com/olivexo28/QBIND/blob/9bf0eb43e4e3c601d02d3886d220b0abeb3a103e/crates/qbind-node/src/storage.rs#L746-L763).
+Consequently, a missing canonical DB may be created, or storage-open effects
+may otherwise occur, before a later occupied/corrupt RTR causes refusal.
+This establishes a possible effect from configured opener behavior, not that
+creation or any specific write occurred in a particular execution. The
+destination lock and early-open errors are separate earlier boundaries.
+
+### Refusal, effects, and uncertain outcomes
+
+“Refusal” is not a blanket claim that nothing changed. A prospective
+pre-effect admission refusal may require no **recovery publication, protected
+state application, engine mutation, or signing invocation** only when its
+validation runs before those operations are attempted. That bounded claim does
+not erase earlier setup effects such as the consensus-storage open above.
+Verification and resource admission should be completed before crossing the
+corresponding mutable boundary; this remains a proposed acceptance condition,
+not an implemented recovery guarantee.
+
+Once an operation has been attempted, preserve its actual outcome rather than
+infer rollback from an error or refusal:
+
+* An acknowledged write/publication/application/signing result is evidence
+  only for that acknowledged operation. Keep its known effect; later refusal
+  does not undo it.
+* A failure known to precede an operation's effect says nothing about prior
+  effects. An error after an operation began may leave a known partial effect
+  or an **unknown** outcome. For example, a rename followed by directory-sync
+  failure may have published the new file despite the error.
+* The sequential library catch-up importer can mutate earlier blocks before a
+  later block fails. It is not transactional; later refusal does not establish
+  an unchanged engine.
+* A timeout, cancellation, lost response, or error from a signer after
+  invocation does not prove that signing did not complete. Preserve uncertain
+  signing outcomes as uncertain; do not describe them as unsigned.
+
+In all such cases, remain closed to participation and resume, preserve known
+effects and unknown outcomes, and require authoritative reconciliation. Do not
+claim rollback, unchanged state, or successful recovery unless independently
+established. This distinction supersedes any broad reading of the acceptance
+matrix's former “no mutation/publication on every refusal” phrasing: the
+inbound-caller stage now requires no protected recovery effect only for
+refusals demonstrated before the relevant effect boundary, and requires
+separate effect/uncertainty assertions for failures or refusals after an
+attempt. The actual existing dispatch's non-empty and empty early returns
+remain as described in section 1; this correction does not change code or
+extend that behavior into a recovery mechanism.
+
+The corrected acceptance criterion is: **pre-effect** verifier/caller refusal
+must not publish recovered evidence, apply protected state, mutate the engine,
+or invoke signing; **after an effect is attempted**, tests must report each
+acknowledged effect, known partial effect, explicit pre-effect failure, and
+uncertain outcome separately, require the node to remain closed, and require
+reconciliation without assuming rollback. These clauses supersede the
+unqualified wording in the earlier “Test-only verifier” and “Actual inbound
+caller” matrix rows.

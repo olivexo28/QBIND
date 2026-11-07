@@ -72,3 +72,199 @@ No Rust tests, compilation, release build, live node/network operation,
 operational signing, or activation were run for this documentation-only task.
 The historical 44 selected tests and compilation checks remain prior author
 executions, not new runs.
+
+Correction record — 2026-11-07
+==============================
+
+Review disposition carried forward: the user supplied **CHANGES REQUIRED**.
+No reviewer identity or raw review artifact was available or invented.
+Recovery/currentness, signing-history continuity, fencing, and separate-resume
+remain proposed directions only; no recovery mechanism is approved.
+
+This correction appends to the inventory and plan. The protected base was
+reverified before editing:
+
+  git remote get-url origin
+    stdout: https://github.com/olivexo28/QBIND
+    exit 0.
+  git branch --show-current
+    stdout: docs/authenticated-recovery-resume-inventory
+    exit 0.
+  git rev-parse HEAD
+    stdout: 61028eb6dbb91f0834a5235f20c935bb0ff5b549
+    exit 0.
+  git rev-parse HEAD^{tree}
+    stdout: 0d4d1dcdea9b6d1b074c6b1d1805c9fb2f8fe18e
+    exit 0.
+  git rev-parse HEAD^
+    stdout: 9bf0eb43e4e3c601d02d3886d220b0abeb3a103e
+    exit 0.
+  git ls-remote origin refs/heads/docs/authenticated-recovery-resume-inventory refs/heads/main
+    stdout:
+      61028eb6dbb91f0834a5235f20c935bb0ff5b549 refs/heads/docs/authenticated-recovery-resume-inventory
+      9bf0eb43e4e3c601d02d3886d220b0abeb3a103e refs/heads/main
+    exit 0.
+  git status --porcelain=v1; git diff --cached --name-only
+    stdout: empty for both; worktree and staging clean before correction.
+    exit 0.
+  git merge-base --is-ancestor 9bf0eb43e4e3c601d02d3886d220b0abeb3a103e HEAD
+    stdout: PASS; exit 0.
+  git rev-parse 9bf0eb43e4e3c601d02d3886d220b0abeb3a103e^{tree}
+    stdout: 56509b20084ee1cbe2c42fda9d73d87e4c82c33f
+    exit 0.
+
+Corrected source order was checked with:
+
+  nl -ba crates/qbind-node/src/main.rs | sed -n '2580,2645p;2700,2810p'
+  nl -ba crates/qbind-node/src/production_consensus_storage.rs | sed -n '385,435p'
+  nl -ba crates/qbind-node/src/storage.rs | sed -n '746,763p'
+    exit 0. `main.rs:2619-2629` opens storage; `main.rs:2776-2808`
+    checks the RTR; production opener config derives canonical storage and
+    creates the parent; RocksDB uses create_if_missing(true).
+
+The original inventory/plan hashes and the prior manifest remain tied to
+their producing task tip, not to the corrected versions:
+
+```sh
+python3 - <<'PY'
+import hashlib, subprocess
+base='61028eb6dbb91f0834a5235f20c935bb0ff5b549'
+manifest_path='docs/security/evidence/recovery-resume-inventory-20261107/SHA256SUMS'
+manifest=subprocess.check_output(['git','show',f'{base}:{manifest_path}'],text=True)
+checked=0
+for line in manifest.splitlines():
+    if not line.strip():
+        continue
+    expected,path=line.split('  ',1)
+    data=subprocess.check_output(['git','show',f'{base}:{path}'])
+    actual=hashlib.sha256(data).hexdigest()
+    if actual != expected:
+        raise SystemExit(f'FAIL {path}: expected {expected}, got {actual}')
+    checked+=1
+print(f'PASS historical manifest at {base}: {checked} entries verified against that exact tree')
+for path in [
+    'docs/security/evidence/recovery-resume-inventory-20261107/README.md',
+    'docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md',
+]:
+    data=subprocess.check_output(['git','show',f'{base}:{path}'])
+    print(f'BASE {path} sha256={hashlib.sha256(data).hexdigest()} bytes={len(data)}')
+PY
+```
+  stdout:
+    PASS historical manifest at 61028eb6dbb91f0834a5235f20c935bb0ff5b549:
+      8 entries verified against that exact tree.
+    BASE docs/security/evidence/recovery-resume-inventory-20261107/README.md sha256=3d1f05d8e0a3f1b3380c5e3ea9362d8521c033a79eb82cb7a11e9d15d3baa248 bytes=27380
+    BASE docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md sha256=27e9dd4031793c2694e562f024eb50a535fc13b7c379022f8a26da21677e8a65 bytes=381635
+  exit 0.
+  git show HEAD:<inventory SHA256SUMS>
+    SHA-256: 91db6608949026a60c404924d1785cdffb2368c730d868825bb13d455f88b467.
+    This is the original manifest and is intentionally unchanged. Its
+    inventory, plan, changed-path and command-log entries apply to the
+    historical bytes at that tip; current checks of those entries against
+    appended files are expected to mismatch. Do not call an expected mismatch
+    a new integrity pass.
+
+Final correction checks:
+
+```sh
+BASE=61028eb6dbb91f0834a5235f20c935bb0ff5b549
+cmp <(git show "$BASE:docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md") \
+  <(head -c "$(git cat-file -s "$BASE:docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md")" \
+    docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md)
+cmp <(git show "$BASE:docs/security/evidence/recovery-resume-inventory-20261107/README.md") \
+  <(head -c "$(git cat-file -s "$BASE:docs/security/evidence/recovery-resume-inventory-20261107/README.md")" \
+    docs/security/evidence/recovery-resume-inventory-20261107/README.md)
+cmp <(git show "$BASE:docs/security/evidence/recovery-resume-inventory-20261107/commands.txt") \
+  <(head -c "$(git cat-file -s "$BASE:docs/security/evidence/recovery-resume-inventory-20261107/commands.txt")" \
+    docs/security/evidence/recovery-resume-inventory-20261107/commands.txt)
+cmp <(git show "$BASE:docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt") \
+  <(head -c "$(git cat-file -s "$BASE:docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt")" \
+    docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt)
+cmp <(git show "$BASE:Audit/QBIND_SECURITY_FINDINGS_REGISTER.md") \
+  Audit/QBIND_SECURITY_FINDINGS_REGISTER.md
+git diff --quiet "$BASE" -- \
+  docs/security/evidence/empty-restore-response \
+  docs/security/evidence/voting_ancestry
+git diff --check && git diff --cached --check
+```
+  stdout: all four append-prefix checks and audit byte comparison passed;
+  evidence diff was empty; whitespace checks emitted no errors.
+  exit 0.
+  git status --porcelain=v1 --untracked-files=all
+    stdout:
+      M docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+      M docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt
+      M docs/security/evidence/recovery-resume-inventory-20261107/README.md
+      M docs/security/evidence/recovery-resume-inventory-20261107/commands.txt
+      ?? docs/security/evidence/recovery-resume-inventory-20261107/CORRECTION-SHA256SUMS
+    exit 0. `git diff --cached --name-only` was empty (exit 0).
+
+```sh
+python3 - <<'PY'
+from pathlib import Path
+import re
+readme = Path("docs/security/evidence/recovery-resume-inventory-20261107/README.md")
+text = readme.read_text()
+links = re.findall(r"(?<!!)\[[^]]+\]\(([^)]+)\)", text)
+for link in links:
+    if link.startswith(("https://", "http://", "mailto:")):
+        continue
+    path, _, fragment = link.partition("#")
+    target = (readme.parent / path).resolve()
+    assert target.is_file(), f"missing relative target: {link}"
+    if fragment:
+        headings = re.findall(r"^#+\s+(.+)$", target.read_text(), re.M)
+        slugs = {
+            re.sub(r"-+", "-", re.sub(r"[^a-z0-9 -]", "", h.lower())).strip().replace(" ", "-")
+            for h in headings
+        }
+        assert fragment in slugs, f"missing heading anchor: {link}"
+base = "9bf0eb43e4e3c601d02d3886d220b0abeb3a103e"
+source_links = re.findall(
+    r"https://github\.com/olivexo28/QBIND/blob/([0-9a-f]{40})/([^#]+)#L(\d+)(?:-L(\d+))?",
+    text,
+)
+assert source_links and {ref for ref, *_ in source_links} == {base}
+for ref, path, start, end in source_links:
+    lines = Path(path).read_text().splitlines()
+    assert 1 <= int(start) <= int(end or start) <= len(lines), path
+for p in (readme, readme.parent / "commands.txt", readme.parent / "CHANGED_PATHS.txt"):
+    assert all(not line.endswith((" ", "\t")) for line in p.read_text().splitlines()), p
+print(f"PASS: {len(links)} relative links/anchors, {len(source_links)} pinned source ranges, whitespace")
+PY
+```
+  stdout: PASS: 39 relative links/anchors, 35 pinned source ranges, whitespace
+  exit 0.
+
+```sh
+sha256sum -c docs/security/evidence/recovery-resume-inventory-20261107/CORRECTION-SHA256SUMS
+```
+  stdout:
+    docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md: OK
+    docs/security/evidence/recovery-resume-inventory-20261107/README.md: OK
+    docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt: OK
+    Audit/QBIND_SECURITY_FINDINGS_REGISTER.md: OK
+    docs/security/evidence/recovery-resume-inventory-20261107/SHA256SUMS: OK
+    docs/security/evidence/empty-restore-response/implementation-20261107/SHA256SUMS: OK
+    docs/security/evidence/empty-restore-response/implementation-20261107/README.md: OK
+    docs/security/evidence/voting_ancestry/README.md: OK
+  exit 0.
+
+Correction commit scope (not the older delivery path list above):
+  docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+  docs/security/evidence/recovery-resume-inventory-20261107/README.md
+  docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt
+  docs/security/evidence/recovery-resume-inventory-20261107/commands.txt
+  docs/security/evidence/recovery-resume-inventory-20261107/CORRECTION-SHA256SUMS
+
+The correction manifest intentionally covers the corrected inventory, plan,
+changed-path list, audit register, and selected preserved review evidence. It
+does not hash itself or this command log; report their final SHA-256 values
+separately. The original `SHA256SUMS` remains byte-identical and is verified
+against commit 61028eb6dbb91f0834a5235f20c935bb0ff5b549 above.
+Unsuccessful command attempts during this correction: none.
+
+No Rust tests, builds, live network, operational signing, or activation were
+run. The old manifest verification described above was performed at its
+producing revision; the new correction manifest is the current integrity
+record.

@@ -4858,3 +4858,32 @@ checks. `SHA256SUMS` covers the new inventory files and the appended plan;
 the audit register and all earlier evidence remain byte-identical. No code,
 test, build, network, operational signing, activation, merge, or PR action is
 part of this delivery.
+
+## 34. Recovery/resume documentation correction
+
+This append-only correction supersedes section 33's erroneous reference to a
+nonexistent “section 32 inventory link.” The delivered inventory is
+[Authenticated recovery and resume design inventory — section 7, Review
+corrections and superseding clarifications](evidence/recovery-resume-inventory-20261107/README.md#7-review-corrections-and-superseding-clarifications).
+It records the user-supplied **CHANGES REQUIRED** disposition without
+inventing a reviewer identity or raw review artifact.
+
+The preceding section 33 integrity sentence referred to the original
+`SHA256SUMS`; that manifest remains tied to the exact pre-correction inventory
+and plan bytes at task tip `61028eb6dbb91f0834a5235f20c935bb0ff5b549`.
+The inventory's new `CORRECTION-SHA256SUMS` and revision-aware command record
+are the current correction integrity evidence; the command record hash is
+reported separately because it is not self-listed.
+
+The correction clarifies that requested-restore startup opens canonical
+consensus storage before evaluating the RTR precondition, and that
+`create_if_missing(true)` permits storage creation before a subsequent RTR
+refusal; it does not assert that a particular run created or wrote anything.
+It also narrows no-effect claims to refusals before the relevant protected
+effect boundary. After publication, application, or signer invocation, known
+effects remain known and ambiguous outcomes remain unknown; refusal does not
+prove rollback or unchanged state. Recovery/currentness, signing-history,
+fencing, and separate-resume directions remain proposed only. No recovery
+mechanism or authority is approved. A17-F1 / RS1-F7, RS1 and A33-F1 / E27
+remain **OPEN**; activation remains **DISABLED** and public DevNet remains
+**NO-GO**.

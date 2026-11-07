@@ -3,3 +3,6 @@ docs/security/evidence/recovery-resume-inventory-20261107/README.md
 docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt
 docs/security/evidence/recovery-resume-inventory-20261107/commands.txt
 docs/security/evidence/recovery-resume-inventory-20261107/SHA256SUMS
+
+Correction appended to the delivery:
+docs/security/evidence/recovery-resume-inventory-20261107/CORRECTION-SHA256SUMS
