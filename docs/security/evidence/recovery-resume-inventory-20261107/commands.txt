@@ -784,3 +784,9 @@ P1 provider/content-binding composition: see
 `p1-content-binding-composition/COMMANDS.txt` for discovery, focused and
 affected regressions, the retained intermediate visibility failure, exact
 results, preservation checks and hashes. The 3-of-4 rule is test-only.
+
+P1 composition resource ordering: see
+`p1-composition-resource-ordering/COMMANDS.txt` for the focused ordering and
+affected regressions, retained failed attempts, toolchain, exact stage
+observations and integrity results. Signature copy/frame counters are
+test-only operations, not measurements of network ingress allocations.

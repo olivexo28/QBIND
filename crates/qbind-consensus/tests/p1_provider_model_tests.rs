@@ -122,6 +122,9 @@ struct Trace {
     evidence_frame_checks: usize,
     evidence_count_checks: usize,
     evidence_entry_length_checks: usize,
+    borrowed_entry_count_checks: usize,
+    borrowed_entry_length_checks: usize,
+    borrowed_entry_aggregate_checks: usize,
     decoders: usize,
     structural_checks: usize,
     uniqueness_checks: usize,
@@ -351,6 +354,42 @@ impl ProviderSlot {
     where
         F: FnOnce(&Candidate),
     {
+        self.verify_use_inner(
+            fixture,
+            admitted,
+            currentness,
+            evidence_bytes,
+            None,
+            callback,
+        )
+    }
+
+    fn verify_use_with_borrowed_entries<F>(
+        &self,
+        fixture: &ExpectedCatalogFixture,
+        admitted: &AdmittedTestContext,
+        currentness: Currentness,
+        entries: &[&[u8]],
+        callback: F,
+    ) -> Result<(), Refusal>
+    where
+        F: FnOnce(&Candidate),
+    {
+        self.verify_use_inner(fixture, admitted, currentness, &[], Some(entries), callback)
+    }
+
+    fn verify_use_inner<F>(
+        &self,
+        fixture: &ExpectedCatalogFixture,
+        admitted: &AdmittedTestContext,
+        currentness: Currentness,
+        evidence_bytes: &[u8],
+        borrowed_entries: Option<&[&[u8]]>,
+        callback: F,
+    ) -> Result<(), Refusal>
+    where
+        F: FnOnce(&Candidate),
+    {
         let state_rc = admitted.slot.upgrade().ok_or(Refusal::ProviderDestroyed)?;
         if !Rc::ptr_eq(&state_rc, &self.state) {
             return Err(Refusal::ProviderReplaced);
@@ -375,7 +414,11 @@ impl ProviderSlot {
             return Err(Refusal::InvalidatedBeforeUse);
         }
         require_currentness(currentness, &self.trace)?;
-        scan_evidence(evidence_bytes, 0, &self.trace)?;
+        if let Some(entries) = borrowed_entries {
+            check_borrowed_evidence_entries(entries, &self.trace)?;
+        } else {
+            scan_evidence(evidence_bytes, 0, &self.trace)?;
+        }
         self.trace.borrow_mut().sentinel_effects += 1;
         callback(&lease.snapshot);
         Ok(())
@@ -619,6 +662,56 @@ fn scan_borrowed(
     check_actual_size(candidate_bytes.len(), evidence_bytes.len())?;
     scan_evidence(evidence_bytes, candidate_bytes.len(), trace)?;
     scan_candidate(candidate_bytes, trace)
+}
+
+fn checked_borrowed_evidence_frame_len(lengths: &[usize]) -> Result<usize, Refusal> {
+    let mut total = EVIDENCE_HEADER;
+    for length in lengths {
+        total = total
+            .checked_add(2)
+            .and_then(|total| total.checked_add(*length))
+            .ok_or(Refusal::LengthOverflow)?;
+    }
+    Ok(total)
+}
+
+fn check_borrowed_evidence_aggregate(
+    lengths: &[usize],
+    trace: &Rc<RefCell<Trace>>,
+) -> Result<usize, Refusal> {
+    trace.borrow_mut().borrowed_entry_aggregate_checks += 1;
+    let total = checked_borrowed_evidence_frame_len(lengths)?;
+    if total > MAX_EVIDENCE {
+        return Err(Refusal::EvidenceTooLarge);
+    }
+    if checked_combined_len(0, total)? > MAX_COMBINED {
+        return Err(Refusal::CombinedTooLarge);
+    }
+    Ok(total)
+}
+
+fn check_borrowed_evidence_entries(
+    entries: &[&[u8]],
+    trace: &Rc<RefCell<Trace>>,
+) -> Result<usize, Refusal> {
+    trace.borrow_mut().borrowed_entry_count_checks += 1;
+    if entries.is_empty() {
+        return Err(Refusal::EvidenceEntryCountInvalid);
+    }
+    if entries.len() > MAX_EVIDENCE_ENTRIES {
+        return Err(Refusal::EvidenceEntryCountExceeded);
+    }
+    trace.borrow_mut().borrowed_entry_length_checks += 1;
+    for entry in entries {
+        if entry.is_empty() {
+            return Err(Refusal::EvidenceEntryLengthInvalid);
+        }
+        if entry.len() > MAX_ENTRY_BYTES {
+            return Err(Refusal::EvidenceEntryTooLarge);
+        }
+    }
+    let lengths = entries.iter().map(|entry| entry.len()).collect::<Vec<_>>();
+    check_borrowed_evidence_aggregate(&lengths, trace)
 }
 
 fn scan_evidence<'a>(

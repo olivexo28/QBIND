@@ -1,0 +1,7 @@
+PASS: four append-only prefixes, 239 historical files and audit bytes
+PASS: 19 accepted composition manifest entries against producing revision 58ea48c1bb1d20526143cf2737767c912fd0f365
+PASS: content experiment test bodies unchanged; five accepted composition tests retained
+PASS: modified paths limited to test support and append-only evidence
+PASS: three distinct ordering controls, result counts and intermediate failures retained
+NOT ESTABLISHED: allocator/total-memory bounds, production currentness, finality or resume
+PASS: unstaged diff whitespace and targeted rustfmt checks

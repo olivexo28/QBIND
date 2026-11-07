@@ -273,3 +273,22 @@ docs/security/evidence/recovery-resume-inventory-20261107/p1-content-binding-com
 docs/security/evidence/recovery-resume-inventory-20261107/p1-content-binding-composition/regressions.log.gz
 docs/security/evidence/recovery-resume-inventory-20261107/p1-content-binding-composition/integrity.txt
 docs/security/evidence/recovery-resume-inventory-20261107/p1-content-binding-composition/SHA256SUMS
+
+P1 composition resource-ordering test control:
+crates/qbind-consensus/tests/p1_provider_model_tests.rs
+crates/qbind-consensus/tests/support/p1_content_composition.rs
+docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+docs/security/evidence/recovery-resume-inventory-20261107/README.md
+docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/commands.txt
+docs/security/evidence/recovery-resume-inventory-20261107/p1-composition-resource-ordering/README.md
+docs/security/evidence/recovery-resume-inventory-20261107/p1-composition-resource-ordering/COMMANDS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/p1-composition-resource-ordering/check_artifacts.py
+docs/security/evidence/recovery-resume-inventory-20261107/p1-composition-resource-ordering/signature-length-compile-failure.log.gz
+docs/security/evidence/recovery-resume-inventory-20261107/p1-composition-resource-ordering/first-ordering-failure.log.gz
+docs/security/evidence/recovery-resume-inventory-20261107/p1-composition-resource-ordering/integrity-comparison-correction.txt
+docs/security/evidence/recovery-resume-inventory-20261107/p1-composition-resource-ordering/discovery.log.gz
+docs/security/evidence/recovery-resume-inventory-20261107/p1-composition-resource-ordering/focused.log.gz
+docs/security/evidence/recovery-resume-inventory-20261107/p1-composition-resource-ordering/regressions.log.gz
+docs/security/evidence/recovery-resume-inventory-20261107/p1-composition-resource-ordering/integrity.txt
+docs/security/evidence/recovery-resume-inventory-20261107/p1-composition-resource-ordering/SHA256SUMS

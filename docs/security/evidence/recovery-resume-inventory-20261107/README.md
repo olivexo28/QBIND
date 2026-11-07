@@ -624,3 +624,15 @@ Independent review is pending; prior bounded acceptances remain unchanged.
 
 A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
 Activation DISABLED; public DevNet NO-GO.
+
+## 26. P1 composition resource ordering
+
+The [ordering control](p1-composition-resource-ordering/README.md) checks
+provider/lease/currentness and actual borrowed evidence bounds before copying
+signature bytes or constructing a frame. It retains an old-order defective
+control, exact cap and arithmetic cases, and real-verifier restored positives.
+This is a single-threaded test model, not an ingress-allocation or production
+resource guarantee. Prior composition acceptance remains unchanged.
+
+A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
+Activation DISABLED; public DevNet NO-GO.

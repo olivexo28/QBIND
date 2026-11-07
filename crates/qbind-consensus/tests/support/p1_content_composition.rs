@@ -65,6 +65,10 @@ struct CompositionTrace {
     callbacks: usize,
     context_checks: usize,
     mapping_checks: usize,
+    signature_copy_bytes: usize,
+    frame_constructions: usize,
+    frame_bytes: usize,
+    frame_signature_bytes: usize,
     verifier_calls: usize,
     verification_successes: usize,
     selected: Option<Candidate>,
@@ -75,6 +79,30 @@ struct CompositionTrace {
 enum Selection {
     Bound,
     WitnessDefect,
+}
+
+fn build_evidence_frame(
+    entries: &[&[u8]],
+    trace: &mut CompositionTrace,
+) -> Result<Vec<u8>, Refusal> {
+    let lengths = entries.iter().map(|entry| entry.len()).collect::<Vec<_>>();
+    let total = checked_borrowed_evidence_frame_len(&lengths)?;
+    let count = u8::try_from(entries.len()).map_err(|_| Refusal::LengthOverflow)?;
+    let declared_total = u32::try_from(total).map_err(|_| Refusal::LengthOverflow)?;
+    let mut bytes = Vec::with_capacity(total);
+    bytes.extend_from_slice(EVIDENCE_MAGIC);
+    bytes.extend_from_slice(&declared_total.to_le_bytes());
+    bytes.push(count);
+    for entry in entries {
+        let length = u16::try_from(entry.len()).map_err(|_| Refusal::LengthOverflow)?;
+        bytes.extend_from_slice(&length.to_le_bytes());
+        trace.frame_signature_bytes += entry.len();
+        bytes.extend_from_slice(entry);
+    }
+    if bytes.len() != total {
+        return Err(Refusal::Malformed);
+    }
+    Ok(bytes)
 }
 
 fn mapped_keys(
@@ -117,48 +145,93 @@ fn compose(
     selection: Selection,
     trace: &mut CompositionTrace,
 ) -> Result<usize, CompositionRefusal> {
-    let evidence = encode_evidence(
-        &endorsements
-            .iter()
-            .map(|entry| entry.signature.clone())
-            .collect::<Vec<_>>(),
-    );
+    let borrowed_entries = endorsements
+        .iter()
+        .map(|entry| entry.signature.as_slice())
+        .collect::<Vec<_>>();
     let mut result = None;
-    slot.verify_use(fixture, lease, currentness, &evidence, |snapshot| {
-        trace.callbacks += 1;
-        trace.context_checks += 1;
-        let selected = match selection {
-            Selection::Bound => {
-                if witness != snapshot {
-                    result = Some(Err(CompositionRefusal::ContextMismatch));
+    slot.verify_use_with_borrowed_entries(
+        fixture,
+        lease,
+        currentness,
+        &borrowed_entries,
+        |snapshot| {
+            trace.callbacks += 1;
+            trace.context_checks += 1;
+            let selected = match selection {
+                Selection::Bound => {
+                    if witness != snapshot {
+                        result = Some(Err(CompositionRefusal::ContextMismatch));
+                        return;
+                    }
+                    snapshot
+                }
+                Selection::WitnessDefect => witness,
+            };
+            trace.selected = Some(selected.clone());
+            trace.mapping_checks += 1;
+            let keys = match mapped_keys(selected, statement) {
+                Ok(keys) => keys,
+                Err(error) => {
+                    result = Some(Err(error));
                     return;
                 }
-                snapshot
-            }
-            Selection::WitnessDefect => witness,
-        };
-        trace.selected = Some(selected.clone());
-        trace.mapping_checks += 1;
-        let keys = match mapped_keys(selected, statement) {
-            Ok(keys) => keys,
-            Err(error) => {
-                result = Some(Err(error));
+            };
+            let copied_endorsements = endorsements
+                .iter()
+                .map(|endorsement| {
+                    trace.signature_copy_bytes += endorsement.signature.len();
+                    content::Endorsement {
+                        signer: endorsement.signer,
+                        signature: endorsement.signature.clone(),
+                    }
+                })
+                .collect::<Vec<_>>();
+            let copied_entries = copied_endorsements
+                .iter()
+                .map(|endorsement| endorsement.signature.as_slice())
+                .collect::<Vec<_>>();
+            trace.frame_constructions += 1;
+            let evidence = match build_evidence_frame(&copied_entries, trace) {
+                Ok(frame) => frame,
+                Err(error) => {
+                    result = Some(Err(CompositionRefusal::Provider(error)));
+                    return;
+                }
+            };
+            trace.frame_bytes = evidence.len();
+            let framed_entries = match scan_evidence(&evidence, 0, &slot.trace) {
+                Ok(entries) => entries,
+                Err(error) => {
+                    result = Some(Err(CompositionRefusal::Provider(error)));
+                    return;
+                }
+            };
+            if framed_entries.len() != copied_entries.len()
+                || framed_entries
+                    .iter()
+                    .zip(&copied_entries)
+                    .any(|(framed, copied)| *framed != *copied)
+            {
+                result = Some(Err(CompositionRefusal::Provider(
+                    Refusal::DescriptorMismatch,
+                )));
                 return;
             }
-        };
-        trace.verifier_calls += 1;
-        let verification = content::test_verify(
-            statement,
-            endorsements,
-            &keys,
-            content::TestDefect::default(),
-            &mut trace.verification,
-        );
-        if verification.is_ok() {
-            trace.verification_successes += 1;
-        }
-        result = Some(verification.map_err(CompositionRefusal::Verification));
-    })
+            trace.verifier_calls += 1;
+            let verification = content::test_verify(
+                statement,
+                &copied_endorsements,
+                &keys,
+                content::TestDefect::default(),
+                &mut trace.verification,
+            );
+            if verification.is_ok() {
+                trace.verification_successes += 1;
+            }
+            result = Some(verification.map_err(CompositionRefusal::Verification));
+        },
+    )
     .map_err(CompositionRefusal::Provider)?;
     result.expect("provider callback ran")
 }
@@ -168,6 +241,10 @@ fn oracle(trace: &CompositionTrace, expected: &Candidate) -> bool {
         .selected
         .as_ref()
         .is_none_or(|selected| selected == expected)
+}
+
+fn refusal_precedes_materialization(trace: &CompositionTrace) -> bool {
+    trace.signature_copy_bytes == 0 && trace.frame_constructions == 0
 }
 
 fn run(
@@ -190,6 +267,385 @@ fn run(
         &mut trace,
     );
     (result, trace)
+}
+
+#[test]
+fn composition_preflight_limits_before_signature_copy_and_frame() {
+    let f = Fixture::new();
+    let slot = ProviderSlot::new(&f.expected);
+    let lease = f.admit(&slot);
+    assert!(f
+        .experiment
+        .endorsements
+        .iter()
+        .all(|entry| entry.signature.len() == MAX_ENTRY_BYTES));
+    let (valid, valid_trace) = run(
+        &f,
+        &slot,
+        &lease,
+        &f.experiment.statement,
+        &f.experiment.endorsements,
+    );
+    assert_eq!(valid, Ok(3));
+    assert_eq!(
+        (
+            valid_trace.signature_copy_bytes,
+            valid_trace.frame_constructions,
+            valid_trace.frame_signature_bytes,
+            valid_trace.frame_bytes,
+            valid_trace.verification.backend_calls,
+            valid_trace.verification_successes
+        ),
+        (
+            3 * MAX_ENTRY_BYTES,
+            1,
+            3 * MAX_ENTRY_BYTES,
+            EVIDENCE_HEADER + 3 * (2 + MAX_ENTRY_BYTES),
+            3,
+            1
+        )
+    );
+    let max_entries = (0..MAX_EVIDENCE_ENTRIES)
+        .map(|_| vec![0xA5; MAX_ENTRY_BYTES])
+        .collect::<Vec<_>>();
+    let max_endorsements = max_entries
+        .iter()
+        .enumerate()
+        .map(|(index, signature)| content::Endorsement {
+            signer: index as u16,
+            signature: signature.clone(),
+        })
+        .collect::<Vec<_>>();
+    let before = slot.trace();
+    let mut trace = CompositionTrace::default();
+    assert_eq!(
+        compose(
+            &slot,
+            &f.expected,
+            &lease,
+            Currentness::Available,
+            &f.expected.context,
+            &f.experiment.statement,
+            &max_endorsements,
+            Selection::Bound,
+            &mut trace
+        ),
+        Err(CompositionRefusal::Verification(
+            content::Refusal::TooManyEndorsements
+        ))
+    );
+    let after = slot.trace();
+    assert_eq!(
+        after.borrowed_entry_count_checks,
+        before.borrowed_entry_count_checks + 1
+    );
+    assert_eq!(
+        after.borrowed_entry_length_checks,
+        before.borrowed_entry_length_checks + 1
+    );
+    assert_eq!(
+        after.borrowed_entry_aggregate_checks,
+        before.borrowed_entry_aggregate_checks + 1
+    );
+    assert_eq!(after.sentinel_effects, before.sentinel_effects + 1);
+    assert_eq!(
+        trace.signature_copy_bytes,
+        MAX_EVIDENCE_ENTRIES * MAX_ENTRY_BYTES
+    );
+    assert_eq!(trace.frame_constructions, 1);
+    assert_eq!(trace.frame_bytes, MAX_EVIDENCE);
+    assert_eq!(
+        trace.frame_signature_bytes,
+        MAX_EVIDENCE_ENTRIES * MAX_ENTRY_BYTES
+    );
+    assert_eq!(trace.verifier_calls, 1);
+    assert_eq!(trace.verification.encoding_calls, 0);
+    assert_eq!(trace.verification.backend_calls, 0);
+
+    let count_over = (0..=MAX_EVIDENCE_ENTRIES)
+        .map(|index| content::Endorsement {
+            signer: index as u16,
+            signature: vec![1],
+        })
+        .collect::<Vec<_>>();
+    let length_over = vec![content::Endorsement {
+        signer: 0,
+        signature: vec![1; MAX_ENTRY_BYTES + 1],
+    }];
+    for (entries, refusal) in [
+        (&count_over, Refusal::EvidenceEntryCountExceeded),
+        (&length_over, Refusal::EvidenceEntryTooLarge),
+    ] {
+        let before = slot.trace();
+        let mut trace = CompositionTrace::default();
+        assert_eq!(
+            compose(
+                &slot,
+                &f.expected,
+                &lease,
+                Currentness::Available,
+                &f.expected.context,
+                &f.experiment.statement,
+                entries,
+                Selection::Bound,
+                &mut trace
+            ),
+            Err(CompositionRefusal::Provider(refusal))
+        );
+        let after = slot.trace();
+        assert_eq!(
+            after.fixture_binding_checks,
+            before.fixture_binding_checks + 1
+        );
+        assert_eq!(
+            after.lease_identity_checks,
+            before.lease_identity_checks + 1
+        );
+        assert_eq!(after.currentness_checks, before.currentness_checks + 1);
+        assert_eq!(
+            after.borrowed_entry_count_checks,
+            before.borrowed_entry_count_checks + 1
+        );
+        assert_eq!(
+            after.borrowed_entry_length_checks,
+            before.borrowed_entry_length_checks
+                + usize::from(refusal == Refusal::EvidenceEntryTooLarge)
+        );
+        assert_eq!(
+            after.borrowed_entry_aggregate_checks,
+            before.borrowed_entry_aggregate_checks
+        );
+        assert_eq!(after.sentinel_effects, before.sentinel_effects);
+        assert_eq!(
+            (
+                trace.callbacks,
+                trace.signature_copy_bytes,
+                trace.frame_constructions,
+                trace.frame_signature_bytes,
+                trace.verifier_calls,
+                trace.verification.backend_calls
+            ),
+            (0, 0, 0, 0, 0, 0)
+        );
+    }
+
+    assert_eq!(
+        checked_borrowed_evidence_frame_len(&[MAX_ENTRY_BYTES; MAX_EVIDENCE_ENTRIES]),
+        Ok(MAX_EVIDENCE)
+    );
+    assert_eq!(
+        checked_borrowed_evidence_frame_len(&[usize::MAX]),
+        Err(Refusal::LengthOverflow)
+    );
+    let arithmetic_trace = Rc::new(RefCell::new(Trace::default()));
+    assert_eq!(
+        check_borrowed_evidence_aggregate(&[usize::MAX], &arithmetic_trace),
+        Err(Refusal::LengthOverflow)
+    );
+    assert_eq!(arithmetic_trace.borrow().borrowed_entry_aggregate_checks, 1);
+    assert_eq!(
+        checked_borrowed_evidence_frame_len(&[]),
+        Ok(EVIDENCE_HEADER)
+    );
+    println!("ORDERING valid 3x2420 signatures reached backend; bounded 8x2420 frame passed preflight then verifier committee cap; 9 entries/2421 bytes refused before copy/frame; checked frame arithmetic at cap/overflow");
+}
+
+#[test]
+fn composition_provider_and_currentness_refuse_before_evidence_copy_or_frame() {
+    let a = Fixture::new();
+    let b = Fixture::new();
+    let slot = ProviderSlot::new(&a.expected);
+    let lease = a.admit(&slot);
+    let invalidated = vec![content::Endorsement {
+        signer: 0,
+        signature: a.experiment.endorsements[0].signature.clone(),
+    }];
+    slot.replace_current(&b.expected).unwrap();
+    let before = slot.trace();
+    let mut trace = CompositionTrace::default();
+    assert_eq!(
+        compose(
+            &slot,
+            &b.expected,
+            &lease,
+            Currentness::Available,
+            &b.expected.context,
+            &b.experiment.statement,
+            &invalidated,
+            Selection::Bound,
+            &mut trace
+        ),
+        Err(CompositionRefusal::Provider(Refusal::ProviderReplaced))
+    );
+    assert_eq!(
+        slot.trace().provider_identity_checks,
+        before.provider_identity_checks + 1
+    );
+    assert_eq!(slot.trace().currentness_checks, before.currentness_checks);
+    assert_eq!(
+        (
+            trace.signature_copy_bytes,
+            trace.frame_constructions,
+            trace.verifier_calls,
+            trace.verification.backend_calls
+        ),
+        (0, 0, 0, 0)
+    );
+
+    let new_lease = b.admit(&slot);
+    for (currentness, refusal) in [
+        (Currentness::Stale, Refusal::StaleContext),
+        (Currentness::Unknown, Refusal::CurrentnessUnknown),
+    ] {
+        let before = slot.trace();
+        let mut trace = CompositionTrace::default();
+        assert_eq!(
+            compose(
+                &slot,
+                &b.expected,
+                &new_lease,
+                currentness,
+                &b.expected.context,
+                &b.experiment.statement,
+                &b.experiment.endorsements,
+                Selection::Bound,
+                &mut trace
+            ),
+            Err(CompositionRefusal::Provider(refusal))
+        );
+        let after = slot.trace();
+        assert_eq!(
+            after.fixture_binding_checks,
+            before.fixture_binding_checks + 1
+        );
+        assert_eq!(
+            after.lease_identity_checks,
+            before.lease_identity_checks + 1
+        );
+        assert_eq!(after.currentness_checks, before.currentness_checks + 1);
+        assert_eq!(
+            after.borrowed_entry_count_checks,
+            before.borrowed_entry_count_checks
+        );
+        assert_eq!(after.sentinel_effects, before.sentinel_effects);
+        assert_eq!(
+            (
+                trace.callbacks,
+                trace.signature_copy_bytes,
+                trace.frame_constructions,
+                trace.verifier_calls,
+                trace.verification.backend_calls
+            ),
+            (0, 0, 0, 0, 0)
+        );
+    }
+    let mut restored = CompositionTrace::default();
+    assert_eq!(
+        compose(
+            &slot,
+            &b.expected,
+            &new_lease,
+            Currentness::Available,
+            &b.expected.context,
+            &b.experiment.statement,
+            &b.experiment.endorsements,
+            Selection::Bound,
+            &mut restored
+        ),
+        Ok(3)
+    );
+    assert_eq!(
+        (
+            restored.signature_copy_bytes,
+            restored.frame_constructions,
+            restored.frame_signature_bytes,
+            restored.verification.backend_calls
+        ),
+        (3 * MAX_ENTRY_BYTES, 1, 3 * MAX_ENTRY_BYTES, 3)
+    );
+    slot.destroy_current();
+    let before = slot.trace();
+    let mut destroyed = CompositionTrace::default();
+    assert_eq!(
+        compose(
+            &slot,
+            &b.expected,
+            &new_lease,
+            Currentness::Available,
+            &b.expected.context,
+            &b.experiment.statement,
+            &b.experiment.endorsements,
+            Selection::Bound,
+            &mut destroyed
+        ),
+        Err(CompositionRefusal::Provider(Refusal::ProviderDestroyed))
+    );
+    assert_eq!(slot.trace().liveness_checks, before.liveness_checks + 1);
+    assert_eq!(
+        (
+            destroyed.signature_copy_bytes,
+            destroyed.frame_constructions,
+            destroyed.frame_signature_bytes,
+            destroyed.verification.backend_calls
+        ),
+        (0, 0, 0, 0)
+    );
+    println!("ORDERING replaced/stale/unknown/destroyed refused before copy/frame/backend; restored B passed real verifier");
+}
+
+#[test]
+fn defective_order_copies_and_frames_before_provider_refusal_is_detected() {
+    let f = Fixture::new();
+    let slot = ProviderSlot::new(&f.expected);
+    let lease = f.admit(&slot);
+    slot.destroy_current();
+    let borrowed = f
+        .experiment
+        .endorsements
+        .iter()
+        .map(|entry| entry.signature.as_slice())
+        .collect::<Vec<_>>();
+    let mut trace = CompositionTrace::default();
+    let signatures = borrowed
+        .iter()
+        .map(|signature| {
+            trace.signature_copy_bytes += signature.len();
+            signature.to_vec()
+        })
+        .collect::<Vec<_>>();
+    trace.frame_constructions += 1;
+    let copied_entries = signatures.iter().map(Vec::as_slice).collect::<Vec<_>>();
+    let evidence = build_evidence_frame(&copied_entries, &mut trace).unwrap();
+    trace.frame_bytes = evidence.len();
+    assert_eq!(
+        slot.verify_use(
+            &f.expected,
+            &lease,
+            Currentness::Available,
+            &evidence,
+            |_| {
+                trace.callbacks += 1;
+            }
+        ),
+        Err(Refusal::ProviderDestroyed)
+    );
+    let after = slot.trace();
+    assert_eq!(
+        (
+            trace.signature_copy_bytes,
+            trace.frame_constructions,
+            trace.frame_signature_bytes,
+            trace.callbacks
+        ),
+        (3 * MAX_ENTRY_BYTES, 1, 3 * MAX_ENTRY_BYTES, 0)
+    );
+    assert_eq!(
+        (trace.verifier_calls, trace.verification.backend_calls),
+        (0, 0)
+    );
+    assert_eq!(after.liveness_checks, 1);
+    assert!(!refusal_precedes_materialization(&trace));
+    println!("DEFECT ORDER destroyed provider still had signature copies={} frame_constructions=1; corrected oracle requires both zero", trace.signature_copy_bytes);
 }
 
 #[test]

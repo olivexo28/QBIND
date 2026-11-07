@@ -1,0 +1,58 @@
+P1 composition resource-ordering command record
+
+Origin https://github.com/olivexo28/QBIND
+Branch docs/authenticated-recovery-resume-inventory
+Starting HEAD 58ea48c1bb1d20526143cf2737767c912fd0f365
+Tree 2b3b33f663fdd05209dc674ed37cb2958fca1f49
+Parent af3110da83a5555da5307b981e276f1cff9d058b
+Direct task ref 58ea48c1bb1d20526143cf2737767c912fd0f365
+Direct main ref 9bf0eb43e4e3c601d02d3886d220b0abeb3a103e
+Main tree 56509b20084ee1cbe2c42fda9d73d87e4c82c33f
+At start: git remote get-url origin; git branch --show-current; git rev-parse
+HEAD, HEAD^{tree}, HEAD^ and main^{tree}; git merge-base --is-ancestor;
+git ls-remote origin for task/main; git status --porcelain=v1; and git diff
+--cached --name-only. Exit 0; exact refs matched, main ancestor, clean tree
+and index. No reset, rebase or force-push.
+
+Linux 6.12.8+ x86_64; rustc 1.99.1 (58cf8f9c3 2026-10-13),
+host x86_64-unknown-linux-gnu, LLVM 23.1.1; cargo 1.99.1
+(5f94df478 2026-08-27).
+
+Intermediate attempts, all preserved as compressed raw output:
+1. The first compile failed with E0425 because the support module referred to
+   private `SIGNATURE_BYTES`; corrected to the accepted model's
+   `MAX_ENTRY_BYTES`. See signature-length-compile-failure.log.gz.
+2. The next focused run had 36 passed / 1 failed because an assertion expected
+   a length-stage counter to advance for a count-over-limit case. Corrected
+   the oracle to reflect that count refusal precedes entry-length checking.
+   See first-ordering-failure.log.gz.
+3. During test organization an equivalent resource module was briefly
+   duplicated; it was removed before final validation. It is not part of the
+   final test body count.
+4. An initial revision-aware check returned exit 1 because its checker wrongly
+stripped `pub(crate)` from a content source file that was already identical
+to the pinned base. Corrected the checker to compare exact bytes. This was
+checker logic only, not a source/test failure; the correction is retained
+in integrity-comparison-correction.txt.
+
+Final commands, serial:
+  rustfmt --edition 2021 crates/qbind-consensus/tests/p1_provider_model_tests.rs crates/qbind-consensus/tests/content_binding_experiment_tests.rs crates/qbind-consensus/tests/p1_content_composition_tests.rs crates/qbind-consensus/tests/support/p1_content_composition.rs
+  rustfmt --edition 2021 --check crates/qbind-consensus/tests/p1_provider_model_tests.rs crates/qbind-consensus/tests/content_binding_experiment_tests.rs crates/qbind-consensus/tests/p1_content_composition_tests.rs crates/qbind-consensus/tests/support/p1_content_composition.rs
+  cargo test -p qbind-consensus --test p1_content_composition_tests -- --list
+  cargo test -p qbind-consensus --test p1_content_composition_tests -- --nocapture
+  cargo test -p qbind-consensus --test p1_provider_model_tests --test p1_provider_verifier_handoff_tests --test content_binding_experiment_tests
+All exit 0. Discovery lists 37 test names; focused log reports 37 passed,
+0 failed/ignored/measured/filtered. Regression log reports 7, 37 and 37
+passed respectively, all 0 failed/ignored/measured/filtered. Focused and
+provider/handoff targets contain the same 37 bodies; only three are new
+ordering controls. Compiler warnings remain in raw output.
+
+Integrity:
+  python3 docs/security/evidence/recovery-resume-inventory-20261107/p1-composition-resource-ordering/check_artifacts.py
+  git diff --check
+  git diff --cached --check
+  sha256sum -c docs/security/evidence/recovery-resume-inventory-20261107/p1-composition-resource-ordering/SHA256SUMS
+All final checks exit 0; integrity.txt retains the checker results. Previous manifest
+entries are verified against their producing revision, not append-modified
+working files. SHA256SUMS excludes itself; final commit and refs are reported
+at delivery because commit contents cannot contain their own hash.

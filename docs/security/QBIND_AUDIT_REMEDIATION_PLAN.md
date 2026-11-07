@@ -5247,3 +5247,18 @@ pending. No production protocol, authority or resume decision is established.
 
 A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
 Activation DISABLED; public DevNet NO-GO.
+
+## 54. P1 composition resource-ordering control
+
+The [test-only ordering evidence](evidence/recovery-resume-inventory-20261107/p1-composition-resource-ordering/README.md)
+records the accepted preflight order: live provider/lease/fixture and
+simulated currentness checks, then actual borrowed evidence count/length and
+checked frame arithmetic, then signature copying, frame construction and
+real test verification within one single-threaded callback boundary. A
+defective-order control reproduces the previously disclosed harness ordering.
+No production allocation or vulnerability claim follows. Earlier accepted
+composition controls, hypothetical statement/quorum semantics, catch-up
+containment and unselected B/C/P1/P2 directions remain unchanged.
+
+A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
+Activation DISABLED; public DevNet NO-GO.

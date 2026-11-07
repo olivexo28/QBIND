@@ -1,0 +1,8 @@
+Intermediate revision-aware checker attempt returned exit 1 after reporting
+the four append prefixes and prior 19-entry manifest as passing. Its source
+comparison incorrectly removed `pub(crate)` tokens from the current content
+experiment even though that visibility change was already present at the
+producing revision 58ea48c1bb1d20526143cf2737767c912fd0f365. Corrected the
+checker to compare the content experiment byte-for-byte to that pinned blob.
+No implementation source changed in response. The corrected checker passes;
+see integrity.txt and COMMANDS.txt.
