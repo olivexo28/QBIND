@@ -40,7 +40,7 @@ struct Candidate {
     content: Vec<u8>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct ExpectedCatalogFixture {
     identity: u64,
     context: Candidate,
@@ -123,6 +123,7 @@ struct Trace {
     admissions: usize,
     currentness_checks: usize,
     provider_identity_checks: usize,
+    fixture_binding_checks: usize,
     lease_identity_checks: usize,
     liveness_checks: usize,
     sentinel_effects: usize,
@@ -137,7 +138,7 @@ struct Descriptor {
 
 struct ProviderInstance {
     identity: u64,
-    fixture_identity: u64,
+    fixture: ExpectedCatalogFixture,
 }
 
 struct LeaseRecord {
@@ -173,7 +174,7 @@ impl ProviderSlot {
     fn new(fixture: &ExpectedCatalogFixture) -> Self {
         let current = ProviderInstance {
             identity: 1,
-            fixture_identity: fixture.identity,
+            fixture: fixture.clone(),
         };
         Self {
             state: Rc::new(RefCell::new(SlotState {
@@ -198,6 +199,19 @@ impl ProviderSlot {
             .map_or(0, |lease| lease.logical_charge)
     }
 
+    fn fixture_logical_charge(&self) -> Result<Option<usize>, Refusal> {
+        self.state
+            .borrow()
+            .current
+            .as_ref()
+            .map(|current| {
+                logical_snapshot_charge(&current.fixture.context)?
+                    .checked_add(std::mem::size_of::<u64>())
+                    .ok_or(Refusal::LengthOverflow)
+            })
+            .transpose()
+    }
+
     fn has_lease(&self) -> bool {
         self.state.borrow().lease.is_some()
     }
@@ -216,7 +230,7 @@ impl ProviderSlot {
         state.lease = None;
         state.current = Some(ProviderInstance {
             identity,
-            fixture_identity: fixture.identity,
+            fixture: fixture.clone(),
         });
         Ok(identity)
     }
@@ -235,14 +249,18 @@ impl ProviderSlot {
     ) -> Result<AdmittedTestContext, Refusal> {
         self.ensure_admission_available(fixture)?;
         validate_candidate(&candidate, &self.trace)?;
-        compare_context(fixture, &candidate, &self.trace)?;
+        {
+            let state = self.state.borrow();
+            let current = state.current.as_ref().ok_or(Refusal::ProviderDestroyed)?;
+            compare_context(&current.fixture, &candidate, &self.trace)?;
+        }
         require_currentness(currentness, &self.trace)?;
 
         let charge = logical_snapshot_charge(&candidate)?;
         let mut state = self.state.borrow_mut();
         let current = state.current.as_ref().ok_or(Refusal::ProviderDestroyed)?;
         let instance_identity = current.identity;
-        if current.fixture_identity != fixture.identity {
+        if current.fixture != *fixture {
             return Err(Refusal::FixtureMismatch);
         }
         let lease_identity = state.next_lease_identity;
@@ -309,7 +327,8 @@ impl ProviderSlot {
             return Err(Refusal::LeaseHeld);
         }
         let current = state.current.as_ref().ok_or(Refusal::ProviderDestroyed)?;
-        if current.fixture_identity != fixture.identity {
+        self.trace.borrow_mut().fixture_binding_checks += 1;
+        if current.fixture != *fixture {
             return Err(Refusal::FixtureMismatch);
         }
         Ok(())
@@ -337,9 +356,8 @@ impl ProviderSlot {
         if current.identity != admitted.instance_identity {
             return Err(Refusal::ProviderReplaced);
         }
-        if current.fixture_identity != fixture.identity
-            || fixture.identity != admitted.fixture_identity
-        {
+        self.trace.borrow_mut().fixture_binding_checks += 1;
+        if current.fixture != *fixture || fixture.identity != admitted.fixture_identity {
             return Err(Refusal::FixtureMismatch);
         }
         self.trace.borrow_mut().lease_identity_checks += 1;
@@ -1141,6 +1159,194 @@ fn provider_slot_rejects_a_different_fixture_identity() {
     );
     assert_eq!(slot.trace().structural_checks, 0);
     assert_eq!(slot.trace().admissions, 0);
+}
+
+#[test]
+fn p1_impl1_same_id_fixture_substitution_refuses_and_replacement_succeeds() {
+    let a = ExpectedCatalogFixture::new();
+    for kind in ["policy", "catalog"] {
+        let mut b = ExpectedCatalogFixture::with_identity(a.identity);
+        match kind {
+            "policy" => b.context.policy_version += 1,
+            "catalog" => b.context.members[0].weight += 1,
+            _ => unreachable!(),
+        }
+        assert_eq!(a.identity, b.identity);
+        assert_ne!(a.context, b.context);
+        let trace = Rc::new(RefCell::new(Trace::default()));
+        validate_candidate(&a.context, &trace).unwrap();
+        validate_candidate(&b.context, &trace).unwrap();
+        let slot = ProviderSlot::new(&a);
+        let expected_charge = logical_snapshot_charge(&a.context).unwrap() + 8;
+        assert_eq!(
+            slot.fixture_logical_charge().unwrap(),
+            Some(expected_charge)
+        );
+        assert_eq!(
+            slot.admit_decoded(&b, b.context.clone(), Currentness::Available)
+                .err(),
+            Some(Refusal::FixtureMismatch)
+        );
+        let t = slot.trace();
+        assert_eq!(
+            (
+                t.fixture_binding_checks,
+                t.structural_checks,
+                t.context_comparisons,
+                t.currentness_checks,
+                t.admissions
+            ),
+            (1, 0, 0, 0, 0)
+        );
+        assert_eq!(slot.logical_charge(), 0);
+        assert_eq!(
+            slot.admit_descriptor(
+                &b,
+                Descriptor {
+                    candidate_len: 0,
+                    evidence_len: 0,
+                },
+                || panic!("substituted fixture must not materialize"),
+                Currentness::Available,
+            )
+            .err(),
+            Some(Refusal::FixtureMismatch)
+        );
+        assert_eq!(slot.trace().materializers, 0);
+        assert_eq!(
+            slot.admit_decoded(&a, b.context.clone(), Currentness::Available)
+                .err(),
+            Some(Refusal::ContextMismatch(if kind == "policy" {
+                "policy"
+            } else {
+                "members/keys/weights"
+            }))
+        );
+        let t = slot.trace();
+        assert_eq!(
+            (
+                t.fixture_binding_checks,
+                t.structural_checks,
+                t.uniqueness_checks,
+                t.context_comparisons,
+                t.admissions
+            ),
+            (3, 1, 1, 1, 0)
+        );
+        let admitted = slot
+            .admit_decoded(&a, a.context.clone(), Currentness::Available)
+            .unwrap();
+        assert_eq!(
+            slot.fixture_logical_charge().unwrap(),
+            Some(expected_charge)
+        );
+        assert_eq!(
+            slot.logical_charge(),
+            logical_snapshot_charge(&a.context).unwrap()
+        );
+        let before = slot.trace();
+        assert_eq!(
+            slot.verify_use(
+                &b,
+                &admitted,
+                Currentness::Available,
+                &minimal_evidence(),
+                |_| {}
+            ),
+            Err(Refusal::FixtureMismatch)
+        );
+        let after = slot.trace();
+        assert_eq!(after.liveness_checks, before.liveness_checks + 1);
+        assert_eq!(
+            after.provider_identity_checks,
+            before.provider_identity_checks + 1
+        );
+        assert_eq!(
+            after.fixture_binding_checks,
+            before.fixture_binding_checks + 1
+        );
+        assert_eq!(after.lease_identity_checks, before.lease_identity_checks);
+        assert_eq!(after.currentness_checks, before.currentness_checks);
+        assert_eq!(after.evidence_decoder_calls, before.evidence_decoder_calls);
+        assert_eq!(after.sentinel_effects, 0);
+        slot.verify_use(
+            &a,
+            &admitted,
+            Currentness::Available,
+            &minimal_evidence(),
+            |snapshot| {
+                assert_eq!(snapshot, &a.context);
+            },
+        )
+        .unwrap();
+        assert_eq!(slot.trace().sentinel_effects, 1);
+        slot.replace_current(&b).unwrap();
+        assert_eq!(
+            slot.fixture_logical_charge().unwrap(),
+            Some(logical_snapshot_charge(&b.context).unwrap() + 8)
+        );
+        assert_eq!(
+            slot.verify_use(
+                &b,
+                &admitted,
+                Currentness::Available,
+                &minimal_evidence(),
+                |_| {}
+            ),
+            Err(Refusal::ProviderReplaced)
+        );
+        let new_lease = slot
+            .admit_decoded(&b, b.context.clone(), Currentness::Available)
+            .unwrap();
+        let charge = slot.logical_charge();
+        drop(admitted);
+        assert_eq!(slot.logical_charge(), charge);
+        slot.verify_use(
+            &b,
+            &new_lease,
+            Currentness::Available,
+            &minimal_evidence(),
+            |snapshot| {
+                assert_eq!(snapshot, &b.context);
+            },
+        )
+        .unwrap();
+        drop(new_lease);
+        assert_eq!(slot.logical_charge(), 0);
+        assert!(slot.fixture_logical_charge().unwrap().is_some());
+        slot.destroy_current();
+        assert_eq!(slot.fixture_logical_charge().unwrap(), None);
+        println!("CORRECTED {kind}: same-ID substitution refused at fixture binding; A and replaced B use succeed");
+    }
+}
+
+#[test]
+fn p1_impl1_bound_fixture_is_immutable_and_exhaustion_preserves_it() {
+    let mut supplied = ExpectedCatalogFixture::new();
+    let original = supplied.clone();
+    let slot = ProviderSlot::new(&supplied);
+    supplied.context.policy_version += 1;
+    assert_eq!(
+        slot.admit_decoded(&supplied, supplied.context.clone(), Currentness::Available)
+            .err(),
+        Some(Refusal::FixtureMismatch)
+    );
+    slot.set_next_identities_for_test(u64::MAX, 1);
+    assert_eq!(
+        slot.replace_current(&supplied),
+        Err(Refusal::IdentityExhausted)
+    );
+    let token = slot
+        .admit_decoded(&original, original.context.clone(), Currentness::Available)
+        .unwrap();
+    slot.verify_use(
+        &original,
+        &token,
+        Currentness::Available,
+        &minimal_evidence(),
+        |_| {},
+    )
+    .unwrap();
 }
 
 #[test]

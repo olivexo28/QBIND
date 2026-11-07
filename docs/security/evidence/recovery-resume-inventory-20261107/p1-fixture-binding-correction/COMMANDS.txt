@@ -1,0 +1,54 @@
+P1-IMPL-1 command record
+
+Repository: https://github.com/olivexo28/QBIND
+Branch: docs/authenticated-recovery-resume-inventory
+Starting HEAD f4ed8a123762dfc9aa1f1a9bdcffa78942894eed
+Starting tree d13045ff59a02ce774534e43d290e987a8e24ba3
+Parent 1d0b66739633b1232187b0cdc04849900f6f411e
+Direct task ref at start: f4ed8a123762dfc9aa1f1a9bdcffa78942894eed
+Direct main ref: 9bf0eb43e4e3c601d02d3886d220b0abeb3a103e
+Main tree: 56509b20084ee1cbe2c42fda9d73d87e4c82c33f
+Starting worktree and index clean; main is an ancestor. No reset or rebase.
+Identity checked with git remote get-url origin, git branch --show-current,
+git rev-parse HEAD/HEAD^{tree}/HEAD^/main^{tree}, git merge-base --is-ancestor,
+git ls-remote origin for both refs, git status --short and git diff --cached.
+The refs and ancestry were reconfirmed before publication.
+
+Platform: Linux 6.12.8+ x86_64; rustc 1.99.1 (58cf8f9c3 2026-10-13),
+host x86_64-unknown-linux-gnu, LLVM 23.1.1; cargo 1.99.1
+(5f94df478 2026-08-27). The historical report's Cargo version is not altered.
+
+The baseline-control.patch.gz is the diff adding the counterexample to the
+exact starting source. Command:
+  cargo test -p qbind-consensus --test p1_provider_model_tests p1_impl1_baseline_same_id_substitution_observation -- --exact --nocapture
+Exit 0: diagnostic 1 passed, 0 failed, 0 ignored, 17 filtered. Its deliberate
+assertions reproduce the defect and do not constitute a security pass. Raw
+output: baseline.log.gz. The patch was checked against the untouched index:
+  git apply --cached --check /root/.copilot/session-state/0d9bc349d569421db76c851feaf5e01c/files/p1-impl1-baseline.patch
+Exit 0.
+
+After correction, an intermediate focused run exited 0 with 19 passed, 0 failed,
+0 ignored, 0 filtered; first-focused.log.gz retains its output. The descriptor
+pre-materialization and simultaneous-accounting assertions were then added.
+Final commands, executed serially:
+  rustfmt --edition 2021 crates/qbind-consensus/tests/p1_provider_model_tests.rs
+  rustfmt --edition 2021 --check crates/qbind-consensus/tests/p1_provider_model_tests.rs
+  cargo test -p qbind-consensus --test p1_provider_model_tests -- --list
+  cargo test -p qbind-consensus --test p1_provider_model_tests -- --nocapture
+  cargo test -p qbind-consensus --test authority_context_experiment_tests --test content_binding_experiment_tests
+All exit 0. discovery.log.gz contains all 19 discovered names; focused.log.gz
+contains 19 passed, 0 failed, 0 ignored, 0 filtered; regressions.log.gz contains
+9 and 7 passed respectively, 0 failed, 0 ignored, 0 filtered. Warnings are
+preserved in raw logs. No command in this correction failed. The baseline
+diagnostic is not a corrected-model regression or an ordinary security pass.
+
+Documentation and integrity commands:
+  python3 docs/security/evidence/recovery-resume-inventory-20261107/p1-fixture-binding-correction/check_artifacts.py
+  git diff --check
+  git diff --cached --check
+  sha256sum -c docs/security/evidence/recovery-resume-inventory-20261107/p1-fixture-binding-correction/SHA256SUMS
+Results: all exit 0; integrity output is retained as integrity.txt. The checker
+compares historical manifest entries against their producing revision, not
+against modified append-only working files. SHA256SUMS excludes itself.
+Exact final commit/tree/parent and direct refs are reported at delivery because
+embedding a commit's own hash in its contents is self-referential.

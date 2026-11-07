@@ -768,3 +768,9 @@ surface changed. The raw accepted prior artifacts and audit register are
 checked unchanged. Synthetic test success does not establish production
 authority/currentness, finality, durable application, signer fencing, or
 resume permission.
+
+P1-IMPL-1 fixture-lifetime correction: see
+`p1-fixture-binding-correction/COMMANDS.txt` for the diagnostic baseline,
+corrected model and directly related regression executions, toolchain,
+preservation checks and hashes. The baseline diagnostic reproduces a
+synthetic test-model gap and is not a passing security control.

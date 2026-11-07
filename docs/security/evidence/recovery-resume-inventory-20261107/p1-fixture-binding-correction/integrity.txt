@@ -1,0 +1,6 @@
+PASS: four append-only prefixes, 208 historical files and audit bytes
+PASS: 25 previous manifest entries against producing revision f4ed8a123762dfc9aa1f1a9bdcffa78942894eed
+PASS: changed-path scope and all 17 prior test names retained; 19 current tests
+PASS: baseline diagnostic and corrected/regression result counts
+NOT ESTABLISHED: production enforcement, real currentness, fencing or resume
+PASS: unstaged whitespace and targeted rustfmt checks

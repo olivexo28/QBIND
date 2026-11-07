@@ -5201,3 +5201,19 @@ the implementation remains independent-review pending.
 
 A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
 Activation DISABLED; public DevNet NO-GO.
+
+## 51. P1-IMPL-1 fixture-lifetime binding correction
+
+The [test-only correction](evidence/recovery-resume-inventory-20261107/p1-fixture-binding-correction/README.md)
+records the user-supplied CHANGES REQUIRED review, a baseline same-ID
+substitution counterexample, and the corrected provider-bound complete fixture
+snapshot and controls. This supersedes section 50 only insofar as numeric
+fixture-label comparison was insufficient for provider-lifetime binding.
+Prior bounded results remain historical, not evidence that the baseline
+already enforced this binding. P1-SPEC-1/2/3 remain PASSED/CLOSED within
+their specification scope. Independent review of this correction is pending.
+
+The synthetic model does not establish production enforcement, authenticated
+currentness, durable application, signer fencing or resume authority.
+A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
+Activation DISABLED; public DevNet NO-GO.

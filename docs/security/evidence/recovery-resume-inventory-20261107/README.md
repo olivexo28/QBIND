@@ -584,3 +584,17 @@ recorded in the linked evidence directory.
 
 A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
 Activation DISABLED; public DevNet NO-GO.
+
+## 23. P1-IMPL-1 fixture-lifetime correction
+
+The [correction](p1-fixture-binding-correction/README.md) preserves the
+baseline counterexample and binds a complete independent fixture snapshot to
+each test-only provider instance. Same-ID policy and catalog substitutions
+now refuse at the binding stage; explicit replacement changes the fixture and
+invalidates the old lease. Focused and directly related synthetic results,
+accounting limitations, commands and revision-aware integrity are recorded
+there. The user-supplied CHANGES REQUIRED is not a production vulnerability
+claim; P1-SPEC-1/2/3 and earlier bounded acceptances retain their prior scope.
+
+A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
+Activation DISABLED; public DevNet NO-GO.
