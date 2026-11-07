@@ -790,3 +790,9 @@ P1 composition resource ordering: see
 affected regressions, retained failed attempts, toolchain, exact stage
 observations and integrity results. Signature copy/frame counters are
 test-only operations, not measurements of network ingress allocations.
+
+Catch-up ingress resource-boundary investigation: see
+`catch-up-ingress-resource-boundary/COMMANDS.txt` for repository/source
+identity, direct remote refs, source reads, and documentation-only checks.
+No Rust tests/builds or live network activity were run. All proposed
+acceptance controls remain FUTURE / NOT EXECUTED.

@@ -636,3 +636,20 @@ resource guarantee. Prior composition acceptance remains unchanged.
 
 A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
 Activation DISABLED; public DevNet NO-GO.
+
+## 27. Catch-up ingress resource boundary
+
+The [source-backed ingress investigation](catch-up-ingress-resource-boundary/README.md)
+traces listener admission, encrypted-frame buffering/decryption,
+`P2pMessage` deserialization, post-decode rate limiting, authenticated-origin
+forwarding, consensus sender binding, and the actual empty/non-empty response
+guards at protected main `9bf0eb43e4e3c601d02d3886d220b0abeb3a103e`. It
+distinguishes the pre-allocation 16 MiB ciphertext bound from decoded nested
+vectors, bounded item queues from byte budgets, optional connection-rate
+limiting from active-connection limits, and outbound block construction from
+inbound enforcement. The proposed pre-bincode guard is not implemented and
+selects no threshold. No Rust tests or builds were run; all new acceptance
+controls are FUTURE / NOT EXECUTED.
+
+A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
+Activation DISABLED; public DevNet NO-GO.

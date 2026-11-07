@@ -1,0 +1,50 @@
+# Catch-up ingress resource-boundary investigation commands
+
+Repository and task-base verification was performed before documentation
+edits:
+
+```text
+git status --short --branch
+## docs/authenticated-recovery-resume-inventory
+git rev-parse HEAD HEAD^{tree} HEAD^
+ad72aae3b0be5c3c5279463e5ceaf5e0e23d4702
+3ae8ece363c684678120137daf431de4cb8946a8
+58ea48c1bb1d20526143cf2737767c912fd0f365
+git remote -v
+origin https://github.com/olivexo28/QBIND (fetch)
+origin https://github.com/olivexo28/QBIND (push)
+git ls-remote origin refs/heads/docs/authenticated-recovery-resume-inventory refs/heads/main
+ad72aae3b0be5c3c5279463e5ceaf5e0e23d4702 refs/heads/docs/authenticated-recovery-resume-inventory
+9bf0eb43e4e3c601d02d3886d220b0abeb3a103e refs/heads/main
+git status --porcelain=v1
+(empty)
+git diff --cached --quiet
+exit 0
+```
+
+The expected task tip, tree, parent, direct remote task ref and direct remote
+main ref matched. Pinned main is the source baseline. `git diff --quiet
+9bf0eb43e4e3c601d02d3886d220b0abeb3a103e -- <seven ingress source paths>`
+returned exit 0; the inspected local source files were identical to the
+pinned-main blobs. No worktree changes or staged changes existed before the
+documentation update.
+
+The source trace used direct `view` and `rg` reads of:
+
+```text
+crates/qbind-net/src/framed_io.rs
+crates/qbind-net/src/transport.rs
+crates/qbind-node/src/secure_channel.rs
+crates/qbind-node/src/p2p_tcp.rs
+crates/qbind-node/src/p2p.rs
+crates/qbind-node/src/p2p_inbound.rs
+crates/qbind-node/src/p2p_node_builder.rs
+crates/qbind-node/src/peer_rate_limiter.rs
+crates/qbind-node/src/binary_consensus_loop.rs
+```
+
+No Rust test, build, live node, or network command was run. No failed or
+intermediate test/build attempt exists for this documentation-only task.
+
+Final documentation checks and exact outputs are recorded in
+`integrity.txt`; file digests are recorded in `SHA256SUMS`.

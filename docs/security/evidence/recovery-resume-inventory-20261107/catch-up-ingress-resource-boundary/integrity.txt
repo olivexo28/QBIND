@@ -1,0 +1,33 @@
+Documentation integrity evidence
+===============================
+
+Pinned source revision:
+  9bf0eb43e4e3c601d02d3886d220b0abeb3a103e
+Pinned source tree:
+  56509b20084ee1cbe2c42fda9d73d87e4c82c33f
+Task-base revision:
+  ad72aae3b0be5c3c5279463e5ceaf5e0e23d4702
+
+The revision-aware checker compares the four append-only records against
+their exact task-base Git blobs, verifies the audit register remains
+byte-identical to task base, and compares nine inspected source files with
+the protected-main Git blobs. It also checks for the pinned revision and
+future-status marker in this inventory.
+
+Command:
+  python3 docs/security/evidence/recovery-resume-inventory-20261107/catch-up-ingress-resource-boundary/check_artifacts.py
+Result:
+  PASS: four append-only prefixes preserved; audit register unchanged; nine source files match pinned main; evidence markers present
+Exit:
+  0
+
+Command:
+  git diff --check
+Result:
+  no output
+Exit:
+  0
+
+Scope:
+  Documentation-only. No Rust tests, builds, live node, or network were run.
+  All proposed acceptance cases are FUTURE / NOT EXECUTED.

@@ -292,3 +292,15 @@ docs/security/evidence/recovery-resume-inventory-20261107/p1-composition-resourc
 docs/security/evidence/recovery-resume-inventory-20261107/p1-composition-resource-ordering/regressions.log.gz
 docs/security/evidence/recovery-resume-inventory-20261107/p1-composition-resource-ordering/integrity.txt
 docs/security/evidence/recovery-resume-inventory-20261107/p1-composition-resource-ordering/SHA256SUMS
+
+Catch-up ingress resource-boundary source investigation (documentation only):
+docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+docs/security/evidence/recovery-resume-inventory-20261107/README.md
+docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/commands.txt
+docs/security/evidence/recovery-resume-inventory-20261107/catch-up-ingress-resource-boundary/README.md
+docs/security/evidence/recovery-resume-inventory-20261107/catch-up-ingress-resource-boundary/COMMANDS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/catch-up-ingress-resource-boundary/check_artifacts.py
+docs/security/evidence/recovery-resume-inventory-20261107/catch-up-ingress-resource-boundary/integrity.txt
+docs/security/evidence/recovery-resume-inventory-20261107/catch-up-ingress-resource-boundary/SHA256SUMS
+No production/test source changed; audit register bytes remain unchanged.

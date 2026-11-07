@@ -5262,3 +5262,27 @@ containment and unselected B/C/P1/P2 directions remain unchanged.
 
 A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
 Activation DISABLED; public DevNet NO-GO.
+
+## 55. Catch-up ingress resource boundary — source-backed, independent review pending
+
+The [source-backed ingress inventory](evidence/recovery-resume-inventory-20261107/catch-up-ingress-resource-boundary/README.md)
+pins transport, deserialization, origin binding, response dispatch, existing
+bounds, and a proposed pre-bincode review boundary to protected main
+`9bf0eb43e4e3c601d02d3886d220b0abeb3a103e`. The transport enforces a 16 MiB
+ciphertext-frame maximum before that frame allocation; catch-up vectors are
+materialized by bincode before post-decode per-peer rate limiting and
+authenticated sender binding. Existing queue capacities are item counts, not
+byte budgets; the per-peer message limiter is post-decode, the connection-rate
+limiter is optional, and the outbound 128-block setting is not an inbound
+limit. The proposed boundary is documentation only, with no selected
+threshold, implementation, application path, or resume authority. Actual
+dispatch continues to refuse admitted non-empty responses and ignore
+admitted empty responses before peer-height or restore-mode effects.
+
+All new acceptance cases are FUTURE / NOT EXECUTED. No Rust tests, builds,
+node, or network were run for this documentation-only investigation. Prior
+P1 test-only resource-ordering controls remain accepted within their scope
+and do not establish ingress allocation protection.
+
+A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
+Activation DISABLED; public DevNet NO-GO.
