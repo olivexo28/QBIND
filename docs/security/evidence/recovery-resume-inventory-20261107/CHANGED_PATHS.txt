@@ -126,3 +126,15 @@ Raw artifacts in that directory, each .stdout/.stderr/.exit:
 02-focused
 03-format
 04-integrity
+
+Documentation-only authority-context provenance contract:
+docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+docs/security/evidence/recovery-resume-inventory-20261107/README.md
+docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/commands.txt
+docs/security/evidence/recovery-resume-inventory-20261107/authority-provenance-contract/README.md
+docs/security/evidence/recovery-resume-inventory-20261107/authority-provenance-contract/COMMANDS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/authority-provenance-contract/check_artifacts.py
+docs/security/evidence/recovery-resume-inventory-20261107/authority-provenance-contract/SHA256SUMS
+Raw documentation check artifacts, each .stdout/.stderr/.exit:
+01-integrity

@@ -519,3 +519,13 @@ establish external authority or a selected protocol. Seven accepted prior
 content-binding controls and R/D/S/M remain PASSED / CLOSED within their
 scopes, preserved and not rerun. Complete commands, outputs, current hashes
 and separate producing-revision integrity checks are retained.
+
+## 18. Proposed authority-context provenance boundary
+
+The [provenance contract](authority-provenance-contract/README.md) pins existing
+genesis, transport trust and Proposal/Vote source boundaries and compares
+unselected independent provenance candidates. All new acceptance cases are
+FUTURE / NOT EXECUTED. Nine accepted authority-context controls, seven
+content-binding controls and R/D/S/M remain preserved within reviewed scope.
+Authenticity does not prove currentness or grant application/signing/resume.
+Documentation checks and producer/current integrity are recorded separately.

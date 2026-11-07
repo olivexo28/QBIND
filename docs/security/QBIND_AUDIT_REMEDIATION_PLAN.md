@@ -5101,3 +5101,24 @@ authority. No finality, historical binding, durable application, signer
 exclusivity or resume authority is established. B/C remain unselected;
 current refusal remains. A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
 Activation remains DISABLED; public DevNet remains NO-GO.
+
+## 46. Authority-context provenance contract — independent review pending
+
+The [source-backed provenance contract](evidence/recovery-resume-inventory-20261107/authority-provenance-contract/README.md)
+separates genesis integrity/pinning, actual transport trust-bundle verification/
+installation, library authority capabilities, absent production Proposal/Vote
+authority and proposed independent recovery expectation. P1 provisioning,
+P2 authenticated record and continued refusal remain unselected provenance
+choices. Currentness/rollback/copied-state assumptions and founder-bootstrap
+scope remain separate from authenticity, application, signing and resume.
+
+The user supplied PASS WITH LIMITATIONS for nine authority-context controls;
+they remain PASSED / CLOSED within test-only scope. Seven content-binding
+controls, R/D/S/M and all earlier bounded acceptances/evidence are preserved.
+No reviewer identity/raw artifact/rerun is invented. New provider-envelope
+and acceptance cases are FUTURE / NOT EXECUTED; no Rust test/build ran.
+No source/test/protocol/configuration change or production provenance/
+activation mechanism exists by virtue of this contract. B/C remain unselected;
+owner/root/currentness/quorum/resource and separate resume decisions remain.
+A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
+Activation remains DISABLED; public DevNet remains NO-GO.

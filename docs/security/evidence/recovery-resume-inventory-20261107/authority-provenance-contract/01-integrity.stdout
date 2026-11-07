@@ -1,0 +1,21 @@
+PASS: four exact historical document byte prefixes
+PASS: 91 prior evidence/Audit files byte-identical
+PASS: SHA256SUMS: 8 entries at producer 61028eb6dbb91f0834a5235f20c935bb0ff5b549
+PASS: CORRECTION-SHA256SUMS: 8 entries at producer 8344e92412d37882ef059b6158ead1959b0fa165
+PASS: CONTRACT-SHA256SUMS: 8 entries at producer a4620f1e9363fbd30b23f06448e8f19174de8192
+PASS: AP1-CORRECTION-SHA256SUMS: 8 entries at producer c12b46497a404171ca41c640f614f0c308ae514b
+PASS: WITNESS-SHA256SUMS: 8 entries at producer e893d0bf7359deb87998ff67e63fbd92aabffd91
+PASS: BINDING-SHA256SUMS: 10 entries at producer 6ba38e9fa66f216e45906b3eb0575d67aa0cd071
+PASS: OPTIONS-SHA256SUMS: 13 entries at producer 0a405c6063d49d8b0d0a4211d091f5405d79b6a6
+PASS: TEST-PLAN-CORRECTION-SHA256SUMS: 8 entries at producer 3725ff080830df60e274fdaa080e390ccdbcc827
+PASS: STRUCTURAL-CONTROL-SHA256SUMS: 8 entries at producer 4ab46f22a66afdfae2363da7da3e493f56155451
+PASS: binding-sensitivity-execution/SHA256SUMS: 50 entries at producer 4162a9c20b2686f6a4d662e7e487eb536073e37a
+PASS: content-binding-experiment/SHA256SUMS: 37 entries at producer e531a7c5a96b978cd1b82b006396c08b24e0933e
+PASS: authority-context-experiment/SHA256SUMS: 32 entries at producer 1d5d12e85f7ad939b731e56bf929d20403d00d11
+PASS: twelve producer manifests /198 entries, separate from current appended hashes; audit unchanged
+PASS: documentation-only scope; production/test/Cargo/config/audit unchanged
+PASS: 33 exact pinned nonempty source/decision ranges; main production bytes equal pinned revision
+PASS: contract discoverable from append-only plan and index
+PASS: documented source distinctions, preserved bounded acceptances and13 FUTURE cases
+PASS: documentation whitespace (no raw Rust outputs created)
+NO RUST TESTS/BUILDS EXECUTED; no production authority/currentness/application/signing/resume established

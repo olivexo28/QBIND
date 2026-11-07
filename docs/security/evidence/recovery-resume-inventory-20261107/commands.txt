@@ -729,3 +729,10 @@ Only the new `authority_context_experiment_tests` target ran. Accepted
 content-binding and R/D/S/M files remain unchanged and were not rerun.
 Artifact checks preserve historical prefixes/audit and verify eleven
 manifests at producing revisions, separately from current delivery hashes.
+
+Documentation-only provenance contract: exact source navigation/checks,
+unsuccessful source lookup and command/results are recorded under
+`authority-provenance-contract/COMMANDS.txt`. `check_artifacts.py` validates
+historical prefixes/unchanged code/evidence, pinned source ranges/navigation,
+FUTURE status and twelve producing-revision manifests separately from
+current `SHA256SUMS`. No unchanged Rust test/build was rerun.

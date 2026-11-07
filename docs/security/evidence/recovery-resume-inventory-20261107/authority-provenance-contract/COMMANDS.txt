@@ -1,0 +1,133 @@
+AUTHORITY PROVENANCE CONTRACT — DOCUMENTATION / SOURCE COMMANDS
+
+Working directory /workspaces/QBIND/olivexo28/QBIND
+Evidence directory P (notation):
+docs/security/evidence/recovery-resume-inventory-20261107/authority-provenance-contract
+
+Initial exact verification:
+$ git remote get-url origin && git branch --show-current && git rev-parse HEAD 'HEAD^{tree}' '9bf0eb43e4e3c601d02d3886d220b0abeb3a103e^{tree}' && git ls-remote --heads origin refs/heads/docs/authenticated-recovery-resume-inventory refs/heads/main && git merge-base --is-ancestor 9bf0eb43e4e3c601d02d3886d220b0abeb3a103e HEAD && git status --porcelain=v1 && git diff --cached --name-only
+Exit0:
+https://github.com/olivexo28/QBIND
+docs/authenticated-recovery-resume-inventory
+1d5d12e85f7ad939b731e56bf929d20403d00d11
+eb022df7169bb18e00de464ce97ce0a1c364ac1f
+56509b20084ee1cbe2c42fda9d73d87e4c82c33f
+1d5d12e85f7ad939b731e56bf929d20403d00d11 refs/heads/docs/authenticated-recovery-resume-inventory
+9bf0eb43e4e3c601d02d3886d220b0abeb3a103e refs/heads/main
+No worktree/staging output; origin/branch/local+direct refs/trees/ancestry match.
+
+Source navigation (read-only tools, no Rust executions):
+search_code_subagent query:
+Locate genesis validation and installation, trust bundle verification and
+production main startup use, Proposal/Vote validator identity keys weights
+chain epoch authority domain construction, and documented founder bootstrap
+approval scope.
+Returned suggested paths/ranges but no hydrated explanation. Parent narrowed
+and directly read actual callsites rather than crediting suggestions as proof.
+
+rg content with -n (tool form, paths kept explicit):
+- 'trust_bundle|genesis_identity|authority_identity|ProposalVoteSigningDomainV2|load_genesis' main.rs, first90
+- 'genesis|ProposalVoteSigningDomainV2|verification_ctx|validator_set|authority_identity' main.rs, first100
+- 'struct TrustBundle|struct BundleSigning|fn load_from|fn verify|validator|weight' pqc_trust_bundle.rs, first65
+- 'ProposalVoteSigningDomainV2|proposal_vote_authority|ConsensusVerificationContext|consensus_authority_from_genesis|build_genesis_consensus|run_boot_time_genesis|consensus_validators' main.rs
+- 'ProposalVoteAuthority|struct ConsensusVerificationContext|ProposalVoteSigningDomainV2|GENESIS_STATIC|fn compute_authority|fn build_genesis|weight|voting_power' genesis_consensus_authority.rs + binary_consensus_loop.rs, first60
+- 'verify_boot_time_genesis|compute_canonical_genesis_hash|struct GenesisAuthorityConfig|fn validate_authority|duplicate' genesis.rs, first40
+- 'trusted_roots.extend|highest|sequence|persist.*sequence|merge.*root' main.rs, first55
+- 'check_and_update_sequence|trusted_roots\.extend|trust_bundle_loaded|sequence_outcome' main.rs, first25
+- 'verify_signature|verify_internal|MlDsa44Backend|canonical_signing_bytes|pub fn validate_at' pqc_trust_bundle.rs, first25
+- 'fn verify_proposal_msg_with_domain|fn verify_vote_msg_with_domain|epoch|voting_power' proposal_vote_verify.rs, first20
+- 'try_build.*provider|build.*key_provider|loaded_kp|validator_key' main.rs, first25
+- 'pub fn build_validator_set_and_key_provider|voting_power:|Duplicate|pub fn check_and_update_sequence' node src glob *{peer_key,trust_sequence}*.rs, first25
+- 'fn independently_supplied_fixture|fn test_verify|fn immutable_expected_context|fn label_only|fn trusting_witness' authority_context_experiment_tests.rs
+All successful reads returned actual fields/calls described in contract.
+
+Unsuccessful lookup:
+rg 'voting_power|pub fn|duplicate' crates/qbind-node/src/validator_key_provider.rs
+Tool error: Search paths do not exist. No source changed. Main's actual import
+was then read and located peer_key_provider.rs; actual builder used instead.
+
+Direct view ranges (paths below are within crates/ unless docs stated):
+qbind-ledger/src/genesis.rs:1-220,754-880,1576-1665,1797-1848
+qbind-node/src/pqc_boot_genesis.rs:180-275
+qbind-node/src/pqc_trust_bundle.rs:1-90,278-440,1480-1556
+qbind-node/src/main.rs:130-290,5420-5465,5700-5718,5785-5905,
+5930-5995,6120-6180,6470-6645,6645-6785,6900-7010,7110-7205,
+7194-7225,8670-8705
+qbind-node/src/genesis_consensus_authority.rs:334-440,805-835,830-864,
+1069-1155,1462-1485
+qbind-node/src/binary_consensus_loop.rs:1030-1130
+qbind-node/src/peer_key_provider.rs:329-452
+qbind-node/src/pqc_trust_sequence.rs:542-638
+qbind-consensus/src/proposal_vote_verify.rs:405-465,511-560
+qbind-consensus/src/qc_verify_domain.rs:849-876
+qbind-wire/src/pv_signing_domain.rs:30-200
+docs/devnet/QBIND_RUN_422_DEVNET_BOOTSTRAP_AUTHORITY_DECISION.md:1-220
+Successful reads. Source refs in the contract are exact pinned subsets of
+these ranges; check_artifacts.py verifies blob existence/ranges and that
+current production bytes equal the pinned main. No remote/moving-branch
+code or network authority was relied on.
+
+Append boundary reads:
+$ tail -22 docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md && tail -12 docs/security/evidence/recovery-resume-inventory-20261107/README.md
+Exit0; section45/17 EOF located. New sections46/18 appended.
+
+Unsuccessful documentation edit:
+apply_patch intended to extend guard link805-835 through849, but initial
+old context already said805-849, so "Failed to find expected lines"; no file
+changed. Correct old805-835 context applied. This failed edit is retained
+here, not represented as successful source validation.
+
+01-integrity exact command:
+$ python3 docs/security/evidence/recovery-resume-inventory-20261107/authority-provenance-contract/check_artifacts.py
+Executed capture:
+  <command> > <P>/01-integrity.stdout 2> <P>/01-integrity.stderr
+  result=$?
+  printf '%s\n' "$result" > <P>/01-integrity.exit
+  cat <P>/01-integrity.stdout <P>/01-integrity.stderr
+  exit "$result"
+Full stdout/stderr/exit retained, not the preview status. Script checks
+four old prefixes, prior evidence/Audit bytes, twelve producer manifests/
+198 entries, documentation-only scope, pinned ranges/navigation, source
+semantics, thirteen explicitly FUTURE cases and whitespace. No Rust runner,
+build, dependency install, operational signing or live network command.
+Exit0; stderr empty. Complete stdout reports four exact historical prefixes,
+91 byte-identical prior evidence/Audit files, twelve producing-revision
+manifests/198 entries,33 pinned source/decision ranges, append navigation,
+documentation-only scope,13 FUTURE cases and whitespace passed. Failed
+source lookup and failed link-edit attempts above remain attributed.
+
+Current manifest generation, after raw checks:
+$ python3 - <<'PY'
+import hashlib
+from pathlib import Path
+root = Path('docs/security/evidence/recovery-resume-inventory-20261107')
+here = root / 'authority-provenance-contract'
+out = here / 'SHA256SUMS'
+paths = [Path('docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md'),
+         Path('Audit/QBIND_SECURITY_FINDINGS_REGISTER.md')]
+paths += [root / name for name in ['README.md', 'CHANGED_PATHS.txt', 'commands.txt']]
+paths += list(root.glob('*SHA256SUMS'))
+paths += [root / name / 'SHA256SUMS' for name in ['binding-sensitivity-execution', 'content-binding-experiment', 'authority-context-experiment']]
+paths += [p for p in here.iterdir() if p.is_file() and p != out]
+out.write_text(''.join(f'{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.as_posix()}\n' for p in sorted(set(paths))))
+print(f'current entries={len(set(paths))}; excludes itself')
+PY
+$ sha256sum -c docs/security/evidence/recovery-resume-inventory-20261107/authority-provenance-contract/SHA256SUMS
+Producer-revision verification is separate from current delivery hashes.
+Manifest itself hashed/reported separately; no circular commit/hash fields.
+
+Publication only after exact initial refs are reverified:
+$ git add -- docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md docs/security/evidence/recovery-resume-inventory-20261107/README.md docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt docs/security/evidence/recovery-resume-inventory-20261107/commands.txt docs/security/evidence/recovery-resume-inventory-20261107/authority-provenance-contract
+$ git diff --cached --check && git diff --cached --stat && git diff --cached --name-only
+$ git commit -m "docs: define authority context provenance boundary" -m "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+$ git push origin HEAD:refs/heads/docs/authenticated-recovery-resume-inventory
+$ git show -s --format='commit=%H%ntree=%T%nparent=%P' HEAD && git ls-remote --heads origin refs/heads/docs/authenticated-recovery-resume-inventory refs/heads/main && git status --porcelain=v1 && git diff --cached --name-only && sha256sum docs/security/evidence/recovery-resume-inventory-20261107/authority-provenance-contract/SHA256SUMS
+Only documentation/evidence paths staged; staged bytes compared to current
+validated files. No source/test changes, force/reset/rebase, PR/merge/main
+push, activation or automatic authority promotion. Final identities/outcomes
+reported outside this self-hashed record after actual publication.
+
+Final delivery inventory:11 changed documentation paths;23 current manifest
+entries, including every changed path except itself and separately preserved
+audit/twelve historical manifests. Final exact commit/tree/parent, direct
+task/main refs and clean worktree/staging are reported after push.
