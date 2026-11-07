@@ -1,0 +1,3 @@
+$ git -c core.whitespace=cr-at-eol diff --check 619a75fa8355692823802754f605e6c02bb57537 HEAD -- *.rs *.md *SHA256SUMS 
+
+exit_code=0

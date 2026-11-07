@@ -1,0 +1,21 @@
+execution revision: fb27c7e7d864bbea8b91fb6c109872ca15aa6d77
+tree: 29c5667a037c0e282cd0192074a390e46e5ac98b
+endpoint byte match: crates/qbind-node/src/binary_consensus_loop.rs
+endpoint byte match: docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md
+endpoint byte match: docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+endpoint byte match: docs/security/evidence/a17-f1-test-controls/README.md
+endpoint byte match: docs/security/evidence/a17-f1-test-controls/SHA256SUMS
+endpoint byte match: docs/security/evidence/a17-f1-test-controls/focused-attempt-1.log
+endpoint byte match: docs/security/evidence/a17-f1-test-controls/focused-final.log
+endpoint byte match: docs/security/evidence/a17-f1-test-controls/restore-regressions.log
+endpoint byte match: docs/security/evidence/a17-f1-test-controls/rustfmt-module.log
+endpoint byte match: docs/security/evidence/a17-f1-test-controls/whitespace-crlf.log
+endpoint byte match: docs/security/evidence/a17-f1-test-controls/whitespace-default.log
+endpoint byte match: docs/security/evidence/a17-f1-test-controls/whitespace-source-docs.log
+endpoint byte match: docs/security/evidence/a17-f1-test-controls/whitespace-staged.log
+implementation production/pre-A17 byte match: crates/qbind-node/src/binary_consensus_loop.rs
+historical byte prefix preserved: docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+historical byte prefix preserved: docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md
+main audit byte match: docs/security/QBIND_DEEP_AUDIT_PLAYBOOK.md
+main audit byte match: docs/security/QBIND_DEEP_AUDIT_TRACKER.md
+exit_code=0

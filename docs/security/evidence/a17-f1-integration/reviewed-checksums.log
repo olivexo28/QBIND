@@ -1,0 +1,15 @@
+$ sha256sum -c docs/security/evidence/a17-f1-test-controls/SHA256SUMS 
+crates/qbind-node/src/binary_consensus_loop.rs: OK
+docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md: OK
+docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md: OK
+docs/security/evidence/a17-f1-test-controls/README.md: OK
+docs/security/evidence/a17-f1-test-controls/focused-attempt-1.log: OK
+docs/security/evidence/a17-f1-test-controls/focused-final.log: OK
+docs/security/evidence/a17-f1-test-controls/restore-regressions.log: OK
+docs/security/evidence/a17-f1-test-controls/rustfmt-module.log: OK
+docs/security/evidence/a17-f1-test-controls/whitespace-crlf.log: OK
+docs/security/evidence/a17-f1-test-controls/whitespace-default.log: OK
+docs/security/evidence/a17-f1-test-controls/whitespace-source-docs.log: OK
+docs/security/evidence/a17-f1-test-controls/whitespace-staged.log: OK
+
+exit_code=0
