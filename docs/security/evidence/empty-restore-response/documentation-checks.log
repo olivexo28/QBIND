@@ -1,0 +1,450 @@
+/bin/bash: line 1: python: command not found
+
+$ python3 /root/.copilot/session-state/e67bb11721be436b995a7699c07498aa/files/check_empty_restore_docs.py
+DOCUMENTATION-ONLY CHECKS; no tests/build/node/network experiment
+Validator source follows for reproducibility:
+from pathlib import Path
+import hashlib
+import re
+import shlex
+import subprocess
+
+BASE = "2d3b2f7a4c4055882525e3af1814d57e87c01c76"
+TREE = "0b0e597a29dc8f2d95d93f9bd04364cc140a9db1"
+BRANCH = "investigation/empty-restore-response-20261107"
+PKG = "docs/security/evidence/empty-restore-response"
+PLAN = "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md"
+
+
+def run(*args, input_bytes=None):
+    result = subprocess.run(args, input=input_bytes, capture_output=True)
+    assert result.returncode == 0, (
+        shlex.join(args), result.returncode, result.stdout, result.stderr
+    )
+    return result.stdout
+
+
+def sha(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def baseline(path):
+    return run("git", "show", f"{BASE}:{path}")
+
+
+print("DOCUMENTATION-ONLY CHECKS; no tests/build/node/network experiment")
+print("Validator source follows for reproducibility:")
+print(Path(__file__).read_text(), end="")
+print("\n--- EXECUTION RESULTS ---")
+print("Initial failed follow-up apply_patch: nonexistent final context; no change applied.")
+print("Corrected follow-up patch succeeded. Guessed filename searches had no matches.")
+print("core.autocrlf query: exit 1, unset; initial git diff --check: exit 0.")
+assert run("git", "remote", "get-url", "origin").decode().strip() == (
+    "https://github.com/olivexo28/QBIND"
+)
+assert run("git", "remote", "get-url", "--push", "origin").decode().strip() == (
+    "https://github.com/olivexo28/QBIND"
+)
+assert run("git", "rev-parse", "HEAD").decode().strip() == BASE
+assert run("git", "rev-parse", "HEAD^{tree}").decode().strip() == TREE
+assert run("git", "rev-parse", "refs/heads/main").decode().strip() == BASE
+assert run("git", "branch", "--show-current").decode().strip() == BRANCH
+remote = run("git", "ls-remote", "origin", "refs/heads/main", f"refs/heads/{BRANCH}")
+assert remote.decode().strip() == f"{BASE}\trefs/heads/main"
+print("git ls-remote origin refs/heads/main refs/heads/" + BRANCH)
+print(remote.decode(), end="")
+print("PASS repository/base/tree/local main/task branch; remote task does not yet exist")
+
+paths = Path(f"{PKG}/CHANGED_PATHS.txt").read_text().splitlines()
+assert len(paths) == 5 and paths == sorted(set(paths))
+assert paths == [
+    PLAN, f"{PKG}/CHANGED_PATHS.txt", f"{PKG}/README.md",
+    f"{PKG}/SHA256SUMS", f"{PKG}/documentation-checks.log",
+]
+tracked_changes = run("git", "diff", "--name-only", BASE).decode().splitlines()
+untracked = run("git", "ls-files", "--others", "--exclude-standard").decode().splitlines()
+assert tracked_changes == [PLAN]
+assert set(untracked) <= set(paths) - {PLAN}
+print("PASS five-path allowlist; sole changed pre-existing path is plan")
+
+old_plan = baseline(PLAN)
+new_plan = Path(PLAN).read_bytes()
+assert new_plan.startswith(old_plan) and len(new_plan) > len(old_plan)
+append = new_plan[len(old_plan):].decode()
+assert append.startswith("\n## 29. Empty RestoreCatchupResponse")
+print(f"PASS exact plan prefix: bytes={len(old_plan)} SHA256={sha(old_plan)}")
+print(f"Append bytes={len(new_plan) - len(old_plan)}")
+
+listing = run(
+    "git", "ls-tree", "-r", BASE, "--",
+    "docs/security/evidence", "Audit/QBIND_SECURITY_FINDINGS_REGISTER.md",
+    "docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md",
+    "crates/qbind-node/src/binary_consensus_loop.rs",
+).decode().splitlines()
+expected = []
+preserved_paths = []
+for line in listing:
+    metadata, path = line.split("\t", 1)
+    mode, kind, blob = metadata.split()
+    assert mode in ("100644", "100755") and kind == "blob", (path, mode, kind)
+    expected.append(blob)
+    preserved_paths.append(path)
+actual = run(
+    "git", "hash-object", "--stdin-paths",
+    input_bytes=("\n".join(preserved_paths) + "\n").encode(),
+).decode().splitlines()
+assert actual == expected
+assert sum(p.startswith("docs/security/evidence/") for p in preserved_paths) == 620
+print("PASS all 620 baseline evidence files + audit register + Run422 D7 + guarded source")
+inventory = ("\n".join(listing) + "\n").encode()
+print(f"Preservation git-ls-tree inventory SHA256={sha(inventory)}")
+
+source_paths = [
+    "crates/qbind-node/src/binary_consensus_loop.rs",
+    "crates/qbind-node/src/main.rs",
+    "crates/qbind-node/src/p2p.rs",
+    "crates/qbind-node/src/p2p_inbound.rs",
+    "crates/qbind-node/src/p2p_node_builder.rs",
+    "crates/qbind-node/src/p2p_tcp.rs",
+    "crates/qbind-node/src/peer_consensus_binding.rs",
+    "crates/qbind-consensus/src/basic_hotstuff_engine.rs",
+    "crates/qbind-consensus/src/hotstuff_state_engine.rs",
+    "Audit/QBIND_SECURITY_FINDINGS_REGISTER.md",
+]
+for path in source_paths:
+    data = baseline(path)
+    assert Path(path).read_bytes() == data
+    print(f"{sha(data)}  preserved {path}")
+
+for package in ("a17-f1-test-controls", "a17-f1-integration"):
+    manifest = f"docs/security/evidence/{package}/SHA256SUMS"
+    entries = baseline(manifest).decode().splitlines()
+    for entry in entries:
+        digest, path = entry.split("  ", 1)
+        assert sha(baseline(path)) == digest, (manifest, path)
+    print(f"PASS {manifest}: {len(entries)} entries at pinned BASE, not appended worktree plan")
+
+readme = Path(f"{PKG}/README.md").read_text()
+for text in (readme, append):
+    for phrase in (
+        "EMPTY-RESPONSE INVESTIGATION",
+        "INDEPENDENT REVIEW PENDING",
+        "A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain **OPEN**",
+        "Activation remains **DISABLED**",
+        "public DevNet remains **NO-GO**",
+        "FUTURE / NOT EXECUTED",
+    ):
+        assert phrase in text, phrase
+    for target in re.findall(r"\]\(([^)]+)\)", text):
+        if target.startswith("https://"):
+            prefix = f"https://github.com/olivexo28/QBIND/blob/{BASE}/"
+            assert target.startswith(prefix), target
+            path, fragment = target[len(prefix):].split("#", 1)
+            match = re.fullmatch(r"L(\d+)-L(\d+)", fragment)
+            assert match, target
+            start, end = map(int, match.groups())
+            assert 1 <= start <= end <= len(baseline(path).splitlines()), target
+        else:
+            parent = Path(PKG) if text == readme else Path(PLAN).parent
+            assert (parent / target).is_file(), target
+print("PASS status/provenance phrases; all new source URLs pinned and ranges valid; local links exist")
+
+for path in (f"{PKG}/README.md", f"{PKG}/CHANGED_PATHS.txt"):
+    data = Path(path).read_bytes()
+    data.decode("utf-8")
+    assert b"\r" not in data and data.endswith(b"\n") and not data.endswith(b"\n\n")
+    assert all(not line.endswith((b" ", b"\t")) for line in data.splitlines())
+assert "\r" not in append and append.endswith("\n")
+print("PASS new UTF-8/LF/EOF/trailing-whitespace checks; no historical normalization")
+for args in (
+    ("git", "diff", "--check"),
+    ("git", "-c", "core.whitespace=cr-at-eol", "diff", "--check"),
+):
+    print("$ " + shlex.join(args))
+    output = run(*args)
+    print(output.decode(), end="")
+    print("exit 0")
+print("ALL DOCUMENTATION CHECKS PASS")
+
+--- EXECUTION RESULTS ---
+Initial failed follow-up apply_patch: nonexistent final context; no change applied.
+Corrected follow-up patch succeeded. Guessed filename searches had no matches.
+core.autocrlf query: exit 1, unset; initial git diff --check: exit 0.
+Traceback (most recent call last):
+  File "/root/.copilot/session-state/e67bb11721be436b995a7699c07498aa/files/check_empty_restore_docs.py", line 48, in <module>
+    assert remote.decode().strip() == f"{BASE}\trefs/heads/main"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError
+
+Continuation pre-fast-forward observations (exact commands and outcomes):
+$ git show -s --format='%H %T %P %s' 2d3b2f7a4c4055882525e3af1814d57e87c01c76; git show -s --format='%H %T %P %s' 541d9a6c9a43fe10410260d9c2494a5fc4416c7a; git merge-base --is-ancestor 2d3b2f7a4c4055882525e3af1814d57e87c01c76 541d9a6c9a43fe10410260d9c2494a5fc4416c7a; printf 'ancestry_exit=%s\n' "$?"; git diff --exit-code 2d3b2f7a4c4055882525e3af1814d57e87c01c76^{tree} 541d9a6c9a43fe10410260d9c2494a5fc4416c7a^{tree}; printf 'tree_diff_exit=%s\n' "$?"; git diff --stat '2d3b2f7a4c4055882525e3af1814d57e87c01c76^{tree}' '541d9a6c9a43fe10410260d9c2494a5fc4416c7a^{tree}'
+exit 128: old commit resolved; frozen commit object was not present locally, so show/ancestry/tree comparisons could not run. No branch or draft change resulted.
+$ git ls-remote origin refs/heads/main refs/heads/investigation/empty-restore-response-20261107
+exit 0: main=541d9a6c9a43fe10410260d9c2494a5fc4416c7a; task branch ref absent.
+$ git rev-parse refs/heads/main refs/heads/investigation/empty-restore-response-20261107
+exit 0: both local refs resolve to 2d3b2f7a4c4055882525e3af1814d57e87c01c76.
+$ git status --porcelain=v1 -uall; git diff --cached --name-status; git diff --name-status; git ls-files --others --exclude-standard
+exit 0: only expected plan modification and draft paths; staging empty.
+
+Fetched frozen-main identity checks (2026-11-07 continuation):
+$ git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
+exit 0; fetched direct advertised main 541d9a6c9a43fe10410260d9c2494a5fc4416c7a.
+$ git ls-remote origin refs/heads/main refs/heads/investigation/empty-restore-response-20261107
+exit 0; direct main=541d9a6c9a43fe10410260d9c2494a5fc4416c7a; no remote task ref.
+$ git show -s --format='%H %T %P %s' 2d3b2f7a4c4055882525e3af1814d57e87c01c76; git show -s --format='%H %T %P %s' 541d9a6c9a43fe10410260d9c2494a5fc4414d57e87c01c76; git merge-base --is-ancestor ...; git diff --exit-code <old-tree> <new-tree>; git diff --stat <mistyped-new-tree>
+The first two show calls, ancestry and exact tree diff succeeded: new commit 541d9a6c9a43fe10410260d9c2494a5fc4416c7a has tree 0b0e597a29dc8f2d95d93f9bd04364cc140a9db1, parent 2d3b2f7a4c4055882525e3af1814d57e87c01c76, followed by merge parent 9ef29e2432b9b84fca63e59440d64d085631e9a3; ancestry exit 0; tree diff exit 0. A separate trailing git diff --stat used a mistyped object ID and emitted fatal ambiguous-argument (git subcommand exit 128); `|| true` masked it, so shell command exit was 0. No worktree change.
+$ git diff --quiet <old-tree> refs/remotes/origin/main^{tree}
+exit 0 (identical trees).
+
+Command transcription/unsuccessful-attempt detail (append-only clarification):
+Before fetching the advertised commit, this compound check returned shell exit 128 because 541d9a6c9a43fe10410260d9c2494a5fc4416c7a was not yet present locally:
+$ git show -s --format='%H %T %P %s' 2d3b2f7a4c4055882525e3af1814d57e87c01c76; git show -s --format='%H %T %P %s' 541d9a6c9a43fe10410260d9c2494a5fc4416c7a; git merge-base --is-ancestor 2d3b2f7a4c4055882525e3af1814d57e87c01c76 541d9a6c9a43fe10410260d9c2494a5fc4416c7a; printf 'ancestry_exit=%s\n' "$?"; git diff --exit-code 2d3b2f7a4c4055882525e3af1814d57e87c01c76^{tree} 541d9a6c9a43fe10410260d9c2494a5fc4416c7a^{tree}; printf 'tree_diff_exit=%s\n' "$?"; git diff --stat '2d3b2f7a4c4055882525e3af1814d57e87c01c76^{tree}' '541d9a6c9a43fe10410260d9c2494a5fc4416c7a^{tree}'
+After fetch, ancestry and exact diff succeeded (exit 0); the final git diff --stat in that same tool command had a mistyped object `541d9a6c9a43fe10410260d9c2494a5fc4414d57e87c01c76`, emitted fatal ambiguous-argument (git subcommand 128), and was masked by `|| true` (overall shell exit 0). The next command used the correct remote-tracking tree and `git diff --quiet` exited 0.
+A separate inspection shell invocation had unmatched quoting; bash emitted `unexpected EOF while looking for matching \"` and exited 2 before running its command. No repository mutation.
+
+$ python3 /root/.copilot/session-state/e67bb11721be436b995a7699c07498aa/files/check_empty_restore_docs.py
+DOCUMENTATION-ONLY CHECKS; no tests/build/node/network experiment
+
+--- EXECUTION RESULTS ---
+Initial failed follow-up apply_patch: nonexistent final context; no change applied.
+Corrected follow-up patch succeeded. Guessed filename searches had no matches.
+core.autocrlf query: exit 1, unset; initial git diff --check: exit 0.
+Traceback (most recent call last):
+  File "/root/.copilot/session-state/e67bb11721be436b995a7699c07498aa/files/check_empty_restore_docs.py", line 44, in <module>
+    assert run("git", "rev-parse", "refs/heads/main").decode().strip() == BASE
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError
+
+Documentation validator attempt after task-branch fast-forward:
+$ python3 /root/.copilot/session-state/e67bb11721be436b995a7699c07498aa/files/check_empty_restore_docs.py
+exit 1 at assertion expecting local refs/heads/main to move with the task branch. Direct remote main and local main were separately verified; local main correctly remains at old commit 2d3b2f7a4c4055882525e3af1814d57e87c01c76, same tree as frozen remote main. Validator corrected to require local main=old base, task HEAD=verified frozen commit, and remote main=frozen commit. The command's tee/tail pipeline had shell exit 0 because pipefail was not enabled; Python itself exited 1.
+
+$ python3 /root/.copilot/session-state/e67bb11721be436b995a7699c07498aa/files/check_empty_restore_docs.py
+DOCUMENTATION-ONLY CHECKS; no tests/build/node/network experiment
+
+--- EXECUTION RESULTS ---
+Initial failed follow-up apply_patch: nonexistent final context; no change applied.
+Corrected follow-up patch succeeded. Guessed filename searches had no matches.
+core.autocrlf query: exit 1, unset; initial git diff --check: exit 0.
+git ls-remote origin refs/heads/main; git ls-remote origin refs/heads/investigation/empty-restore-response-20261107
+541d9a6c9a43fe10410260d9c2494a5fc4416c7a	refs/heads/main
+PASS repository/frozen main/tree/local main/task branch; remote task ref absent
+PASS 2d3b2f7a4c4055882525e3af1814d57e87c01c76 ancestor of 541d9a6c9a43fe10410260d9c2494a5fc4416c7a; both trees 0b0e597a29dc8f2d95d93f9bd04364cc140a9db1; zero tree diff
+PASS five-path allowlist; sole changed pre-existing path is plan
+Traceback (most recent call last):
+  File "/root/.copilot/session-state/e67bb11721be436b995a7699c07498aa/files/check_empty_restore_docs.py", line 81, in <module>
+    assert actual == digest, (path, digest, actual)
+           ^^^^^^^^^^^^^^^^
+AssertionError: ('docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md', 'c43010529615ab74f1b073c93ffe0db159b7604fb9350c118958ec29f882c799', '2c49e394c7bbd235dbcf9fda3e36e6bd0d7a5f2041f32fdabcc7b959988edd05')
+
+Documentation validator attempt 2 after fast-forward:
+$ python3 /root/.copilot/session-state/e67bb11721be436b995a7699c07498aa/files/check_empty_restore_docs.py
+exit 1 at the stale-plan-hash assertion: continuation had already append-only extended the plan, so its final hash must differ from the previously verified stopped-task draft hash. The baseline-prefix check remains the correct invariant. Validator corrected to verify the changed-path list's original hash and exact plan prefix; previous plan/README/log hashes remain identified as pre-edit hashes verified against the stopped-task report before continuation edits.
+
+$ python3 /root/.copilot/session-state/e67bb11721be436b995a7699c07498aa/files/check_empty_restore_docs.py
+DOCUMENTATION-ONLY CHECKS; no tests/build/node/network experiment
+
+--- EXECUTION RESULTS ---
+Initial failed follow-up apply_patch: nonexistent final context; no change applied.
+Corrected follow-up patch succeeded. Guessed filename searches had no matches.
+core.autocrlf query: exit 1, unset; initial git diff --check: exit 0.
+git ls-remote origin refs/heads/main; git ls-remote origin refs/heads/investigation/empty-restore-response-20261107
+541d9a6c9a43fe10410260d9c2494a5fc4416c7a	refs/heads/main
+PASS repository/frozen main/tree/local main/task branch; remote task ref absent
+PASS 2d3b2f7a4c4055882525e3af1814d57e87c01c76 ancestor of 541d9a6c9a43fe10410260d9c2494a5fc4416c7a; both trees 0b0e597a29dc8f2d95d93f9bd04364cc140a9db1; zero tree diff
+PASS five-path allowlist; sole changed pre-existing path is plan
+PASS stopped-report draft hash 2d5f2bbbbfde48758afb6bb4bcb049142655388400ee271bd74ebd75d1f980ec  docs/security/evidence/empty-restore-response/CHANGED_PATHS.txt
+Traceback (most recent call last):
+  File "/root/.copilot/session-state/e67bb11721be436b995a7699c07498aa/files/check_empty_restore_docs.py", line 85, in <module>
+    assert "python: command not found" in log_text and "exit 127" in log_text
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError
+
+Documentation validator attempt 3:
+$ python3 /root/.copilot/session-state/e67bb11721be436b995a7699c07498aa/files/check_empty_restore_docs.py
+exit 1 because the validator expected literal `exit 127` but the original captured shell diagnostic had only `/bin/bash: line 1: python: command not found`. The prior stopped-task tool record establishes that invocation exited 127. This append records the exit explicitly; validator is rerun without another source change.
+
+$ python3 /root/.copilot/session-state/e67bb11721be436b995a7699c07498aa/files/check_empty_restore_docs.py
+DOCUMENTATION-ONLY CHECKS; no tests/build/node/network experiment
+
+--- EXECUTION RESULTS ---
+Initial failed follow-up apply_patch: nonexistent final context; no change applied.
+Corrected follow-up patch succeeded. Guessed filename searches had no matches.
+core.autocrlf query: exit 1, unset; initial git diff --check: exit 0.
+git ls-remote origin refs/heads/main; git ls-remote origin refs/heads/investigation/empty-restore-response-20261107
+541d9a6c9a43fe10410260d9c2494a5fc4416c7a	refs/heads/main
+PASS repository/frozen main/tree/local main/task branch; remote task ref absent
+PASS 2d3b2f7a4c4055882525e3af1814d57e87c01c76 ancestor of 541d9a6c9a43fe10410260d9c2494a5fc4416c7a; both trees 0b0e597a29dc8f2d95d93f9bd04364cc140a9db1; zero tree diff
+PASS five-path allowlist; sole changed pre-existing path is plan
+PASS stopped-report draft hash 2d5f2bbbbfde48758afb6bb4bcb049142655388400ee271bd74ebd75d1f980ec  docs/security/evidence/empty-restore-response/CHANGED_PATHS.txt
+Prior SHA256s verified against stopped report before continuation edits: plan c43010529615ab74f1b073c93ffe0db159b7604fb9350c118958ec29f882c799; README 5b1d33ede4d90db19840fa305dfec14dd9dfdbe4ea3c9b6ec6dd4a17adc5e455; changed paths 2d5f2bbbbfde48758afb6bb4bcb049142655388400ee271bd74ebd75d1f980ec; diagnostics 110925ee8e20e418fc288d64bee7a2dfbd1a2739b84214bb84da6fed319c8863
+PASS exact plan prefix: bytes=371206 SHA256=2e626048ea8e89507c86ba008d6f8ae7420756a9fcd5b532e83e07eda28e4098
+Append bytes=3511
+PASS all 620 baseline evidence files + audit register + Run422 D7 + guarded source
+Preservation git-ls-tree inventory SHA256=12d1ea095ef0b9c0ce3336c7acf03f112e85b03627802f8c47e94fa80cc5485c
+9b03a9fb9c2f0d7f5883bfe41f035886b276e58f0b56b65b5cefb5a70eaeb2b3  preserved crates/qbind-node/src/binary_consensus_loop.rs
+e234fcfb2d54628dec76c51162ed7b45a7baab7d960d6585e40c274eb555aca3  preserved crates/qbind-node/src/main.rs
+6ff62d8dcc614cda31db8e653e802b8fbaa44098f921e164f1420973d579625d  preserved crates/qbind-node/src/p2p.rs
+1bbeabd744d2f56e0e5a55c99f11460be01f5f7034501a51e60bfa2dc0d41e30  preserved crates/qbind-node/src/p2p_inbound.rs
+237f001c7c999b0a98bf1e683ffe5dcc05a1af508e1dddeb4c0cc82b4334d961  preserved crates/qbind-node/src/p2p_node_builder.rs
+cfa177bbd0ea20bae940e68b355b91cfe7b9da1679613122783e32d40767141a  preserved crates/qbind-node/src/p2p_tcp.rs
+ec369ebe279c9f074b201b15898bcde3b5775646b794aa2a3dbd30c8f81a0db7  preserved crates/qbind-node/src/peer_consensus_binding.rs
+d37b522a478d524962c1d62b08ca111ffffa2392a6911453b7b8b584a28568e3  preserved crates/qbind-consensus/src/basic_hotstuff_engine.rs
+947592ce168ed4e1f74ab729d5ebd6af832ca09bd8f6e49a5111e08839895765  preserved crates/qbind-consensus/src/hotstuff_state_engine.rs
+6e68d3d05964f9a6dc0384ffda2bb53d81d7da97ffb786ce84f4bd5a4360c0d9  preserved Audit/QBIND_SECURITY_FINDINGS_REGISTER.md
+PASS docs/security/evidence/a17-f1-test-controls/SHA256SUMS: 12 entries at pinned BASE, not appended worktree plan
+PASS docs/security/evidence/a17-f1-integration/SHA256SUMS: 11 entries at pinned BASE, not appended worktree plan
+Traceback (most recent call last):
+  File "/root/.copilot/session-state/e67bb11721be436b995a7699c07498aa/files/check_empty_restore_docs.py", line 162, in <module>
+    assert target.startswith(prefix), target
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: https://github.com/olivexo28/QBIND/blob/2d3b2f7a4c4055882525e3af1814d57e87c01c76/crates/qbind-node/src/binary_consensus_loop.rs#L10410-L10431
+
+Documentation validator attempt 4:
+$ python3 /root/.copilot/session-state/e67bb11721be436b995a7699c07498aa/files/check_empty_restore_docs.py
+exit 1 at URL-pin check because source URLs intentionally pin old commit 2d3b2f7a4c4055882525e3af1814d57e87c01c76; user-provided expected source identity was retained and both source trees are proven identical. Validator corrected to validate references against the original pinned source commit, whose tree equals frozen main.
+
+$ python3 /root/.copilot/session-state/e67bb11721be436b995a7699c07498aa/files/check_empty_restore_docs.py
+DOCUMENTATION-ONLY CHECKS; no tests/build/node/network experiment
+
+--- EXECUTION RESULTS ---
+Initial failed follow-up apply_patch: nonexistent final context; no change applied.
+Corrected follow-up patch succeeded. Guessed filename searches had no matches.
+core.autocrlf query: exit 1, unset; initial git diff --check: exit 0.
+git ls-remote origin refs/heads/main; git ls-remote origin refs/heads/investigation/empty-restore-response-20261107
+541d9a6c9a43fe10410260d9c2494a5fc4416c7a	refs/heads/main
+PASS repository/frozen main/tree/local main/task branch; remote task ref absent
+PASS 2d3b2f7a4c4055882525e3af1814d57e87c01c76 ancestor of 541d9a6c9a43fe10410260d9c2494a5fc4416c7a; both trees 0b0e597a29dc8f2d95d93f9bd04364cc140a9db1; zero tree diff
+PASS five-path allowlist; sole changed pre-existing path is plan
+PASS stopped-report draft hash 2d5f2bbbbfde48758afb6bb4bcb049142655388400ee271bd74ebd75d1f980ec  docs/security/evidence/empty-restore-response/CHANGED_PATHS.txt
+Prior SHA256s verified against stopped report before continuation edits: plan c43010529615ab74f1b073c93ffe0db159b7604fb9350c118958ec29f882c799; README 5b1d33ede4d90db19840fa305dfec14dd9dfdbe4ea3c9b6ec6dd4a17adc5e455; changed paths 2d5f2bbbbfde48758afb6bb4bcb049142655388400ee271bd74ebd75d1f980ec; diagnostics 110925ee8e20e418fc288d64bee7a2dfbd1a2739b84214bb84da6fed319c8863
+PASS exact plan prefix: bytes=371206 SHA256=2e626048ea8e89507c86ba008d6f8ae7420756a9fcd5b532e83e07eda28e4098
+Append bytes=3511
+PASS all 620 baseline evidence files + audit register + Run422 D7 + guarded source
+Preservation git-ls-tree inventory SHA256=12d1ea095ef0b9c0ce3336c7acf03f112e85b03627802f8c47e94fa80cc5485c
+9b03a9fb9c2f0d7f5883bfe41f035886b276e58f0b56b65b5cefb5a70eaeb2b3  preserved crates/qbind-node/src/binary_consensus_loop.rs
+e234fcfb2d54628dec76c51162ed7b45a7baab7d960d6585e40c274eb555aca3  preserved crates/qbind-node/src/main.rs
+6ff62d8dcc614cda31db8e653e802b8fbaa44098f921e164f1420973d579625d  preserved crates/qbind-node/src/p2p.rs
+1bbeabd744d2f56e0e5a55c99f11460be01f5f7034501a51e60bfa2dc0d41e30  preserved crates/qbind-node/src/p2p_inbound.rs
+237f001c7c999b0a98bf1e683ffe5dcc05a1af508e1dddeb4c0cc82b4334d961  preserved crates/qbind-node/src/p2p_node_builder.rs
+cfa177bbd0ea20bae940e68b355b91cfe7b9da1679613122783e32d40767141a  preserved crates/qbind-node/src/p2p_tcp.rs
+ec369ebe279c9f074b201b15898bcde3b5775646b794aa2a3dbd30c8f81a0db7  preserved crates/qbind-node/src/peer_consensus_binding.rs
+d37b522a478d524962c1d62b08ca111ffffa2392a6911453b7b8b584a28568e3  preserved crates/qbind-consensus/src/basic_hotstuff_engine.rs
+947592ce168ed4e1f74ab729d5ebd6af832ca09bd8f6e49a5111e08839895765  preserved crates/qbind-consensus/src/hotstuff_state_engine.rs
+6e68d3d05964f9a6dc0384ffda2bb53d81d7da97ffb786ce84f4bd5a4360c0d9  preserved Audit/QBIND_SECURITY_FINDINGS_REGISTER.md
+PASS docs/security/evidence/a17-f1-test-controls/SHA256SUMS: 12 entries at pinned BASE, not appended worktree plan
+PASS docs/security/evidence/a17-f1-integration/SHA256SUMS: 11 entries at pinned BASE, not appended worktree plan
+PASS status/provenance phrases; all new source URLs pinned and ranges valid; local links exist
+PASS new UTF-8/LF/EOF/trailing-whitespace checks; no historical normalization
+$ git diff --check
+exit 0
+$ git -c core.whitespace=cr-at-eol diff --check
+exit 0
+ALL DOCUMENTATION CHECKS PASS
+
+Prefix integrity check:
+$ python3 - <<'PY' (exact check encoded in check_empty_restore_docs.py)
+Compare SHA-256 of bytes preceding each append marker to the stopped-task hashes for plan, README and initial documentation-checks log.
+exit 0; all three prefixes match exactly. Output was recorded by the subsequent full validator run.
+
+$ python3 /root/.copilot/session-state/e67bb11721be436b995a7699c07498aa/files/check_empty_restore_docs.py
+DOCUMENTATION-ONLY CHECKS; no tests/build/node/network experiment
+
+--- EXECUTION RESULTS ---
+Initial failed follow-up apply_patch: nonexistent final context; no change applied.
+Corrected follow-up patch succeeded. Guessed filename searches had no matches.
+core.autocrlf query: exit 1, unset; initial git diff --check: exit 0.
+git ls-remote origin refs/heads/main; git ls-remote origin refs/heads/investigation/empty-restore-response-20261107
+541d9a6c9a43fe10410260d9c2494a5fc4416c7a	refs/heads/main
+PASS repository/frozen main/tree/local main/task branch; remote task ref absent
+PASS 2d3b2f7a4c4055882525e3af1814d57e87c01c76 ancestor of 541d9a6c9a43fe10410260d9c2494a5fc4416c7a; both trees 0b0e597a29dc8f2d95d93f9bd04364cc140a9db1; zero tree diff
+PASS five-path allowlist; sole changed pre-existing path is plan
+PASS stopped-report draft hash 2d5f2bbbbfde48758afb6bb4bcb049142655388400ee271bd74ebd75d1f980ec  docs/security/evidence/empty-restore-response/CHANGED_PATHS.txt
+Prior SHA256s verified against stopped report before continuation edits: plan c43010529615ab74f1b073c93ffe0db159b7604fb9350c118958ec29f882c799; README 5b1d33ede4d90db19840fa305dfec14dd9dfdbe4ea3c9b6ec6dd4a17adc5e455; changed paths 2d5f2bbbbfde48758afb6bb4bcb049142655388400ee271bd74ebd75d1f980ec; diagnostics 110925ee8e20e418fc288d64bee7a2dfbd1a2739b84214bb84da6fed319c8863
+PASS stopped-task bytes preserved as exact prefix SHA256=c43010529615ab74f1b073c93ffe0db159b7604fb9350c118958ec29f882c799  docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+PASS stopped-task bytes preserved as exact prefix SHA256=5b1d33ede4d90db19840fa305dfec14dd9dfdbe4ea3c9b6ec6dd4a17adc5e455  docs/security/evidence/empty-restore-response/README.md
+PASS stopped-task bytes preserved as exact prefix SHA256=110925ee8e20e418fc288d64bee7a2dfbd1a2739b84214bb84da6fed319c8863  docs/security/evidence/empty-restore-response/documentation-checks.log
+PASS exact plan prefix: bytes=371206 SHA256=2e626048ea8e89507c86ba008d6f8ae7420756a9fcd5b532e83e07eda28e4098
+Append bytes=3511
+PASS all 620 baseline evidence files + audit register + Run422 D7 + guarded source
+Preservation git-ls-tree inventory SHA256=12d1ea095ef0b9c0ce3336c7acf03f112e85b03627802f8c47e94fa80cc5485c
+9b03a9fb9c2f0d7f5883bfe41f035886b276e58f0b56b65b5cefb5a70eaeb2b3  preserved crates/qbind-node/src/binary_consensus_loop.rs
+e234fcfb2d54628dec76c51162ed7b45a7baab7d960d6585e40c274eb555aca3  preserved crates/qbind-node/src/main.rs
+6ff62d8dcc614cda31db8e653e802b8fbaa44098f921e164f1420973d579625d  preserved crates/qbind-node/src/p2p.rs
+1bbeabd744d2f56e0e5a55c99f11460be01f5f7034501a51e60bfa2dc0d41e30  preserved crates/qbind-node/src/p2p_inbound.rs
+237f001c7c999b0a98bf1e683ffe5dcc05a1af508e1dddeb4c0cc82b4334d961  preserved crates/qbind-node/src/p2p_node_builder.rs
+cfa177bbd0ea20bae940e68b355b91cfe7b9da1679613122783e32d40767141a  preserved crates/qbind-node/src/p2p_tcp.rs
+ec369ebe279c9f074b201b15898bcde3b5775646b794aa2a3dbd30c8f81a0db7  preserved crates/qbind-node/src/peer_consensus_binding.rs
+d37b522a478d524962c1d62b08ca111ffffa2392a6911453b7b8b584a28568e3  preserved crates/qbind-consensus/src/basic_hotstuff_engine.rs
+947592ce168ed4e1f74ab729d5ebd6af832ca09bd8f6e49a5111e08839895765  preserved crates/qbind-consensus/src/hotstuff_state_engine.rs
+6e68d3d05964f9a6dc0384ffda2bb53d81d7da97ffb786ce84f4bd5a4360c0d9  preserved Audit/QBIND_SECURITY_FINDINGS_REGISTER.md
+PASS docs/security/evidence/a17-f1-test-controls/SHA256SUMS: 12 entries at pinned BASE, not appended worktree plan
+PASS docs/security/evidence/a17-f1-integration/SHA256SUMS: 11 entries at pinned BASE, not appended worktree plan
+PASS status/provenance phrases; all new source URLs pinned and ranges valid; local links exist
+PASS new UTF-8/LF/EOF/trailing-whitespace checks; no historical normalization
+$ git diff --check
+exit 0
+$ git -c core.whitespace=cr-at-eol diff --check
+exit 0
+ALL DOCUMENTATION CHECKS PASS
+
+Final documentation inventory before checksum manifest creation:
+1. docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+2. docs/security/evidence/empty-restore-response/CHANGED_PATHS.txt
+3. docs/security/evidence/empty-restore-response/README.md
+4. docs/security/evidence/empty-restore-response/SHA256SUMS
+5. docs/security/evidence/empty-restore-response/documentation-checks.log
+Pre-manifest SHA-256:
+2c49e394c7bbd235dbcf9fda3e36e6bd0d7a5f2041f32fdabcc7b959988edd05  docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+34a57fe8aecce451f9d4e72fdd823dcddcdd130ee62369f8b9d351a43b489258  docs/security/evidence/empty-restore-response/README.md
+2d5f2bbbbfde48758afb6bb4bcb049142655388400ee271bd74ebd75d1f980ec  docs/security/evidence/empty-restore-response/CHANGED_PATHS.txt
+The documentation-checks.log digest is recorded by SHA256SUMS (not self-embedded). The final successful full validator command was `python3 /root/.copilot/session-state/e67bb11721be436b995a7699c07498aa/files/check_empty_restore_docs.py`, exit 0. It verified frozen direct main, same-tree ancestry, exact draft/log prefixes, five-path scope, all 620 preserved evidence blobs plus source/audit bytes, historical manifests (12 and 11 entries), pinned source ranges/local links, UTF-8/LF/EOF and both whitespace checks. No Rust tests/build/runtime/network commands were run.
+
+Final complete documentation validator run (manifest included):
+$ python3 /root/.copilot/session-state/e67bb11721be436b995a7699c07498aa/files/check_empty_restore_docs.py
+exit 0. Exact captured stdout/stderr follows; the manifest's `documentation-checks.log: OK` line validates the pre-transcript log bytes and is retained as that successful historical check. The final regenerated manifest is checked again after this append.
+DOCUMENTATION-ONLY CHECKS; no tests/build/node/network experiment
+
+--- EXECUTION RESULTS ---
+Initial failed follow-up apply_patch: nonexistent final context; no change applied.
+Corrected follow-up patch succeeded. Guessed filename searches had no matches.
+core.autocrlf query: exit 1, unset; initial git diff --check: exit 0.
+git ls-remote origin refs/heads/main; git ls-remote origin refs/heads/investigation/empty-restore-response-20261107
+541d9a6c9a43fe10410260d9c2494a5fc4416c7a	refs/heads/main
+PASS repository/frozen main/tree/local main/task branch; remote task ref absent
+PASS 2d3b2f7a4c4055882525e3af1814d57e87c01c76 ancestor of 541d9a6c9a43fe10410260d9c2494a5fc4416c7a; both trees 0b0e597a29dc8f2d95d93f9bd04364cc140a9db1; zero tree diff
+PASS five-path allowlist; sole changed pre-existing path is plan
+PASS stopped-report draft hash 2d5f2bbbbfde48758afb6bb4bcb049142655388400ee271bd74ebd75d1f980ec  docs/security/evidence/empty-restore-response/CHANGED_PATHS.txt
+Prior SHA256s verified against stopped report before continuation edits: plan c43010529615ab74f1b073c93ffe0db159b7604fb9350c118958ec29f882c799; README 5b1d33ede4d90db19840fa305dfec14dd9dfdbe4ea3c9b6ec6dd4a17adc5e455; changed paths 2d5f2bbbbfde48758afb6bb4bcb049142655388400ee271bd74ebd75d1f980ec; diagnostics 110925ee8e20e418fc288d64bee7a2dfbd1a2739b84214bb84da6fed319c8863
+PASS stopped-task bytes preserved as exact prefix SHA256=c43010529615ab74f1b073c93ffe0db159b7604fb9350c118958ec29f882c799  docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+PASS stopped-task bytes preserved as exact prefix SHA256=5b1d33ede4d90db19840fa305dfec14dd9dfdbe4ea3c9b6ec6dd4a17adc5e455  docs/security/evidence/empty-restore-response/README.md
+PASS stopped-task bytes preserved as exact prefix SHA256=110925ee8e20e418fc288d64bee7a2dfbd1a2739b84214bb84da6fed319c8863  docs/security/evidence/empty-restore-response/documentation-checks.log
+PASS exact plan prefix: bytes=371206 SHA256=2e626048ea8e89507c86ba008d6f8ae7420756a9fcd5b532e83e07eda28e4098
+Append bytes=3511
+PASS all 620 baseline evidence files + audit register + Run422 D7 + guarded source
+Preservation git-ls-tree inventory SHA256=12d1ea095ef0b9c0ce3336c7acf03f112e85b03627802f8c47e94fa80cc5485c
+9b03a9fb9c2f0d7f5883bfe41f035886b276e58f0b56b65b5cefb5a70eaeb2b3  preserved crates/qbind-node/src/binary_consensus_loop.rs
+e234fcfb2d54628dec76c51162ed7b45a7baab7d960d6585e40c274eb555aca3  preserved crates/qbind-node/src/main.rs
+6ff62d8dcc614cda31db8e653e802b8fbaa44098f921e164f1420973d579625d  preserved crates/qbind-node/src/p2p.rs
+1bbeabd744d2f56e0e5a55c99f11460be01f5f7034501a51e60bfa2dc0d41e30  preserved crates/qbind-node/src/p2p_inbound.rs
+237f001c7c999b0a98bf1e683ffe5dcc05a1af508e1dddeb4c0cc82b4334d961  preserved crates/qbind-node/src/p2p_node_builder.rs
+cfa177bbd0ea20bae940e68b355b91cfe7b9da1679613122783e32d40767141a  preserved crates/qbind-node/src/p2p_tcp.rs
+ec369ebe279c9f074b201b15898bcde3b5775646b794aa2a3dbd30c8f81a0db7  preserved crates/qbind-node/src/peer_consensus_binding.rs
+d37b522a478d524962c1d62b08ca111ffffa2392a6911453b7b8b584a28568e3  preserved crates/qbind-consensus/src/basic_hotstuff_engine.rs
+947592ce168ed4e1f74ab729d5ebd6af832ca09bd8f6e49a5111e08839895765  preserved crates/qbind-consensus/src/hotstuff_state_engine.rs
+6e68d3d05964f9a6dc0384ffda2bb53d81d7da97ffb786ce84f4bd5a4360c0d9  preserved Audit/QBIND_SECURITY_FINDINGS_REGISTER.md
+PASS docs/security/evidence/a17-f1-test-controls/SHA256SUMS: 12 entries at pinned BASE, not appended worktree plan
+PASS docs/security/evidence/a17-f1-integration/SHA256SUMS: 11 entries at pinned BASE, not appended worktree plan
+PASS status/provenance phrases; all new source URLs pinned and ranges valid; local links exist
+PASS new UTF-8/LF/EOF/trailing-whitespace checks; no historical normalization
+$ sha256sum -c docs/security/evidence/empty-restore-response/SHA256SUMS
+docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md: OK
+docs/security/evidence/empty-restore-response/CHANGED_PATHS.txt: OK
+docs/security/evidence/empty-restore-response/README.md: OK
+docs/security/evidence/empty-restore-response/documentation-checks.log: OK
+exit 0
+$ git diff --check
+exit 0
+$ git -c core.whitespace=cr-at-eol diff --check
+exit 0
+ALL DOCUMENTATION CHECKS PASS

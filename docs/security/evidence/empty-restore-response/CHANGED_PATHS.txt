@@ -1,0 +1,5 @@
+docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+docs/security/evidence/empty-restore-response/CHANGED_PATHS.txt
+docs/security/evidence/empty-restore-response/README.md
+docs/security/evidence/empty-restore-response/SHA256SUMS
+docs/security/evidence/empty-restore-response/documentation-checks.log

@@ -4686,3 +4686,60 @@ A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain **OPEN**; activation
 **DISABLED**; public DevNet **NO-GO**. Earlier bounded acceptances retain their
 scope. All non-empty catch-up imports, including honest suffixes, remain
 refused; empty-response effects are characterized, not approved recovery.
+
+## 29. Empty RestoreCatchupResponse and restore-mode exit investigation
+
+**EMPTY-RESPONSE INVESTIGATION — INDEPENDENT REVIEW PENDING.**
+A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain **OPEN**.
+Activation remains **DISABLED**; public DevNet remains **NO-GO**.
+Earlier bounded acceptances retain their recorded scope; the audit register,
+historical evidence and all preceding bytes of this plan are unchanged.
+
+Direct remote main, local main and starting HEAD were verified at
+`2d3b2f7a4c4055882525e3af1814d57e87c01c76`, tree
+`0b0e597a29dc8f2d95d93f9bd04364cc140a9db1`, with clean worktree/staging,
+before creating `investigation/empty-restore-response-20261107` from that
+exact base. This task changes documentation only, not production/test code.
+
+The [pinned investigation](evidence/empty-restore-response/README.md) traces
+session/claimed-responder binding, receipt/self ordering, empty-path absence
+of request-anchor/outstanding-request checks, monotone optional peer maximum,
+strict local progress and the one-shot scalar exit. It maps every mode gate
+and the authority, signer, timing/configuration and publication checks that
+remain. Leader ticks mutate the engine before outbound authorization in both
+modes; single-validator local progress is source-supported despite the
+nonempty guard. That configuration does not simultaneously supply a bound
+nonself production peer, and the current multi-validator Required/no-PV
+wiring must not be replaced by directly imported fixture progress.
+
+Lower/equal claims can trigger exit only with independently established
+strict progress and no greater observed maximum; inflated bound claims can
+raise the target even at baseline and cannot be lowered by later reports.
+These are new source-level consequences, not an executed exploit, observed
+production stall or authenticated recovery/participation acceptance.
+Existing corrected/integration test evidence is reused with provenance and
+limitations; unchanged tests are not rerun.
+
+Next boundary recommended for independent review, **not implemented**:
+contain bound empty inputs before peer tracking/mode-clear effects while
+positive recovery/resume authority is absent. Keeping mode active affects
+request attempts, proposal deferral and local timeout availability, not all
+leader/TC behavior. Minimum actual-handler and downstream controls are
+enumerated as FUTURE / NOT EXECUTED. Positive recovery, currentness, signing
+continuity/exclusivity, durable quarantine and clear/resume authority remain
+separate obligations. The package manifest pins the exact changed paths;
+documentation checks and preserved-byte checks are retained with outcomes.
+Only the new investigation branch is published, without merge, main push,
+PR, force push, keys, live node, network experiment or activation.
+
+Continuation verified direct frozen main
+`541d9a6c9a43fe10410260d9c2494a5fc4416c7a`, tree
+`0b0e597a29dc8f2d95d93f9bd04364cc140a9db1`, as a child of the originally
+verified base `2d3b2f7a4c4055882525e3af1814d57e87c01c76`, with merge parent
+`9ef29e2432b9b84fca63e59440d64d085631e9a3`. Both commits have the same
+tree; ancestry and zero-tree-diff checks passed. The existing investigation
+branch was fast-forwarded, retaining draft work. Original draft hashes and
+the initial diagnostics hash were verified against the stopped-task report
+before continuation edits; subsequent log entries preserve earlier bytes and
+record unsuccessful attempts accurately. Final hashes, manifest and checks
+are in the investigation package.
