@@ -1,0 +1,21 @@
+origin	https://github.com/olivexo28/QBIND (fetch)
+origin	https://github.com/olivexo28/QBIND (push)
+f5ccefecec4d47b5fd529513e9eae8ac4b46fef7	refs/heads/copilot/a33-f1-bounded-eviction
+3926fd4d9e7c1ec68c4b22610e154f9e90460f1c	refs/heads/main
+3926fd4d9e7c1ec68c4b22610e154f9e90460f1c
+1a846b01962f7ea016ec971f8a11b71ce91a30c9
+3926fd4d9e7c1ec68c4b22610e154f9e90460f1c
+1a846b01962f7ea016ec971f8a11b71ce91a30c9
+3926fd4d9e7c1ec68c4b22610e154f9e90460f1c
+M  crates/qbind-node/src/main.rs
+M  crates/qbind-node/src/pqc_authority_state_reset.rs
+A  crates/qbind-node/src/pqc_authority_state_reset_error_tests.rs
+A  crates/qbind-node/tests/a33_f1_authority_reset_audit_collision_tests.rs
+A  crates/qbind-node/tests/a33_f1_authority_reset_destination_lock_tests.rs
+A  crates/qbind-node/tests/a33_f1_authority_reset_verified_success_tests.rs
+A  crates/qbind-node/tests/a33_f1_reset_marker_temp_identity_tests.rs
+A  crates/qbind-node/tests/support/authority_reset_cli.rs
+?? docs/security/evidence/reset_integration/
+rustc 1.99.1 (58cf8f9c3 2026-10-13)
+cargo 1.99.1 (5f94df478 2026-08-27)
+Linux 6.12.8+ x86_64 GNU/Linux

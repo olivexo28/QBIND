@@ -1,0 +1,14 @@
+{
+  "command": [
+    "bash",
+    "-c",
+    "apt-get update -qq && apt-get install -y -qq libclang-dev"
+  ],
+  "shell_display": "bash -c 'apt-get update -qq && apt-get install -y -qq libclang-dev'",
+  "cwd": "/workspaces/QBIND/olivexo28/QBIND-reset-integration",
+  "started_utc": "2026-11-07T06:21:44.270063+00:00",
+  "finished_utc": "2026-11-07T06:22:11.303964+00:00",
+  "exit_code": 0,
+  "log": "dependency-install.log",
+  "environment_overrides": {}
+}

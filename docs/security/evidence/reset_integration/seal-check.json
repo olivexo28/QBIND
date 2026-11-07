@@ -1,0 +1,14 @@
+{
+  "command": [
+    "python3",
+    "docs/security/evidence/reset_integration/check_candidate.py",
+    "--verify-seal"
+  ],
+  "shell_display": "python3 docs/security/evidence/reset_integration/check_candidate.py --verify-seal",
+  "cwd": "/workspaces/QBIND/olivexo28/QBIND-reset-integration",
+  "started_utc": "2026-11-07T06:36:45.809863+00:00",
+  "finished_utc": "2026-11-07T06:36:46.825776+00:00",
+  "exit_code": 0,
+  "log": "seal-check.log",
+  "environment_overrides": {}
+}

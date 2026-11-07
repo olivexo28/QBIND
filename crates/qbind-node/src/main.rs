@@ -2221,7 +2221,30 @@ async fn main() {
     // ------------------------------------------------------------------
     if args.authority_state_reset {
         use qbind_node::pqc_authority_state_reset::{
-            AuthorityResetInputs, execute_authority_state_reset,
+            execute_authority_state_reset, AuthorityResetInputs,
+        };
+        let Some(data_dir) = args.data_dir.as_ref() else {
+            eprintln!("[run-127] FATAL: authority-state-reset requires --data-dir for destination ownership; no reset audit or marker write attempted.");
+            std::process::exit(1);
+        };
+        if !cfg!(target_os = "linux") {
+            eprintln!("[run-127] FATAL: authority-state-reset destination ownership requires the supported Linux filesystem profile; no reset audit or marker write attempted.");
+            std::process::exit(1);
+        }
+        if let Err(e) = std::fs::create_dir_all(data_dir) {
+            eprintln!("[run-127] FATAL: authority-state-reset destination ownership: cannot create data directory {}: {e}", data_dir.display());
+            std::process::exit(1);
+        }
+        // Keep the descriptor owned through every reset effect and process exit.
+        // Future quarantine classification belongs here, before reset effects.
+        let _reset_destination_lock = match qbind_node::restore_completion::acquire_destination_lock(
+            data_dir,
+        ) {
+            Ok(lock) => lock,
+            Err(e) => {
+                eprintln!("[run-127] FATAL: authority-state-reset refused without destination ownership: {e}; no reset audit or marker write attempted.");
+                std::process::exit(1);
+            }
         };
         let validation_time_secs = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

@@ -1,0 +1,847 @@
+crates/qbind-node/src/pqc_authority_state_reset.rs:59: trailing whitespace.
++//! Refusal audits require established audit/marker/lock path separation. Unsafe or
+crates/qbind-node/src/pqc_authority_state_reset.rs:60: trailing whitespace.
++//! indeterminate paths return `UnsafeAuditPath` without audit publication.
+crates/qbind-node/src/pqc_authority_state_reset.rs:61: trailing whitespace.
++//! Other failures after persistence do not imply an unchanged marker.
+crates/qbind-node/src/pqc_authority_state_reset.rs:112: trailing whitespace.
++/// Verification does not modify marker bytes. A safely separated refusal audit
+crates/qbind-node/src/pqc_authority_state_reset.rs:113: trailing whitespace.
++/// is attempted, except when path separation itself refuses. I/O failures after
+crates/qbind-node/src/pqc_authority_state_reset.rs:114: trailing whitespace.
++/// marker persistence do not imply an unchanged marker. Stable string identifiers
+crates/qbind-node/src/pqc_authority_state_reset.rs:119: trailing whitespace.
++    /// Stage-aware failure retaining operation and audit errors independently.
+crates/qbind-node/src/pqc_authority_state_reset.rs:120: trailing whitespace.
++    AttemptFailed {
+crates/qbind-node/src/pqc_authority_state_reset.rs:121: trailing whitespace.
++        stage: AuthorityResetStage,
+crates/qbind-node/src/pqc_authority_state_reset.rs:122: trailing whitespace.
++        marker: MarkerPersistenceOutcome,
+crates/qbind-node/src/pqc_authority_state_reset.rs:123: trailing whitespace.
++        operation_failure: Option<Box<AuthorityResetRefusal>>,
+crates/qbind-node/src/pqc_authority_state_reset.rs:124: trailing whitespace.
++        audit_failure: Option<Box<AuthorityResetRefusal>>,
+crates/qbind-node/src/pqc_authority_state_reset.rs:125: trailing whitespace.
++    },
+crates/qbind-node/src/pqc_authority_state_reset.rs:179: trailing whitespace.
++    /// Audit/marker separation failed or could not be established; no audit
+crates/qbind-node/src/pqc_authority_state_reset.rs:180: trailing whitespace.
++    /// publication is attempted at this check.
+crates/qbind-node/src/pqc_authority_state_reset.rs:181: trailing whitespace.
++    UnsafeAuditPath(String),
+crates/qbind-node/src/pqc_authority_state_reset.rs:182: trailing whitespace.
++    /// Marker persist failed; an error after rename can leave new bytes visible.
+crates/qbind-node/src/pqc_authority_state_reset.rs:190: trailing whitespace.
++            Self::AttemptFailed { .. } => "AttemptFailed",
+crates/qbind-node/src/pqc_authority_state_reset.rs:213: trailing whitespace.
++            Self::UnsafeAuditPath(_) => "UnsafeAuditPath",
+crates/qbind-node/src/pqc_authority_state_reset.rs:222: trailing whitespace.
++            Self::AttemptFailed {
+crates/qbind-node/src/pqc_authority_state_reset.rs:223: trailing whitespace.
++                stage,
+crates/qbind-node/src/pqc_authority_state_reset.rs:224: trailing whitespace.
++                marker,
+crates/qbind-node/src/pqc_authority_state_reset.rs:225: trailing whitespace.
++                operation_failure,
+crates/qbind-node/src/pqc_authority_state_reset.rs:226: trailing whitespace.
++                audit_failure,
+crates/qbind-node/src/pqc_authority_state_reset.rs:227: trailing whitespace.
++            } => format!(
+crates/qbind-node/src/pqc_authority_state_reset.rs:228: trailing whitespace.
++                "stage={stage:?}; marker={marker:?}; operation_failure={operation_failure:?}; \
+crates/qbind-node/src/pqc_authority_state_reset.rs:229: trailing whitespace.
++                 audit_failure={audit_failure:?}; no rollback or broader durability implied"
+crates/qbind-node/src/pqc_authority_state_reset.rs:230: trailing whitespace.
++            ),
+crates/qbind-node/src/pqc_authority_state_reset.rs:329: trailing whitespace.
++            Self::UnsafeAuditPath(s) => format!("audit path separation refused: {}", s),
+crates/qbind-node/src/pqc_authority_state_reset.rs:331: trailing whitespace.
++                "authority marker persist failed: {}. An error after rename may leave \
+crates/qbind-node/src/pqc_authority_state_reset.rs:332: trailing whitespace.
++                 new marker bytes visible; inspect marker and audit before further action",
+crates/qbind-node/src/pqc_authority_state_reset.rs:347: trailing whitespace.
++/// Stage at which the reset could not complete.
+crates/qbind-node/src/pqc_authority_state_reset.rs:348: trailing whitespace.
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+crates/qbind-node/src/pqc_authority_state_reset.rs:349: trailing whitespace.
++pub enum AuthorityResetStage {
+crates/qbind-node/src/pqc_authority_state_reset.rs:350: trailing whitespace.
++    VerificationRefusalAudit,
+crates/qbind-node/src/pqc_authority_state_reset.rs:351: trailing whitespace.
++    PendingAudit,
+crates/qbind-node/src/pqc_authority_state_reset.rs:352: trailing whitespace.
++    MarkerPersistence,
+crates/qbind-node/src/pqc_authority_state_reset.rs:353: trailing whitespace.
++    SuccessAudit,
+crates/qbind-node/src/pqc_authority_state_reset.rs:354: trailing whitespace.
++}
+crates/qbind-node/src/pqc_authority_state_reset.rs:355: trailing whitespace.
++
+crates/qbind-node/src/pqc_authority_state_reset.rs:356: trailing whitespace.
++/// Acknowledgments refer only to the existing persistence API, not power loss.
+crates/qbind-node/src/pqc_authority_state_reset.rs:357: trailing whitespace.
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+crates/qbind-node/src/pqc_authority_state_reset.rs:358: trailing whitespace.
++pub enum MarkerPersistenceOutcome {
+crates/qbind-node/src/pqc_authority_state_reset.rs:359: trailing whitespace.
++    NotAttempted,
+crates/qbind-node/src/pqc_authority_state_reset.rs:360: trailing whitespace.
++    AttemptedUncertain,
+crates/qbind-node/src/pqc_authority_state_reset.rs:361: trailing whitespace.
++    Acknowledged,
+crates/qbind-node/src/pqc_authority_state_reset.rs:362: trailing whitespace.
++}
+crates/qbind-node/src/pqc_authority_state_reset.rs:363: trailing whitespace.
++
+crates/qbind-node/src/pqc_authority_state_reset.rs:364: trailing whitespace.
++fn attempt_failure(
+crates/qbind-node/src/pqc_authority_state_reset.rs:365: trailing whitespace.
++    stage: AuthorityResetStage,
+crates/qbind-node/src/pqc_authority_state_reset.rs:366: trailing whitespace.
++    marker: MarkerPersistenceOutcome,
+crates/qbind-node/src/pqc_authority_state_reset.rs:367: trailing whitespace.
++    operation_failure: Option<AuthorityResetRefusal>,
+crates/qbind-node/src/pqc_authority_state_reset.rs:368: trailing whitespace.
++    audit_failure: Option<AuthorityResetRefusal>,
+crates/qbind-node/src/pqc_authority_state_reset.rs:369: trailing whitespace.
++) -> AuthorityResetRefusal {
+crates/qbind-node/src/pqc_authority_state_reset.rs:370: trailing whitespace.
++    AuthorityResetRefusal::AttemptFailed {
+crates/qbind-node/src/pqc_authority_state_reset.rs:371: trailing whitespace.
++        stage,
+crates/qbind-node/src/pqc_authority_state_reset.rs:372: trailing whitespace.
++        marker,
+crates/qbind-node/src/pqc_authority_state_reset.rs:373: trailing whitespace.
++        operation_failure: operation_failure.map(Box::new),
+crates/qbind-node/src/pqc_authority_state_reset.rs:374: trailing whitespace.
++        audit_failure: audit_failure.map(Box::new),
+crates/qbind-node/src/pqc_authority_state_reset.rs:375: trailing whitespace.
++    }
+crates/qbind-node/src/pqc_authority_state_reset.rs:376: trailing whitespace.
++}
+crates/qbind-node/src/pqc_authority_state_reset.rs:377: trailing whitespace.
++
+crates/qbind-node/src/pqc_authority_state_reset.rs:976: trailing whitespace.
++/// Check final and temporary audit/marker paths and the destination lock.
+crates/qbind-node/src/pqc_authority_state_reset.rs:977: trailing whitespace.
++///
+crates/qbind-node/src/pqc_authority_state_reset.rs:978: trailing whitespace.
++/// Supported profile: Linux, case-sensitive filesystem, stable operator-owned
+crates/qbind-node/src/pqc_authority_state_reset.rs:979: trailing whitespace.
++/// directories and no concurrent namespace/hard-link changes. Parent symlinks
+crates/qbind-node/src/pqc_authority_state_reset.rs:980: trailing whitespace.
++/// are resolved; leaf symlinks/special files and unavailable parents refuse.
+crates/qbind-node/src/pqc_authority_state_reset.rs:981: trailing whitespace.
++/// Canonicalization/inode checks are not protection against hostile races.
+crates/qbind-node/src/pqc_authority_state_reset.rs:982: trailing whitespace.
++fn check_authority_reset_audit_path(
+crates/qbind-node/src/pqc_authority_state_reset.rs:983: trailing whitespace.
++    data_dir: &Path,
+crates/qbind-node/src/pqc_authority_state_reset.rs:984: trailing whitespace.
++    audit_path: &Path,
+crates/qbind-node/src/pqc_authority_state_reset.rs:985: trailing whitespace.
++) -> Result<(), AuthorityResetRefusal> {
+crates/qbind-node/src/pqc_authority_state_reset.rs:986: trailing whitespace.
++    #[cfg(not(target_os = "linux"))]
+crates/qbind-node/src/pqc_authority_state_reset.rs:987: trailing whitespace.
++    {
+crates/qbind-node/src/pqc_authority_state_reset.rs:988: trailing whitespace.
++        let _ = (data_dir, audit_path);
+crates/qbind-node/src/pqc_authority_state_reset.rs:989: trailing whitespace.
++        Err(AuthorityResetRefusal::UnsafeAuditPath(
+crates/qbind-node/src/pqc_authority_state_reset.rs:990: trailing whitespace.
++            "path separation is supported only on the Linux profile".to_string(),
+crates/qbind-node/src/pqc_authority_state_reset.rs:991: trailing whitespace.
++        ))
+crates/qbind-node/src/pqc_authority_state_reset.rs:992: trailing whitespace.
++    }
+crates/qbind-node/src/pqc_authority_state_reset.rs:993: trailing whitespace.
++    #[cfg(target_os = "linux")]
+crates/qbind-node/src/pqc_authority_state_reset.rs:994: trailing whitespace.
++    {
+crates/qbind-node/src/pqc_authority_state_reset.rs:995: trailing whitespace.
++        use std::os::unix::fs::MetadataExt;
+crates/qbind-node/src/pqc_authority_state_reset.rs:996: trailing whitespace.
++
+crates/qbind-node/src/pqc_authority_state_reset.rs:997: trailing whitespace.
++        fn inspect(
+crates/qbind-node/src/pqc_authority_state_reset.rs:998: trailing whitespace.
++            path: &Path,
+crates/qbind-node/src/pqc_authority_state_reset.rs:999: trailing whitespace.
++        ) -> Result<(PathBuf, (u64, u64), Option<(u64, u64)>), AuthorityResetRefusal> {
+crates/qbind-node/src/pqc_authority_state_reset.rs:1000: trailing whitespace.
++            let refuse = |detail| AuthorityResetRefusal::UnsafeAuditPath(detail);
+crates/qbind-node/src/pqc_authority_state_reset.rs:1001: trailing whitespace.
++            let name = path
+crates/qbind-node/src/pqc_authority_state_reset.rs:1002: trailing whitespace.
++                .file_name()
+crates/qbind-node/src/pqc_authority_state_reset.rs:1003: trailing whitespace.
++                .ok_or_else(|| refuse(format!("no file name in {}", path.display())))?;
+crates/qbind-node/src/pqc_authority_state_reset.rs:1004: trailing whitespace.
++            let parent = path
+crates/qbind-node/src/pqc_authority_state_reset.rs:1005: trailing whitespace.
++                .parent()
+crates/qbind-node/src/pqc_authority_state_reset.rs:1006: trailing whitespace.
++                .filter(|p| !p.as_os_str().is_empty())
+crates/qbind-node/src/pqc_authority_state_reset.rs:1007: trailing whitespace.
++                .unwrap_or_else(|| Path::new("."));
+crates/qbind-node/src/pqc_authority_state_reset.rs:1008: trailing whitespace.
++            let parent = std::fs::canonicalize(parent).map_err(|e| {
+crates/qbind-node/src/pqc_authority_state_reset.rs:1009: trailing whitespace.
++                refuse(format!(
+crates/qbind-node/src/pqc_authority_state_reset.rs:1010: trailing whitespace.
++                    "cannot resolve parent of {}: {}",
+crates/qbind-node/src/pqc_authority_state_reset.rs:1011: trailing whitespace.
++                    path.display(),
+crates/qbind-node/src/pqc_authority_state_reset.rs:1012: trailing whitespace.
++                    e
+crates/qbind-node/src/pqc_authority_state_reset.rs:1013: trailing whitespace.
++                ))
+crates/qbind-node/src/pqc_authority_state_reset.rs:1014: trailing whitespace.
++            })?;
+crates/qbind-node/src/pqc_authority_state_reset.rs:1015: trailing whitespace.
++            let parent_meta = std::fs::metadata(&parent)
+crates/qbind-node/src/pqc_authority_state_reset.rs:1016: trailing whitespace.
++                .map_err(|e| refuse(format!("cannot inspect {}: {}", parent.display(), e)))?;
+crates/qbind-node/src/pqc_authority_state_reset.rs:1017: trailing whitespace.
++            if !parent_meta.is_dir() {
+crates/qbind-node/src/pqc_authority_state_reset.rs:1018: trailing whitespace.
++                return Err(refuse(format!(
+crates/qbind-node/src/pqc_authority_state_reset.rs:1019: trailing whitespace.
++                    "parent is not a directory: {}",
+crates/qbind-node/src/pqc_authority_state_reset.rs:1020: trailing whitespace.
++                    parent.display()
+crates/qbind-node/src/pqc_authority_state_reset.rs:1021: trailing whitespace.
++                )));
+crates/qbind-node/src/pqc_authority_state_reset.rs:1022: trailing whitespace.
++            }
+crates/qbind-node/src/pqc_authority_state_reset.rs:1023: trailing whitespace.
++            let resolved = parent.join(name);
+crates/qbind-node/src/pqc_authority_state_reset.rs:1024: trailing whitespace.
++            let identity = match std::fs::symlink_metadata(&resolved) {
+crates/qbind-node/src/pqc_authority_state_reset.rs:1025: trailing whitespace.
++                Ok(meta) if meta.is_file() => Some((meta.dev(), meta.ino())),
+crates/qbind-node/src/pqc_authority_state_reset.rs:1026: trailing whitespace.
++                Ok(_) => {
+crates/qbind-node/src/pqc_authority_state_reset.rs:1027: trailing whitespace.
++                    return Err(refuse(format!(
+crates/qbind-node/src/pqc_authority_state_reset.rs:1028: trailing whitespace.
++                        "symlink or non-regular path: {}",
+crates/qbind-node/src/pqc_authority_state_reset.rs:1029: trailing whitespace.
++                        resolved.display()
+crates/qbind-node/src/pqc_authority_state_reset.rs:1030: trailing whitespace.
++                    )))
+crates/qbind-node/src/pqc_authority_state_reset.rs:1031: trailing whitespace.
++                }
+crates/qbind-node/src/pqc_authority_state_reset.rs:1032: trailing whitespace.
++                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+crates/qbind-node/src/pqc_authority_state_reset.rs:1033: trailing whitespace.
++                Err(e) => {
+crates/qbind-node/src/pqc_authority_state_reset.rs:1034: trailing whitespace.
++                    return Err(refuse(format!(
+crates/qbind-node/src/pqc_authority_state_reset.rs:1035: trailing whitespace.
++                        "cannot inspect {}: {}",
+crates/qbind-node/src/pqc_authority_state_reset.rs:1036: trailing whitespace.
++                        resolved.display(),
+crates/qbind-node/src/pqc_authority_state_reset.rs:1037: trailing whitespace.
++                        e
+crates/qbind-node/src/pqc_authority_state_reset.rs:1038: trailing whitespace.
++                    )))
+crates/qbind-node/src/pqc_authority_state_reset.rs:1039: trailing whitespace.
++                }
+crates/qbind-node/src/pqc_authority_state_reset.rs:1040: trailing whitespace.
++            };
+crates/qbind-node/src/pqc_authority_state_reset.rs:1041: trailing whitespace.
++            Ok((resolved, (parent_meta.dev(), parent_meta.ino()), identity))
+crates/qbind-node/src/pqc_authority_state_reset.rs:1042: trailing whitespace.
++        }
+crates/qbind-node/src/pqc_authority_state_reset.rs:1043: trailing whitespace.
++
+crates/qbind-node/src/pqc_authority_state_reset.rs:1044: trailing whitespace.
++        let marker = authority_state_file_path(data_dir);
+crates/qbind-node/src/pqc_authority_state_reset.rs:1045: trailing whitespace.
++        let mut marker_tmp = marker.as_os_str().to_owned();
+crates/qbind-node/src/pqc_authority_state_reset.rs:1046: trailing whitespace.
++        marker_tmp.push(".tmp");
+crates/qbind-node/src/pqc_authority_state_reset.rs:1047: trailing whitespace.
++        let paths = [
+crates/qbind-node/src/pqc_authority_state_reset.rs:1048: trailing whitespace.
++            inspect(audit_path)?,
+crates/qbind-node/src/pqc_authority_state_reset.rs:1049: trailing whitespace.
++            inspect(&audit_path.with_extension("json.tmp"))?,
+crates/qbind-node/src/pqc_authority_state_reset.rs:1050: trailing whitespace.
++            inspect(&marker)?,
+crates/qbind-node/src/pqc_authority_state_reset.rs:1051: trailing whitespace.
++            inspect(&PathBuf::from(marker_tmp))?,
+crates/qbind-node/src/pqc_authority_state_reset.rs:1052: trailing whitespace.
++            inspect(&data_dir.join(crate::restore_completion::RESTORE_LOCK_FILENAME))?,
+crates/qbind-node/src/pqc_authority_state_reset.rs:1053: trailing whitespace.
++        ];
+crates/qbind-node/src/pqc_authority_state_reset.rs:1054: trailing whitespace.
++        for (i, j) in [
+crates/qbind-node/src/pqc_authority_state_reset.rs:1055: trailing whitespace.
++            (0, 1),
+crates/qbind-node/src/pqc_authority_state_reset.rs:1056: trailing whitespace.
++            (0, 2),
+crates/qbind-node/src/pqc_authority_state_reset.rs:1057: trailing whitespace.
++            (0, 3),
+crates/qbind-node/src/pqc_authority_state_reset.rs:1058: trailing whitespace.
++            (1, 2),
+crates/qbind-node/src/pqc_authority_state_reset.rs:1059: trailing whitespace.
++            (1, 3),
+crates/qbind-node/src/pqc_authority_state_reset.rs:1060: trailing whitespace.
++            (2, 3),
+crates/qbind-node/src/pqc_authority_state_reset.rs:1061: trailing whitespace.
++            (0, 4),
+crates/qbind-node/src/pqc_authority_state_reset.rs:1062: trailing whitespace.
++            (1, 4),
+crates/qbind-node/src/pqc_authority_state_reset.rs:1063: trailing whitespace.
++            (2, 4),
+crates/qbind-node/src/pqc_authority_state_reset.rs:1064: trailing whitespace.
++            (3, 4),
+crates/qbind-node/src/pqc_authority_state_reset.rs:1065: trailing whitespace.
++        ] {
+crates/qbind-node/src/pqc_authority_state_reset.rs:1066: trailing whitespace.
++            if paths[i].0 == paths[j].0
+crates/qbind-node/src/pqc_authority_state_reset.rs:1067: trailing whitespace.
++                || (paths[i].1 == paths[j].1 && paths[i].0.file_name() == paths[j].0.file_name())
+crates/qbind-node/src/pqc_authority_state_reset.rs:1068: trailing whitespace.
++                || (paths[i].2.is_some() && paths[i].2 == paths[j].2)
+crates/qbind-node/src/pqc_authority_state_reset.rs:1069: trailing whitespace.
++            {
+crates/qbind-node/src/pqc_authority_state_reset.rs:1070: trailing whitespace.
++                return Err(AuthorityResetRefusal::UnsafeAuditPath(format!(
+crates/qbind-node/src/pqc_authority_state_reset.rs:1071: trailing whitespace.
++                    "{} aliases {}",
+crates/qbind-node/src/pqc_authority_state_reset.rs:1072: trailing whitespace.
++                    paths[i].0.display(),
+crates/qbind-node/src/pqc_authority_state_reset.rs:1073: trailing whitespace.
++                    paths[j].0.display()
+crates/qbind-node/src/pqc_authority_state_reset.rs:1074: trailing whitespace.
++                )));
+crates/qbind-node/src/pqc_authority_state_reset.rs:1075: trailing whitespace.
++            }
+crates/qbind-node/src/pqc_authority_state_reset.rs:1076: trailing whitespace.
++        }
+crates/qbind-node/src/pqc_authority_state_reset.rs:1077: trailing whitespace.
++        Ok(())
+crates/qbind-node/src/pqc_authority_state_reset.rs:1078: trailing whitespace.
++    }
+crates/qbind-node/src/pqc_authority_state_reset.rs:1079: trailing whitespace.
++}
+crates/qbind-node/src/pqc_authority_state_reset.rs:1080: trailing whitespace.
++
+crates/qbind-node/src/pqc_authority_state_reset.rs:1081: trailing whitespace.
++/// Persist an audit (tmp + rename) only after checking marker/lock separation.
+crates/qbind-node/src/pqc_authority_state_reset.rs:1082: trailing whitespace.
++/// An error after I/O is not a general no-filesystem-effect guarantee.
+crates/qbind-node/src/pqc_authority_state_reset.rs:1084: trailing whitespace.
++    data_dir: &Path,
+crates/qbind-node/src/pqc_authority_state_reset.rs:1088: trailing whitespace.
++    check_authority_reset_audit_path(data_dir, audit_path)?;
+crates/qbind-node/src/pqc_authority_state_reset.rs:1139: trailing whitespace.
++/// Path-separation refusal attempts no audit write. `AttemptFailed` preserves
+crates/qbind-node/src/pqc_authority_state_reset.rs:1140: trailing whitespace.
++/// operation/audit failures and the stage-specific persistence outcome.
+crates/qbind-node/src/pqc_authority_state_reset.rs:1141: trailing whitespace.
++/// An acknowledged persistence call is not an audit acknowledgment or a
+crates/qbind-node/src/pqc_authority_state_reset.rs:1142: trailing whitespace.
++/// power-loss guarantee; errors after persistence do not imply rollback.
+crates/qbind-node/src/pqc_authority_state_reset.rs:1143: trailing whitespace.
++///
+crates/qbind-node/src/pqc_authority_state_reset.rs:1144: trailing whitespace.
++/// Direct callers must acquire and retain destination ownership themselves
+crates/qbind-node/src/pqc_authority_state_reset.rs:1145: trailing whitespace.
++/// before calling (including refusal-audit effects). This function does not
+crates/qbind-node/src/pqc_authority_state_reset.rs:1146: trailing whitespace.
++/// acquire a lock; the CLI's lock does not protect arbitrary library callers.
+crates/qbind-node/src/pqc_authority_state_reset.rs:1150: trailing whitespace.
++    execute_authority_state_reset_with_audit(inputs, write_authority_reset_audit)
+crates/qbind-node/src/pqc_authority_state_reset.rs:1151: trailing whitespace.
++}
+crates/qbind-node/src/pqc_authority_state_reset.rs:1152: trailing whitespace.
++
+crates/qbind-node/src/pqc_authority_state_reset.rs:1153: trailing whitespace.
++fn execute_authority_state_reset_with_audit(
+crates/qbind-node/src/pqc_authority_state_reset.rs:1154: trailing whitespace.
++    inputs: &AuthorityResetInputs,
+crates/qbind-node/src/pqc_authority_state_reset.rs:1155: trailing whitespace.
++    mut audit: impl FnMut(&Path, &Path, &AuthorityResetAuditRecord) -> Result<(), AuthorityResetRefusal>,
+crates/qbind-node/src/pqc_authority_state_reset.rs:1156: trailing whitespace.
++) -> Result<AuthorityResetSuccess, AuthorityResetRefusal> {
+crates/qbind-node/src/pqc_authority_state_reset.rs:1157: trailing whitespace.
++    let data_dir = inputs
+crates/qbind-node/src/pqc_authority_state_reset.rs:1158: trailing whitespace.
++        .data_dir
+crates/qbind-node/src/pqc_authority_state_reset.rs:1159: trailing whitespace.
++        .as_ref()
+crates/qbind-node/src/pqc_authority_state_reset.rs:1160: trailing whitespace.
++        .ok_or(AuthorityResetRefusal::MissingDataDir)?;
+crates/qbind-node/src/pqc_authority_state_reset.rs:1161: trailing whitespace.
++    let audit_path = inputs
+crates/qbind-node/src/pqc_authority_state_reset.rs:1162: trailing whitespace.
++        .audit_output_path
+crates/qbind-node/src/pqc_authority_state_reset.rs:1163: trailing whitespace.
++        .as_ref()
+crates/qbind-node/src/pqc_authority_state_reset.rs:1164: trailing whitespace.
++        .ok_or(AuthorityResetRefusal::AuditOutputMissing)?;
+crates/qbind-node/src/pqc_authority_state_reset.rs:1165: trailing whitespace.
++    check_authority_reset_audit_path(data_dir, audit_path)?;
+crates/qbind-node/src/pqc_authority_state_reset.rs:1173: trailing whitespace.
++                if let Err(audit_error) = audit(data_dir, audit_path, &record) {
+crates/qbind-node/src/pqc_authority_state_reset.rs:1174: trailing whitespace.
++                    return Err(attempt_failure(
+crates/qbind-node/src/pqc_authority_state_reset.rs:1175: trailing whitespace.
++                        AuthorityResetStage::VerificationRefusalAudit,
+crates/qbind-node/src/pqc_authority_state_reset.rs:1176: trailing whitespace.
++                        MarkerPersistenceOutcome::NotAttempted,
+crates/qbind-node/src/pqc_authority_state_reset.rs:1177: trailing whitespace.
++                        Some(refusal),
+crates/qbind-node/src/pqc_authority_state_reset.rs:1178: trailing whitespace.
++                        Some(audit_error),
+crates/qbind-node/src/pqc_authority_state_reset.rs:1179: trailing whitespace.
++                    ));
+crates/qbind-node/src/pqc_authority_state_reset.rs:1180: trailing whitespace.
++                }
+crates/qbind-node/src/pqc_authority_state_reset.rs:1186: trailing whitespace.
++    execute_verified_authority_reset(inputs, plan, audit, |path, record| {
+crates/qbind-node/src/pqc_authority_state_reset.rs:1187: trailing whitespace.
++        persist_authority_state_atomic(path, record)
+crates/qbind-node/src/pqc_authority_state_reset.rs:1188: trailing whitespace.
++            .map_err(|e| AuthorityResetRefusal::MarkerPersistFailed(e.to_string()))
+crates/qbind-node/src/pqc_authority_state_reset.rs:1189: trailing whitespace.
++    })
+crates/qbind-node/src/pqc_authority_state_reset.rs:1190: trailing whitespace.
++}
+crates/qbind-node/src/pqc_authority_state_reset.rs:1191: trailing whitespace.
++
+crates/qbind-node/src/pqc_authority_state_reset.rs:1192: trailing whitespace.
++// Private sequencing seam: production reaches this only after real verification.
+crates/qbind-node/src/pqc_authority_state_reset.rs:1193: trailing whitespace.
++fn execute_verified_authority_reset(
+crates/qbind-node/src/pqc_authority_state_reset.rs:1194: trailing whitespace.
++    inputs: &AuthorityResetInputs,
+crates/qbind-node/src/pqc_authority_state_reset.rs:1195: trailing whitespace.
++    plan: VerifiedAuthorityResetPlan,
+crates/qbind-node/src/pqc_authority_state_reset.rs:1196: trailing whitespace.
++    mut audit: impl FnMut(&Path, &Path, &AuthorityResetAuditRecord) -> Result<(), AuthorityResetRefusal>,
+crates/qbind-node/src/pqc_authority_state_reset.rs:1197: trailing whitespace.
++    mut persist: impl FnMut(&Path, &PersistentAuthorityStateRecord) -> Result<(), AuthorityResetRefusal>,
+crates/qbind-node/src/pqc_authority_state_reset.rs:1198: trailing whitespace.
++) -> Result<AuthorityResetSuccess, AuthorityResetRefusal> {
+crates/qbind-node/src/pqc_authority_state_reset.rs:1199: trailing whitespace.
++    let data_dir = inputs
+crates/qbind-node/src/pqc_authority_state_reset.rs:1200: trailing whitespace.
++        .data_dir
+crates/qbind-node/src/pqc_authority_state_reset.rs:1201: trailing whitespace.
++        .as_ref()
+crates/qbind-node/src/pqc_authority_state_reset.rs:1202: trailing whitespace.
++        .ok_or(AuthorityResetRefusal::MissingDataDir)?;
+crates/qbind-node/src/pqc_authority_state_reset.rs:1203: trailing whitespace.
++    // Keep the guard even for direct private sequencing tests.
+crates/qbind-node/src/pqc_authority_state_reset.rs:1204: trailing whitespace.
++    check_authority_reset_audit_path(
+crates/qbind-node/src/pqc_authority_state_reset.rs:1205: trailing whitespace.
++        data_dir,
+crates/qbind-node/src/pqc_authority_state_reset.rs:1206: trailing whitespace.
++        inputs
+crates/qbind-node/src/pqc_authority_state_reset.rs:1207: trailing whitespace.
++            .audit_output_path
+crates/qbind-node/src/pqc_authority_state_reset.rs:1208: trailing whitespace.
++            .as_ref()
+crates/qbind-node/src/pqc_authority_state_reset.rs:1209: trailing whitespace.
++            .ok_or(AuthorityResetRefusal::AuditOutputMissing)?,
+crates/qbind-node/src/pqc_authority_state_reset.rs:1210: trailing whitespace.
++    )?;
+crates/qbind-node/src/pqc_authority_state_reset.rs:1220: trailing whitespace.
++    if let Err(e) = audit(data_dir, &audit_path, &pending_record) {
+crates/qbind-node/src/pqc_authority_state_reset.rs:1222: trailing whitespace.
++        return Err(attempt_failure(
+crates/qbind-node/src/pqc_authority_state_reset.rs:1223: trailing whitespace.
++            AuthorityResetStage::PendingAudit,
+crates/qbind-node/src/pqc_authority_state_reset.rs:1224: trailing whitespace.
++            MarkerPersistenceOutcome::NotAttempted,
+crates/qbind-node/src/pqc_authority_state_reset.rs:1225: trailing whitespace.
++            None,
+crates/qbind-node/src/pqc_authority_state_reset.rs:1226: trailing whitespace.
++            Some(e),
+crates/qbind-node/src/pqc_authority_state_reset.rs:1227: trailing whitespace.
++        ));
+crates/qbind-node/src/pqc_authority_state_reset.rs:1231: trailing whitespace.
++    if let Err(refusal) = persist(&plan.marker_path, &plan.new_marker) {
+crates/qbind-node/src/pqc_authority_state_reset.rs:1233: trailing whitespace.
++        let audit_error = audit(data_dir, &audit_path, &final_record).err();
+crates/qbind-node/src/pqc_authority_state_reset.rs:1234: trailing whitespace.
++        return Err(attempt_failure(
+crates/qbind-node/src/pqc_authority_state_reset.rs:1235: trailing whitespace.
++            AuthorityResetStage::MarkerPersistence,
+crates/qbind-node/src/pqc_authority_state_reset.rs:1236: trailing whitespace.
++            MarkerPersistenceOutcome::AttemptedUncertain,
+crates/qbind-node/src/pqc_authority_state_reset.rs:1237: trailing whitespace.
++            Some(refusal),
+crates/qbind-node/src/pqc_authority_state_reset.rs:1238: trailing whitespace.
++            audit_error,
+crates/qbind-node/src/pqc_authority_state_reset.rs:1239: trailing whitespace.
++        ));
+crates/qbind-node/src/pqc_authority_state_reset.rs:1244: trailing whitespace.
++    audit(data_dir, &audit_path, &final_record).map_err(|e| {
+crates/qbind-node/src/pqc_authority_state_reset.rs:1245: trailing whitespace.
++        attempt_failure(
+crates/qbind-node/src/pqc_authority_state_reset.rs:1246: trailing whitespace.
++            AuthorityResetStage::SuccessAudit,
+crates/qbind-node/src/pqc_authority_state_reset.rs:1247: trailing whitespace.
++            MarkerPersistenceOutcome::Acknowledged,
+crates/qbind-node/src/pqc_authority_state_reset.rs:1248: trailing whitespace.
++            None,
+crates/qbind-node/src/pqc_authority_state_reset.rs:1249: trailing whitespace.
++            Some(e),
+crates/qbind-node/src/pqc_authority_state_reset.rs:1250: trailing whitespace.
++        )
+crates/qbind-node/src/pqc_authority_state_reset.rs:1251: trailing whitespace.
++    })?;
+crates/qbind-node/src/pqc_authority_state_reset.rs:1269: trailing whitespace.
++#[cfg(all(test, target_os = "linux"))]
+crates/qbind-node/src/pqc_authority_state_reset.rs:1270: trailing whitespace.
++#[path = "pqc_authority_state_reset_error_tests.rs"]
+crates/qbind-node/src/pqc_authority_state_reset.rs:1271: trailing whitespace.
++mod error_tests;
+crates/qbind-node/src/pqc_authority_state_reset.rs:1272: trailing whitespace.
++
+docs/security/evidence/reset_integration/dependency-install.log:3: trailing whitespace.
++(Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 50485 files and directories currently installed.)
+docs/security/evidence/reset_integration/dependency-install.log:4: trailing whitespace.
++Preparing to unpack .../00-libasan8_14.2.0-4ubuntu2~24.04.1_amd64.deb ...
+docs/security/evidence/reset_integration/dependency-install.log:5: trailing whitespace.
++Unpacking libasan8:amd64 (14.2.0-4ubuntu2~24.04.1) over (14.2.0-4ubuntu2~24.04) ...
+docs/security/evidence/reset_integration/dependency-install.log:6: trailing whitespace.
++Preparing to unpack .../01-libubsan1_14.2.0-4ubuntu2~24.04.1_amd64.deb ...
+docs/security/evidence/reset_integration/dependency-install.log:7: trailing whitespace.
++Unpacking libubsan1:amd64 (14.2.0-4ubuntu2~24.04.1) over (14.2.0-4ubuntu2~24.04) ...
+docs/security/evidence/reset_integration/dependency-install.log:8: trailing whitespace.
++Preparing to unpack .../02-libstdc++-13-dev_13.3.0-6ubuntu2~24.04.1_amd64.deb ...
+docs/security/evidence/reset_integration/dependency-install.log:9: trailing whitespace.
++Unpacking libstdc++-13-dev:amd64 (13.3.0-6ubuntu2~24.04.1) over (13.3.0-6ubuntu2~24.04) ...
+docs/security/evidence/reset_integration/dependency-install.log:10: trailing whitespace.
++Preparing to unpack .../03-gcc-13_13.3.0-6ubuntu2~24.04.1_amd64.deb ...
+docs/security/evidence/reset_integration/dependency-install.log:11: trailing whitespace.
++Unpacking gcc-13 (13.3.0-6ubuntu2~24.04.1) over (13.3.0-6ubuntu2~24.04) ...
+docs/security/evidence/reset_integration/dependency-install.log:12: trailing whitespace.
++Preparing to unpack .../04-g++-13_13.3.0-6ubuntu2~24.04.1_amd64.deb ...
+docs/security/evidence/reset_integration/dependency-install.log:13: trailing whitespace.
++Unpacking g++-13 (13.3.0-6ubuntu2~24.04.1) over (13.3.0-6ubuntu2~24.04) ...
+docs/security/evidence/reset_integration/dependency-install.log:14: trailing whitespace.
++Preparing to unpack .../05-g++-13-x86-64-linux-gnu_13.3.0-6ubuntu2~24.04.1_amd64.deb ...
+docs/security/evidence/reset_integration/dependency-install.log:15: trailing whitespace.
++Unpacking g++-13-x86-64-linux-gnu (13.3.0-6ubuntu2~24.04.1) over (13.3.0-6ubuntu2~24.04) ...
+docs/security/evidence/reset_integration/dependency-install.log:16: trailing whitespace.
++Preparing to unpack .../06-gcc-13-x86-64-linux-gnu_13.3.0-6ubuntu2~24.04.1_amd64.deb ...
+docs/security/evidence/reset_integration/dependency-install.log:17: trailing whitespace.
++Unpacking gcc-13-x86-64-linux-gnu (13.3.0-6ubuntu2~24.04.1) over (13.3.0-6ubuntu2~24.04) ...
+docs/security/evidence/reset_integration/dependency-install.log:18: trailing whitespace.
++Preparing to unpack .../07-cpp-13-x86-64-linux-gnu_13.3.0-6ubuntu2~24.04.1_amd64.deb ...
+docs/security/evidence/reset_integration/dependency-install.log:19: trailing whitespace.
++Unpacking cpp-13-x86-64-linux-gnu (13.3.0-6ubuntu2~24.04.1) over (13.3.0-6ubuntu2~24.04) ...
+docs/security/evidence/reset_integration/dependency-install.log:20: trailing whitespace.
++Preparing to unpack .../08-cpp-13_13.3.0-6ubuntu2~24.04.1_amd64.deb ...
+docs/security/evidence/reset_integration/dependency-install.log:21: trailing whitespace.
++Unpacking cpp-13 (13.3.0-6ubuntu2~24.04.1) over (13.3.0-6ubuntu2~24.04) ...
+docs/security/evidence/reset_integration/dependency-install.log:22: trailing whitespace.
++Preparing to unpack .../09-gcc-13-base_13.3.0-6ubuntu2~24.04.1_amd64.deb ...
+docs/security/evidence/reset_integration/dependency-install.log:23: trailing whitespace.
++Unpacking gcc-13-base:amd64 (13.3.0-6ubuntu2~24.04.1) over (13.3.0-6ubuntu2~24.04) ...
+docs/security/evidence/reset_integration/dependency-install.log:24: trailing whitespace.
++Preparing to unpack .../10-libgcc-13-dev_13.3.0-6ubuntu2~24.04.1_amd64.deb ...
+docs/security/evidence/reset_integration/dependency-install.log:25: trailing whitespace.
++Unpacking libgcc-13-dev:amd64 (13.3.0-6ubuntu2~24.04.1) over (13.3.0-6ubuntu2~24.04) ...
+docs/security/evidence/reset_integration/dependency-install.log:26: trailing whitespace.
++Preparing to unpack .../11-libtsan2_14.2.0-4ubuntu2~24.04.1_amd64.deb ...
+docs/security/evidence/reset_integration/dependency-install.log:27: trailing whitespace.
++Unpacking libtsan2:amd64 (14.2.0-4ubuntu2~24.04.1) over (14.2.0-4ubuntu2~24.04) ...
+docs/security/evidence/reset_integration/dependency-install.log:28: trailing whitespace.
++Preparing to unpack .../12-gcc-14-base_14.2.0-4ubuntu2~24.04.1_amd64.deb ...
+docs/security/evidence/reset_integration/dependency-install.log:29: trailing whitespace.
++Unpacking gcc-14-base:amd64 (14.2.0-4ubuntu2~24.04.1) over (14.2.0-4ubuntu2~24.04) ...
+docs/security/evidence/reset_integration/dependency-install.log:30: trailing whitespace.
++Setting up gcc-14-base:amd64 (14.2.0-4ubuntu2~24.04.1) ...
+docs/security/evidence/reset_integration/dependency-install.log:31: trailing whitespace.
++(Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 50485 files and directories currently installed.)
+docs/security/evidence/reset_integration/dependency-install.log:32: trailing whitespace.
++Preparing to unpack .../libstdc++6_14.2.0-4ubuntu2~24.04.1_amd64.deb ...
+docs/security/evidence/reset_integration/dependency-install.log:33: trailing whitespace.
++Unpacking libstdc++6:amd64 (14.2.0-4ubuntu2~24.04.1) over (14.2.0-4ubuntu2~24.04) ...
+docs/security/evidence/reset_integration/dependency-install.log:34: trailing whitespace.
++Setting up libstdc++6:amd64 (14.2.0-4ubuntu2~24.04.1) ...
+docs/security/evidence/reset_integration/dependency-install.log:35: trailing whitespace.
++(Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 50485 files and directories currently installed.)
+docs/security/evidence/reset_integration/dependency-install.log:36: trailing whitespace.
++Preparing to unpack .../0-libquadmath0_14.2.0-4ubuntu2~24.04.1_amd64.deb ...
+docs/security/evidence/reset_integration/dependency-install.log:37: trailing whitespace.
++Unpacking libquadmath0:amd64 (14.2.0-4ubuntu2~24.04.1) over (14.2.0-4ubuntu2~24.04) ...
+docs/security/evidence/reset_integration/dependency-install.log:38: trailing whitespace.
++Preparing to unpack .../1-liblsan0_14.2.0-4ubuntu2~24.04.1_amd64.deb ...
+docs/security/evidence/reset_integration/dependency-install.log:39: trailing whitespace.
++Unpacking liblsan0:amd64 (14.2.0-4ubuntu2~24.04.1) over (14.2.0-4ubuntu2~24.04) ...
+docs/security/evidence/reset_integration/dependency-install.log:40: trailing whitespace.
++Preparing to unpack .../2-libitm1_14.2.0-4ubuntu2~24.04.1_amd64.deb ...
+docs/security/evidence/reset_integration/dependency-install.log:41: trailing whitespace.
++Unpacking libitm1:amd64 (14.2.0-4ubuntu2~24.04.1) over (14.2.0-4ubuntu2~24.04) ...
+docs/security/evidence/reset_integration/dependency-install.log:42: trailing whitespace.
++Preparing to unpack .../3-libhwasan0_14.2.0-4ubuntu2~24.04.1_amd64.deb ...
+docs/security/evidence/reset_integration/dependency-install.log:43: trailing whitespace.
++Unpacking libhwasan0:amd64 (14.2.0-4ubuntu2~24.04.1) over (14.2.0-4ubuntu2~24.04) ...
+docs/security/evidence/reset_integration/dependency-install.log:44: trailing whitespace.
++Preparing to unpack .../4-libgomp1_14.2.0-4ubuntu2~24.04.1_amd64.deb ...
+docs/security/evidence/reset_integration/dependency-install.log:45: trailing whitespace.
++Unpacking libgomp1:amd64 (14.2.0-4ubuntu2~24.04.1) over (14.2.0-4ubuntu2~24.04) ...
+docs/security/evidence/reset_integration/dependency-install.log:46: trailing whitespace.
++Preparing to unpack .../5-libcc1-0_14.2.0-4ubuntu2~24.04.1_amd64.deb ...
+docs/security/evidence/reset_integration/dependency-install.log:47: trailing whitespace.
++Unpacking libcc1-0:amd64 (14.2.0-4ubuntu2~24.04.1) over (14.2.0-4ubuntu2~24.04) ...
+docs/security/evidence/reset_integration/dependency-install.log:48: trailing whitespace.
++Preparing to unpack .../6-libatomic1_14.2.0-4ubuntu2~24.04.1_amd64.deb ...
+docs/security/evidence/reset_integration/dependency-install.log:49: trailing whitespace.
++Unpacking libatomic1:amd64 (14.2.0-4ubuntu2~24.04.1) over (14.2.0-4ubuntu2~24.04) ...
+docs/security/evidence/reset_integration/dependency-install.log:50: trailing whitespace.
++Preparing to unpack .../7-libgcc-s1_14.2.0-4ubuntu2~24.04.1_amd64.deb ...
+docs/security/evidence/reset_integration/dependency-install.log:51: trailing whitespace.
++Unpacking libgcc-s1:amd64 (14.2.0-4ubuntu2~24.04.1) over (14.2.0-4ubuntu2~24.04) ...
+docs/security/evidence/reset_integration/dependency-install.log:52: trailing whitespace.
++Setting up libgcc-s1:amd64 (14.2.0-4ubuntu2~24.04.1) ...
+docs/security/evidence/reset_integration/dependency-install.log:53: trailing whitespace.
++Selecting previously unselected package libc6-i386.
+docs/security/evidence/reset_integration/dependency-install.log:54: trailing whitespace.
++(Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 50485 files and directories currently installed.)
+docs/security/evidence/reset_integration/dependency-install.log:55: trailing whitespace.
++Preparing to unpack .../00-libc6-i386_2.39-0ubuntu8.9_amd64.deb ...
+docs/security/evidence/reset_integration/dependency-install.log:56: trailing whitespace.
++Unpacking libc6-i386 (2.39-0ubuntu8.9) ...
+docs/security/evidence/reset_integration/dependency-install.log:57: trailing whitespace.
++Selecting previously unselected package lib32gcc-s1.
+docs/security/evidence/reset_integration/dependency-install.log:58: trailing whitespace.
++Preparing to unpack .../01-lib32gcc-s1_14.2.0-4ubuntu2~24.04.1_amd64.deb ...
+docs/security/evidence/reset_integration/dependency-install.log:59: trailing whitespace.
++Unpacking lib32gcc-s1 (14.2.0-4ubuntu2~24.04.1) ...
+docs/security/evidence/reset_integration/dependency-install.log:60: trailing whitespace.
++Selecting previously unselected package libgc1:amd64.
+docs/security/evidence/reset_integration/dependency-install.log:61: trailing whitespace.
++Preparing to unpack .../02-libgc1_1%3a8.2.6-1build1_amd64.deb ...
+docs/security/evidence/reset_integration/dependency-install.log:62: trailing whitespace.
++Unpacking libgc1:amd64 (1:8.2.6-1build1) ...
+docs/security/evidence/reset_integration/dependency-install.log:63: trailing whitespace.
++Selecting previously unselected package libobjc4:amd64.
+docs/security/evidence/reset_integration/dependency-install.log:64: trailing whitespace.
++Preparing to unpack .../03-libobjc4_14.2.0-4ubuntu2~24.04.1_amd64.deb ...
+docs/security/evidence/reset_integration/dependency-install.log:65: trailing whitespace.
++Unpacking libobjc4:amd64 (14.2.0-4ubuntu2~24.04.1) ...
+docs/security/evidence/reset_integration/dependency-install.log:66: trailing whitespace.
++Selecting previously unselected package libobjc-13-dev:amd64.
+docs/security/evidence/reset_integration/dependency-install.log:67: trailing whitespace.
++Preparing to unpack .../04-libobjc-13-dev_13.3.0-6ubuntu2~24.04.1_amd64.deb ...
+docs/security/evidence/reset_integration/dependency-install.log:68: trailing whitespace.
++Unpacking libobjc-13-dev:amd64 (13.3.0-6ubuntu2~24.04.1) ...
+docs/security/evidence/reset_integration/dependency-install.log:69: trailing whitespace.
++Selecting previously unselected package libclang1-18.
+docs/security/evidence/reset_integration/dependency-install.log:70: trailing whitespace.
++Preparing to unpack .../05-libclang1-18_1%3a18.1.3-1ubuntu1_amd64.deb ...
+docs/security/evidence/reset_integration/dependency-install.log:71: trailing whitespace.
++Unpacking libclang1-18 (1:18.1.3-1ubuntu1) ...
+docs/security/evidence/reset_integration/dependency-install.log:72: trailing whitespace.
++Selecting previously unselected package libclang-common-18-dev:amd64.
+docs/security/evidence/reset_integration/dependency-install.log:73: trailing whitespace.
++Preparing to unpack .../06-libclang-common-18-dev_1%3a18.1.3-1ubuntu1_amd64.deb ...
+docs/security/evidence/reset_integration/dependency-install.log:74: trailing whitespace.
++Unpacking libclang-common-18-dev:amd64 (1:18.1.3-1ubuntu1) ...
+docs/security/evidence/reset_integration/dependency-install.log:75: trailing whitespace.
++Selecting previously unselected package libclang-18-dev.
+docs/security/evidence/reset_integration/dependency-install.log:76: trailing whitespace.
++Preparing to unpack .../07-libclang-18-dev_1%3a18.1.3-1ubuntu1_amd64.deb ...
+docs/security/evidence/reset_integration/dependency-install.log:77: trailing whitespace.
++Unpacking libclang-18-dev (1:18.1.3-1ubuntu1) ...
+docs/security/evidence/reset_integration/dependency-install.log:78: trailing whitespace.
++Selecting previously unselected package libclang-dev.
+docs/security/evidence/reset_integration/dependency-install.log:79: trailing whitespace.
++Preparing to unpack .../08-libclang-dev_1%3a18.0-59~exp2_amd64.deb ...
+docs/security/evidence/reset_integration/dependency-install.log:80: trailing whitespace.
++Unpacking libclang-dev (1:18.0-59~exp2) ...
+docs/security/evidence/reset_integration/dependency-install.log:81: trailing whitespace.
++Selecting previously unselected package lib32stdc++6.
+docs/security/evidence/reset_integration/dependency-install.log:82: trailing whitespace.
++Preparing to unpack .../09-lib32stdc++6_14.2.0-4ubuntu2~24.04.1_amd64.deb ...
+docs/security/evidence/reset_integration/dependency-install.log:83: trailing whitespace.
++Unpacking lib32stdc++6 (14.2.0-4ubuntu2~24.04.1) ...
+docs/security/evidence/reset_integration/dependency-install.log:84: trailing whitespace.
++Selecting previously unselected package libclang-rt-18-dev:amd64.
+docs/security/evidence/reset_integration/dependency-install.log:85: trailing whitespace.
++Preparing to unpack .../10-libclang-rt-18-dev_1%3a18.1.3-1ubuntu1_amd64.deb ...
+docs/security/evidence/reset_integration/dependency-install.log:86: trailing whitespace.
++Unpacking libclang-rt-18-dev:amd64 (1:18.1.3-1ubuntu1) ...
+docs/security/evidence/reset_integration/dependency-install.log:87: trailing whitespace.
++Setting up libclang1-18 (1:18.1.3-1ubuntu1) ...
+docs/security/evidence/reset_integration/dependency-install.log:88: trailing whitespace.
++Setting up libgomp1:amd64 (14.2.0-4ubuntu2~24.04.1) ...
+docs/security/evidence/reset_integration/dependency-install.log:89: trailing whitespace.
++Setting up gcc-13-base:amd64 (13.3.0-6ubuntu2~24.04.1) ...
+docs/security/evidence/reset_integration/dependency-install.log:90: trailing whitespace.
++Setting up libquadmath0:amd64 (14.2.0-4ubuntu2~24.04.1) ...
+docs/security/evidence/reset_integration/dependency-install.log:91: trailing whitespace.
++Setting up libatomic1:amd64 (14.2.0-4ubuntu2~24.04.1) ...
+docs/security/evidence/reset_integration/dependency-install.log:92: trailing whitespace.
++Setting up libclang-common-18-dev:amd64 (1:18.1.3-1ubuntu1) ...
+docs/security/evidence/reset_integration/dependency-install.log:93: trailing whitespace.
++Setting up libgc1:amd64 (1:8.2.6-1build1) ...
+docs/security/evidence/reset_integration/dependency-install.log:94: trailing whitespace.
++Setting up libubsan1:amd64 (14.2.0-4ubuntu2~24.04.1) ...
+docs/security/evidence/reset_integration/dependency-install.log:95: trailing whitespace.
++Setting up libhwasan0:amd64 (14.2.0-4ubuntu2~24.04.1) ...
+docs/security/evidence/reset_integration/dependency-install.log:96: trailing whitespace.
++Setting up libasan8:amd64 (14.2.0-4ubuntu2~24.04.1) ...
+docs/security/evidence/reset_integration/dependency-install.log:97: trailing whitespace.
++Setting up libc6-i386 (2.39-0ubuntu8.9) ...
+docs/security/evidence/reset_integration/dependency-install.log:98: trailing whitespace.
++Setting up libtsan2:amd64 (14.2.0-4ubuntu2~24.04.1) ...
+docs/security/evidence/reset_integration/dependency-install.log:99: trailing whitespace.
++Setting up libcc1-0:amd64 (14.2.0-4ubuntu2~24.04.1) ...
+docs/security/evidence/reset_integration/dependency-install.log:100: trailing whitespace.
++Setting up liblsan0:amd64 (14.2.0-4ubuntu2~24.04.1) ...
+docs/security/evidence/reset_integration/dependency-install.log:101: trailing whitespace.
++Setting up libitm1:amd64 (14.2.0-4ubuntu2~24.04.1) ...
+docs/security/evidence/reset_integration/dependency-install.log:102: trailing whitespace.
++Setting up cpp-13-x86-64-linux-gnu (13.3.0-6ubuntu2~24.04.1) ...
+docs/security/evidence/reset_integration/dependency-install.log:103: trailing whitespace.
++Setting up libobjc4:amd64 (14.2.0-4ubuntu2~24.04.1) ...
+docs/security/evidence/reset_integration/dependency-install.log:104: trailing whitespace.
++Setting up lib32gcc-s1 (14.2.0-4ubuntu2~24.04.1) ...
+docs/security/evidence/reset_integration/dependency-install.log:105: trailing whitespace.
++Setting up lib32stdc++6 (14.2.0-4ubuntu2~24.04.1) ...
+docs/security/evidence/reset_integration/dependency-install.log:106: trailing whitespace.
++Setting up libgcc-13-dev:amd64 (13.3.0-6ubuntu2~24.04.1) ...
+docs/security/evidence/reset_integration/dependency-install.log:107: trailing whitespace.
++Setting up libclang-rt-18-dev:amd64 (1:18.1.3-1ubuntu1) ...
+docs/security/evidence/reset_integration/dependency-install.log:108: trailing whitespace.
++Setting up libobjc-13-dev:amd64 (13.3.0-6ubuntu2~24.04.1) ...
+docs/security/evidence/reset_integration/dependency-install.log:109: trailing whitespace.
++Setting up libstdc++-13-dev:amd64 (13.3.0-6ubuntu2~24.04.1) ...
+docs/security/evidence/reset_integration/dependency-install.log:110: trailing whitespace.
++Setting up cpp-13 (13.3.0-6ubuntu2~24.04.1) ...
+docs/security/evidence/reset_integration/dependency-install.log:111: trailing whitespace.
++Setting up gcc-13-x86-64-linux-gnu (13.3.0-6ubuntu2~24.04.1) ...
+docs/security/evidence/reset_integration/dependency-install.log:112: trailing whitespace.
++Setting up libclang-18-dev (1:18.1.3-1ubuntu1) ...
+docs/security/evidence/reset_integration/dependency-install.log:113: trailing whitespace.
++Setting up gcc-13 (13.3.0-6ubuntu2~24.04.1) ...
+docs/security/evidence/reset_integration/dependency-install.log:114: trailing whitespace.
++Setting up libclang-dev (1:18.0-59~exp2) ...
+docs/security/evidence/reset_integration/dependency-install.log:115: trailing whitespace.
++Setting up g++-13-x86-64-linux-gnu (13.3.0-6ubuntu2~24.04.1) ...
+docs/security/evidence/reset_integration/dependency-install.log:116: trailing whitespace.
++Setting up g++-13 (13.3.0-6ubuntu2~24.04.1) ...
+docs/security/evidence/reset_integration/dependency-install.log:117: trailing whitespace.
++Processing triggers for man-db (2.12.0-4build2) ...
+docs/security/evidence/reset_integration/dependency-install.log:118: trailing whitespace.
++Processing triggers for libc-bin (2.39-0ubuntu8.9) ...
+docs/security/evidence/reset_integration/existing-lock-regression.log:383: new blank line at EOF.
+docs/security/evidence/reset_integration/focused-attempt-2.log:1150: new blank line at EOF.
+docs/security/evidence/reset_integration/production-format-whole-files.log:12: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:23: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:27: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:37: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:39: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:78: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:130: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:154: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:167: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:178: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:198: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:260: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:326: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:456: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:517: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:540: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:546: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:594: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:684: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:786: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:857: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:1163: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:1297: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:1361: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:1366: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:1392: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:1425: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:1568: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:1579: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:1684: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:1688: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:1695: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:1710: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:1725: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:1737: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:1759: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:1810: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:1894: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:1906: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:1927: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:2034: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:2077: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:2101: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:2152: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:2179: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:2184: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:2192: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:2201: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:2206: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:2239: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/production-format-whole-files.log:2243: trailing whitespace.
++ 
+docs/security/evidence/reset_integration/reset-unit.log:410: new blank line at EOF.

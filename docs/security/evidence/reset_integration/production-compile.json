@@ -1,0 +1,19 @@
+{
+  "command": [
+    "cargo",
+    "check",
+    "--locked",
+    "-p",
+    "qbind-node",
+    "--lib",
+    "--bin",
+    "qbind-node"
+  ],
+  "shell_display": "cargo check --locked -p qbind-node --lib --bin qbind-node",
+  "cwd": "/workspaces/QBIND/olivexo28/QBIND-reset-integration",
+  "started_utc": "2026-11-07T06:34:06.022330+00:00",
+  "finished_utc": "2026-11-07T06:34:47.815870+00:00",
+  "exit_code": 0,
+  "log": "production-compile.log",
+  "environment_overrides": {}
+}

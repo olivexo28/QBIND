@@ -1,0 +1,20 @@
+{
+  "command": [
+    "git",
+    "-c",
+    "core.whitespace=cr-at-eol,-blank-at-eof",
+    "diff",
+    "--cached",
+    "--check",
+    "--",
+    ".",
+    ":(exclude)docs/security/evidence/reset_integration/*.log"
+  ],
+  "shell_display": "git -c core.whitespace=cr-at-eol,-blank-at-eof diff --cached --check -- . ':(exclude)docs/security/evidence/reset_integration/*.log'",
+  "cwd": "/workspaces/QBIND/olivexo28/QBIND-reset-integration",
+  "started_utc": "2026-11-07T06:35:46.889531+00:00",
+  "finished_utc": "2026-11-07T06:35:46.908465+00:00",
+  "exit_code": 0,
+  "log": "whitespace-source-prose.log",
+  "environment_overrides": {}
+}

@@ -1,0 +1,21 @@
+{
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "-p",
+    "qbind-node",
+    "--lib",
+    "pqc_authority_state_reset::",
+    "--",
+    "--nocapture",
+    "--test-threads=1"
+  ],
+  "shell_display": "cargo test --locked -p qbind-node --lib pqc_authority_state_reset:: -- --nocapture --test-threads=1",
+  "cwd": "/workspaces/QBIND/olivexo28/QBIND-reset-integration",
+  "started_utc": "2026-11-07T06:27:04.388542+00:00",
+  "finished_utc": "2026-11-07T06:34:05.965904+00:00",
+  "exit_code": 0,
+  "log": "reset-unit.log",
+  "environment_overrides": {}
+}

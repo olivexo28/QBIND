@@ -1,0 +1,14 @@
+{
+  "command": [
+    "bash",
+    "-c",
+    "cd docs/security/evidence/a33_f1 && sha256sum --check SHA256SUMS"
+  ],
+  "shell_display": "bash -c 'cd docs/security/evidence/a33_f1 && sha256sum --check SHA256SUMS'",
+  "cwd": "/workspaces/QBIND/olivexo28/QBIND-reset-integration",
+  "started_utc": "2026-11-07T06:26:38.012733+00:00",
+  "finished_utc": "2026-11-07T06:26:38.026087+00:00",
+  "exit_code": 0,
+  "log": "preserved-main-checksums.log",
+  "environment_overrides": {}
+}

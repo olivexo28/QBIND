@@ -1,0 +1,21 @@
+{
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "-p",
+    "qbind-node",
+    "--lib",
+    "restore_completion::tests::second_lock_acquisition_is_contended",
+    "--",
+    "--exact",
+    "--nocapture"
+  ],
+  "shell_display": "cargo test --locked -p qbind-node --lib restore_completion::tests::second_lock_acquisition_is_contended -- --exact --nocapture",
+  "cwd": "/workspaces/QBIND/olivexo28/QBIND-reset-integration",
+  "started_utc": "2026-11-07T06:34:59.377051+00:00",
+  "finished_utc": "2026-11-07T06:34:59.682397+00:00",
+  "exit_code": 0,
+  "log": "existing-lock-regression.log",
+  "environment_overrides": {}
+}

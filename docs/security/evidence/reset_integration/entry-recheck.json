@@ -1,0 +1,14 @@
+{
+  "command": [
+    "bash",
+    "-c",
+    "git remote -v && git ls-remote origin refs/heads/main refs/heads/copilot/a33-f1-bounded-eviction && git rev-parse HEAD HEAD^{tree} refs/heads/main refs/heads/main^{tree} && git -C ../QBIND status --porcelain=v1 --untracked-files=all && git -C ../QBIND rev-parse HEAD && git status --short && rustc --version && cargo --version && uname -srmo"
+  ],
+  "shell_display": "bash -c 'git remote -v && git ls-remote origin refs/heads/main refs/heads/copilot/a33-f1-bounded-eviction && git rev-parse HEAD HEAD^{tree} refs/heads/main refs/heads/main^{tree} && git -C ../QBIND status --porcelain=v1 --untracked-files=all && git -C ../QBIND rev-parse HEAD && git status --short && rustc --version && cargo --version && uname -srmo'",
+  "cwd": "/workspaces/QBIND/olivexo28/QBIND-reset-integration",
+  "started_utc": "2026-11-07T06:25:41.226491+00:00",
+  "finished_utc": "2026-11-07T06:25:42.103242+00:00",
+  "exit_code": 0,
+  "log": "entry-recheck.log",
+  "environment_overrides": {}
+}

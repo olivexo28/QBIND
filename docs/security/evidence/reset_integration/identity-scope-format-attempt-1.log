@@ -1,0 +1,33 @@
+selected historical complete-file checksums PASS: 53
+reviewed/tested blob IDENTICAL: 9e3652f03b18bdb0baf899d64bc735b7c459c798 e234fcfb2d54628dec76c51162ed7b45a7baab7d960d6585e40c274eb555aca3 crates/qbind-node/src/main.rs
+reviewed/tested blob IDENTICAL: 210a071f8b1d2c4f6393f60115e109c428a55ef9 11efa2d36617a0fb740a29a386e7e1eabfd8b25d31ecb90a32146fac3cd553c2 crates/qbind-node/src/pqc_authority_state_reset.rs
+reviewed/tested blob IDENTICAL: 1f8cd3917a48f8f5190a54ca2640748eed1ab225 265f87fa5f4dcef855f65ea4554860805c298870c16c007ee9aed9a46556b216 crates/qbind-node/src/pqc_authority_state_reset_error_tests.rs
+reviewed/tested blob IDENTICAL: 11b84941304f954362d3d4956474d8741423c149 305a16ec7ad177180c9a7964a99630df28a6d538cd2f3fe7df3b5654ad2f2fc0 crates/qbind-node/tests/a33_f1_authority_reset_audit_collision_tests.rs
+reviewed/tested blob IDENTICAL: 957a709f5d503efa83edd33f7cb08c960b19ce1c 87d985efe7603ac667b0c240fa5fd338d55458ec43e7cdfe6608879362110e97 crates/qbind-node/tests/a33_f1_authority_reset_destination_lock_tests.rs
+reviewed/tested blob IDENTICAL: b894e11e69dfaf095206e66561217c434bce8d7b 3325bf459bb5a43330625a775c2e0c7cca700df24137863e43ea30f54f09c659 crates/qbind-node/tests/a33_f1_authority_reset_verified_success_tests.rs
+reviewed/tested blob IDENTICAL: 1501e58ddd0fcb54027cce7d7ec63585c26a5e65 58c6de915b8d68434ebd7c4b7d2773028e968d7f2503e97da97748ec2cf1627d crates/qbind-node/tests/a33_f1_reset_marker_temp_identity_tests.rs
+reviewed/tested blob IDENTICAL: c4d51950d8c4b87b28d133c2e63c950d33820eb6 ccc61c7d8869732211dcb5cad3ed5a3b0a9531d724c1db4091c78260a9357e97 crates/qbind-node/tests/support/authority_reset_cli.rs
+candidate path: crates/qbind-node/src/main.rs
+candidate path: crates/qbind-node/src/pqc_authority_state_reset.rs
+candidate path: crates/qbind-node/src/pqc_authority_state_reset_error_tests.rs
+candidate path: crates/qbind-node/tests/a33_f1_authority_reset_audit_collision_tests.rs
+candidate path: crates/qbind-node/tests/a33_f1_authority_reset_destination_lock_tests.rs
+candidate path: crates/qbind-node/tests/a33_f1_authority_reset_verified_success_tests.rs
+candidate path: crates/qbind-node/tests/a33_f1_reset_marker_temp_identity_tests.rs
+candidate path: crates/qbind-node/tests/support/authority_reset_cli.rs
+candidate path: docs/security/evidence/reset_integration/check_candidate.py
+candidate path: docs/security/evidence/reset_integration/dependency-install.json
+candidate path: docs/security/evidence/reset_integration/dependency-install.log
+candidate path: docs/security/evidence/reset_integration/entry-recheck.json
+candidate path: docs/security/evidence/reset_integration/entry-recheck.log
+candidate path: docs/security/evidence/reset_integration/focused-attempt-1.json
+candidate path: docs/security/evidence/reset_integration/focused-attempt-1.log
+candidate path: docs/security/evidence/reset_integration/focused-attempt-2.log
+candidate path: docs/security/evidence/reset_integration/historical-index.tsv
+candidate path: docs/security/evidence/reset_integration/identity-scope-format-attempt-1.log
+candidate path: docs/security/evidence/reset_integration/run_validation.py
+original 19 entries PASS; all 20 historical evidence files and plan byte-identical
+complete selected test/helper formatting PASS
+changed production-line formatting PASS (legacy differences excluded): crates/qbind-node/src/main.rs
+changed production-line formatting PASS (legacy differences excluded): crates/qbind-node/src/pqc_authority_state_reset.rs
+scope PASS; every other tracked path remains at protected main

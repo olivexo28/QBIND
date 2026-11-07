@@ -1,0 +1,17 @@
+{
+  "command": [
+    "git",
+    "-c",
+    "core.whitespace=cr-at-eol,-blank-at-eof",
+    "diff",
+    "--cached",
+    "--check"
+  ],
+  "shell_display": "git -c core.whitespace=cr-at-eol,-blank-at-eof diff --cached --check",
+  "cwd": "/workspaces/QBIND/olivexo28/QBIND-reset-integration",
+  "started_utc": "2026-11-07T06:35:46.894732+00:00",
+  "finished_utc": "2026-11-07T06:35:46.909118+00:00",
+  "exit_code": 2,
+  "log": "whitespace-profile.log",
+  "environment_overrides": {}
+}

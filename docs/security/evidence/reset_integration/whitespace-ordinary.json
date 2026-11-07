@@ -1,0 +1,15 @@
+{
+  "command": [
+    "git",
+    "diff",
+    "--cached",
+    "--check"
+  ],
+  "shell_display": "git diff --cached --check",
+  "cwd": "/workspaces/QBIND/olivexo28/QBIND-reset-integration",
+  "started_utc": "2026-11-07T06:35:40.469093+00:00",
+  "finished_utc": "2026-11-07T06:35:40.484070+00:00",
+  "exit_code": 2,
+  "log": "whitespace-ordinary.log",
+  "environment_overrides": {}
+}

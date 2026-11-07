@@ -1,0 +1,32 @@
+{
+  "command": [
+    "env",
+    "-u",
+    "QBIND_I1_BASELINE",
+    "-u",
+    "QBIND_A33_LOCK_HOLDER",
+    "cargo",
+    "test",
+    "--locked",
+    "-p",
+    "qbind-node",
+    "--test",
+    "a33_f1_reset_marker_temp_identity_tests",
+    "--test",
+    "a33_f1_authority_reset_audit_collision_tests",
+    "--test",
+    "a33_f1_authority_reset_verified_success_tests",
+    "--test",
+    "a33_f1_authority_reset_destination_lock_tests",
+    "--",
+    "--nocapture",
+    "--test-threads=1"
+  ],
+  "shell_display": "env -u QBIND_I1_BASELINE -u QBIND_A33_LOCK_HOLDER cargo test --locked -p qbind-node --test a33_f1_reset_marker_temp_identity_tests --test a33_f1_authority_reset_audit_collision_tests --test a33_f1_authority_reset_verified_success_tests --test a33_f1_authority_reset_destination_lock_tests -- --nocapture --test-threads=1",
+  "cwd": "/workspaces/QBIND/olivexo28/QBIND-reset-integration",
+  "started_utc": "2026-11-07T06:20:33.789152+00:00",
+  "finished_utc": "2026-11-07T06:21:38.762117+00:00",
+  "exit_code": 101,
+  "log": "focused-attempt-1.log",
+  "environment_overrides": {}
+}

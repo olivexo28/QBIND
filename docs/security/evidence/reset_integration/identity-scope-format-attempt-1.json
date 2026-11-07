@@ -1,0 +1,14 @@
+{
+  "command": [
+    "python3",
+    "docs/security/evidence/reset_integration/check_candidate.py",
+    "--write-index"
+  ],
+  "shell_display": "python3 docs/security/evidence/reset_integration/check_candidate.py --write-index",
+  "cwd": "/workspaces/QBIND/olivexo28/QBIND-reset-integration",
+  "started_utc": "2026-11-07T06:26:23.616221+00:00",
+  "finished_utc": "2026-11-07T06:26:25.203099+00:00",
+  "exit_code": 0,
+  "log": "identity-scope-format-attempt-1.log",
+  "environment_overrides": {}
+}
