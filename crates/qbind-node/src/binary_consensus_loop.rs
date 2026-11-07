@@ -7407,6 +7407,16 @@ pub(crate) fn handle_inbound_consensus_msg(
             }
             stats.restore_catchup_responses_received =
                 stats.restore_catchup_responses_received.saturating_add(1);
+            if !resp.blocks.is_empty() {
+                stats.restore_catchup_responses_rejected = stats
+                    .restore_catchup_responses_rejected
+                    .saturating_add(1);
+                eprintln!(
+                    "[restore-catchup] rejected non-empty response: wire format lacks \
+                     verifiable constituent QC endorsements"
+                );
+                return;
+            }
             handle_restore_catchup_response(engine, resp, stats, local_validator_id, restore_mode);
         }
     }
@@ -8434,6 +8444,9 @@ fn handle_restore_catchup_request(
     stats.restore_catchup_responses_sent = stats.restore_catchup_responses_sent.saturating_add(1);
 }
 
+// Non-empty responses are refused by the authenticated inbound dispatch.
+// Keep this helper's existing behavior for empty responses and for direct
+// characterization tests of the non-transactional engine import operation.
 fn handle_restore_catchup_response(
     engine: &mut BasicHotStuffEngine<[u8; 32]>,
     resp: RestoreCatchupResponse,
@@ -8528,13 +8541,11 @@ fn handle_restore_catchup_response(
             stats.restore_catchup_responses_rejected =
                 stats.restore_catchup_responses_rejected.saturating_add(1);
             eprintln!("[restore-catchup] rejected response: {:?}", e);
-            // Fail-closed: a rejected response did NOT mutate engine
-            // state, so we treat it as if the response had not
-            // happened. Specifically, we do NOT update the
-            // peer-anchor tracker from a malformed payload (the
-            // `responder_committed_height` field came from an
-            // untrusted/inconsistent message and must not influence the
-            // transition decision). Mode stays active.
+            // A rejected response does not update the peer-anchor tracker:
+            // its `responder_committed_height` must not influence the
+            // transition decision. The engine is not transactional, however;
+            // earlier valid blocks in this response may already have mutated
+            // it before a later block failed. Mode remains active.
         }
     }
 }
@@ -9961,6 +9972,633 @@ mod tests {
     // are deliberately small and high-signal: each one asserts a single
     // bounded property of the new transition state machine.
     // ========================================================================
+
+    fn a17_node_id(id: u64) -> NodeId {
+        let mut bytes = [0u8; 32];
+        bytes[0] = 0xA0u8.wrapping_add(id as u8);
+        bytes[31] = 0x50u8.wrapping_add(id as u8);
+        NodeId::new(bytes)
+    }
+
+    fn a17_binding_gate(n: u64) -> PeerConsensusBindingGate {
+        PeerConsensusBindingGate::new(
+            crate::peer_consensus_binding::PeerConsensusBindingMap::build(
+                (0..n).map(|id| (a17_node_id(id), ValidatorId::new(id))),
+            )
+            .expect("one-to-one test binding"),
+        )
+    }
+
+    fn a17_engine(baseline: Option<(u64, [u8; 32])>) -> BasicHotStuffEngine<[u8; 32]> {
+        let mut engine =
+            BasicHotStuffEngine::new(ValidatorId::new(0), build_uniform_validator_set(4));
+        if let Some((height, block_id)) = baseline {
+            engine.initialize_from_snapshot_baseline(block_id, height);
+        }
+        engine
+    }
+
+    fn a17_suffix(
+        engine: &BasicHotStuffEngine<[u8; 32]>,
+        from_height: u64,
+        from_block_id: [u8; 32],
+        count: usize,
+    ) -> Vec<RestoreCatchupBlock> {
+        let mut parent = from_block_id;
+        (1..=count)
+            .map(|offset| {
+                let height = from_height + offset as u64;
+                let proposer = engine.leader_for_view(height);
+                let mut block_id = [0u8; 32];
+                block_id[..8].copy_from_slice(&proposer.0.to_le_bytes());
+                block_id[8..16].copy_from_slice(&height.to_le_bytes());
+                block_id[16..].copy_from_slice(&parent[..16]);
+                let block = RestoreCatchupBlock {
+                    height,
+                    view: height,
+                    parent_block_id: parent,
+                    block_id,
+                    proposer_index: proposer.0 as u16,
+                    qc_signer_indices: vec![0, 1, 2],
+                };
+                parent = block_id;
+                block
+            })
+            .collect()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn a17_dispatch_response(
+        engine: &mut BasicHotStuffEngine<[u8; 32]>,
+        stats: &mut BinaryConsensusLoopInboundStats,
+        mode: &mut RestoreCatchupModeState,
+        resp: RestoreCatchupResponse,
+        origin: Option<&AuthenticatedConsensusOrigin>,
+        gate: &PeerConsensusBindingGate,
+        timeout_ctx: Option<&TimeoutVerificationContext>,
+        pv_authority: Option<&ProposalVoteAuthority>,
+        policy: ConsensusVerificationPolicy,
+    ) -> Arc<NodeMetrics> {
+        let metrics = Arc::new(NodeMetrics::new());
+        handle_inbound_consensus_msg(
+            engine,
+            ConsensusNetMsg::RestoreCatchupResponse(resp),
+            stats,
+            None,
+            &metrics,
+            ValidatorId::new(0),
+            mode,
+            timeout_ctx,
+            pv_authority,
+            None,
+            &mut BinaryReconfigDetector::default(),
+            origin,
+            Some(gate),
+            None,
+            policy,
+        );
+        metrics
+    }
+
+    fn a17_response(
+        responder: u16,
+        request_from_height: u64,
+        request_from_block_id: [u8; 32],
+        responder_committed_height: Option<u64>,
+        blocks: Vec<RestoreCatchupBlock>,
+    ) -> RestoreCatchupResponse {
+        RestoreCatchupResponse {
+            responder_validator_index: responder,
+            request_from_height,
+            request_from_block_id,
+            responder_committed_height,
+            blocks,
+        }
+    }
+
+    fn a17_origin(id: u64) -> AuthenticatedConsensusOrigin {
+        AuthenticatedConsensusOrigin::new(a17_node_id(id), ValidatorId::new(id))
+    }
+
+    fn a17_mode(baseline: Option<(u64, [u8; 32])>) -> RestoreCatchupModeState {
+        RestoreCatchupModeState::from_config(baseline.map(
+            |(snapshot_height, snapshot_block_id)| RestoreBaseline {
+                snapshot_height,
+                snapshot_block_id,
+            },
+        ))
+    }
+
+    fn a17_engine_observation(
+        engine: &BasicHotStuffEngine<[u8; 32]>,
+    ) -> (u64, Option<u64>, Option<[u8; 32]>, Vec<[u8; 32]>) {
+        (
+            engine.current_view(),
+            engine.committed_height(),
+            engine.committed_block().copied(),
+            engine.state().blocks_iter().map(|block| block.id).collect(),
+        )
+    }
+
+    fn a17_coherent_authorities() -> (TimeoutVerificationContext, ProposalVoteAuthority) {
+        let timeout = run030::make_test_context(4, None);
+        let signing_domain =
+            ProposalVoteSigningDomainV2::try_new(timeout.chain_id, 0, [0x31; 32], [0x42; 32])
+                .expect("valid test signing domain");
+        let pv = ProposalVoteAuthority {
+            validators: Arc::clone(&timeout.validators),
+            key_provider: Arc::clone(&timeout.key_provider),
+            backend_registry: Arc::clone(&timeout.backend_registry),
+            chain_id: timeout.chain_id,
+            signer: None,
+            signing_domain,
+        };
+        (timeout, pv)
+    }
+
+    #[test]
+    fn a17_nonempty_dispatch_refuses_before_import_and_has_sensitive_positive_control() {
+        let anchor = [0x61; 32];
+        let mut engine = a17_engine(Some((5, anchor)));
+        let blocks = a17_suffix(&engine, 5, anchor, 3);
+        let response = a17_response(1, 5, anchor, Some(9), blocks);
+        let gate = a17_binding_gate(4);
+        let origin = a17_origin(1);
+        let mut mode = a17_mode(Some((5, anchor)));
+        let mut stats = BinaryConsensusLoopInboundStats::default();
+        let before = a17_engine_observation(&engine);
+
+        let metrics = a17_dispatch_response(
+            &mut engine,
+            &mut stats,
+            &mut mode,
+            response.clone(),
+            Some(&origin),
+            &gate,
+            None,
+            None,
+            ConsensusVerificationPolicy::Required,
+        );
+
+        assert_eq!(a17_engine_observation(&engine), before);
+        assert!(mode.is_active());
+        assert_eq!(mode.peer_max_observed_committed_height, None);
+        assert_eq!(stats.inbound_msgs_received, 1);
+        assert_eq!(stats.inbound_sender_binding_rejected_total, 0);
+        assert_eq!(stats.restore_catchup_responses_received, 1);
+        assert_eq!(stats.restore_catchup_responses_rejected, 1);
+        assert_eq!(stats.restore_catchup_blocks_applied, 0);
+        assert_eq!(stats.restore_catchup_requests_sent, 0);
+        assert!(metrics
+            .format_metrics()
+            .contains("consensus_net_inbound_total{kind=\"other\"} 1"));
+
+        // Sensitivity control: the same structurally valid suffix reaches the
+        // direct engine API and changes committed progress.
+        let mut direct_engine = a17_engine(Some((5, anchor)));
+        let direct_blocks: Vec<_> = response
+            .blocks
+            .iter()
+            .map(|block| EngineRestoreCatchupBlock {
+                height: block.height,
+                view: block.view,
+                parent_block_id: block.parent_block_id,
+                block_id: block.block_id,
+                proposer: ValidatorId::new(block.proposer_index as u64),
+                qc_signers: block
+                    .qc_signer_indices
+                    .iter()
+                    .copied()
+                    .map(|id| ValidatorId::new(id as u64))
+                    .collect(),
+            })
+            .collect();
+        assert_eq!(
+            direct_engine
+                .apply_restore_catchup_blocks(&direct_blocks)
+                .expect("the pre-guard witness is structurally valid"),
+            3
+        );
+        assert!(direct_engine.committed_height().unwrap() > 5);
+        assert!(direct_engine.current_view() > 6);
+
+        // Bypass only the production ingress guard in a test-only sensitivity
+        // control: the same handler assertions would detect an omitted guard.
+        let mut unguarded_engine = a17_engine(Some((5, anchor)));
+        let mut unguarded_mode = a17_mode(Some((5, anchor)));
+        let mut unguarded_stats = BinaryConsensusLoopInboundStats::default();
+        handle_restore_catchup_response(
+            &mut unguarded_engine,
+            response,
+            &mut unguarded_stats,
+            ValidatorId::new(0),
+            &mut unguarded_mode,
+        );
+        assert!(unguarded_engine.committed_height().unwrap() > 5);
+        assert_eq!(unguarded_stats.restore_catchup_blocks_applied, 3);
+        assert_eq!(unguarded_mode.peer_max_observed_committed_height, Some(9));
+    }
+
+    #[test]
+    fn a17_nonempty_dispatch_refuses_valid_prefix_before_invalid_suffix() {
+        let anchor = [0x62; 32];
+        let mut direct_engine = a17_engine(Some((5, anchor)));
+        let mut prefix_then_invalid = a17_suffix(&direct_engine, 5, anchor, 1);
+        let mut invalid = a17_suffix(&direct_engine, 6, prefix_then_invalid[0].block_id, 1)
+            .pop()
+            .unwrap();
+        invalid.block_id[0] ^= 0x80;
+        prefix_then_invalid.push(invalid);
+        let direct_before = a17_engine_observation(&direct_engine);
+        let direct_blocks: Vec<_> = prefix_then_invalid
+            .iter()
+            .map(|block| EngineRestoreCatchupBlock {
+                height: block.height,
+                view: block.view,
+                parent_block_id: block.parent_block_id,
+                block_id: block.block_id,
+                proposer: ValidatorId::new(block.proposer_index as u64),
+                qc_signers: block
+                    .qc_signer_indices
+                    .iter()
+                    .copied()
+                    .map(|id| ValidatorId::new(id as u64))
+                    .collect(),
+            })
+            .collect();
+        assert!(direct_engine
+            .apply_restore_catchup_blocks(&direct_blocks)
+            .is_err());
+        assert_ne!(
+            a17_engine_observation(&direct_engine),
+            direct_before,
+            "direct engine application retains the valid prefix before a later error"
+        );
+
+        let mut engine = a17_engine(Some((5, anchor)));
+        let before = a17_engine_observation(&engine);
+        let mut mode = a17_mode(Some((5, anchor)));
+        let mut stats = BinaryConsensusLoopInboundStats::default();
+        let gate = a17_binding_gate(4);
+        let origin = a17_origin(1);
+        a17_dispatch_response(
+            &mut engine,
+            &mut stats,
+            &mut mode,
+            a17_response(1, 5, anchor, Some(7), prefix_then_invalid),
+            Some(&origin),
+            &gate,
+            None,
+            None,
+            ConsensusVerificationPolicy::Required,
+        );
+        assert_eq!(a17_engine_observation(&engine), before);
+        assert!(mode.is_active());
+        assert_eq!(mode.peer_max_observed_committed_height, None);
+        assert_eq!(stats.restore_catchup_responses_rejected, 1);
+        assert_eq!(stats.restore_catchup_blocks_applied, 0);
+    }
+
+    #[test]
+    fn a17_stale_nonempty_dispatch_cannot_update_peer_progress_or_exit_restore_mode() {
+        let anchor = [0x63; 32];
+        let mut engine = a17_engine(Some((5, anchor)));
+        let suffix = a17_suffix(&engine, 5, anchor, 3);
+        let direct_blocks: Vec<_> = suffix
+            .iter()
+            .map(|block| EngineRestoreCatchupBlock {
+                height: block.height,
+                view: block.view,
+                parent_block_id: block.parent_block_id,
+                block_id: block.block_id,
+                proposer: ValidatorId::new(block.proposer_index as u64),
+                qc_signers: block
+                    .qc_signer_indices
+                    .iter()
+                    .copied()
+                    .map(|id| ValidatorId::new(id as u64))
+                    .collect(),
+            })
+            .collect();
+        engine.apply_restore_catchup_blocks(&direct_blocks).unwrap();
+        let local_height = engine.committed_height().expect("direct control committed");
+        let stale = a17_response(1, 5, [0xFF; 32], Some(local_height), suffix);
+        let gate = a17_binding_gate(4);
+        let origin = a17_origin(1);
+        let mut direct_mode = a17_mode(Some((5, anchor)));
+        let mut direct_stats = BinaryConsensusLoopInboundStats::default();
+        handle_restore_catchup_response(
+            &mut engine,
+            stale.clone(),
+            &mut direct_stats,
+            ValidatorId::new(0),
+            &mut direct_mode,
+        );
+        assert!(!direct_mode.is_active());
+        assert_eq!(
+            direct_mode.peer_max_observed_committed_height,
+            Some(local_height)
+        );
+
+        let mut guarded_engine = a17_engine(Some((5, anchor)));
+        guarded_engine
+            .apply_restore_catchup_blocks(&direct_blocks)
+            .unwrap();
+        let before = a17_engine_observation(&guarded_engine);
+        let mut mode = a17_mode(Some((5, anchor)));
+        let mut stats = BinaryConsensusLoopInboundStats::default();
+        a17_dispatch_response(
+            &mut guarded_engine,
+            &mut stats,
+            &mut mode,
+            stale,
+            Some(&origin),
+            &gate,
+            None,
+            None,
+            ConsensusVerificationPolicy::Required,
+        );
+        assert_eq!(a17_engine_observation(&guarded_engine), before);
+        assert!(mode.is_active());
+        assert_eq!(mode.peer_max_observed_committed_height, None);
+        assert_eq!(mode.exited_at_height, None);
+        assert_eq!(stats.restore_catchup_responses_rejected, 1);
+    }
+
+    #[test]
+    fn a17_nonempty_dispatch_guard_covers_authority_compatibility_and_response_shapes() {
+        let anchor = [0x64; 32];
+        let (timeout, pv) = a17_coherent_authorities();
+        let gate = a17_binding_gate(4);
+
+        let cases = [
+            (
+                "matching anchor, active mode, no request",
+                Some((5, anchor)),
+                1,
+                5,
+                anchor,
+                true,
+            ),
+            (
+                "missing local anchor, inactive mode",
+                None,
+                1,
+                5,
+                anchor,
+                false,
+            ),
+            (
+                "self-labelled response, active mode",
+                Some((5, anchor)),
+                0,
+                5,
+                anchor,
+                true,
+            ),
+        ];
+        for (label, baseline, responder, from_height, from_id, active) in cases {
+            let mut engine = a17_engine(baseline);
+            let blocks = a17_suffix(&engine, 5, anchor, 1);
+            let mut mode = a17_mode(baseline);
+            assert_eq!(mode.is_active(), active, "{label}");
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let origin = a17_origin(responder as u64);
+            a17_dispatch_response(
+                &mut engine,
+                &mut stats,
+                &mut mode,
+                a17_response(responder, from_height, from_id, Some(100), blocks),
+                Some(&origin),
+                &gate,
+                None,
+                None,
+                ConsensusVerificationPolicy::Required,
+            );
+            assert_eq!(stats.restore_catchup_responses_received, 1, "{label}");
+            assert_eq!(stats.restore_catchup_responses_rejected, 1, "{label}");
+            assert_eq!(stats.restore_catchup_blocks_applied, 0, "{label}");
+            assert_eq!(mode.is_active(), active, "{label}");
+            assert_eq!(mode.peer_max_observed_committed_height, None, "{label}");
+        }
+
+        // Neither configured, mutually coherent Timeout/PV test authority nor
+        // the test-only unsigned compatibility policy permits this wire format.
+        for (timeout_ctx, pv_ctx, policy) in [
+            (
+                Some(&timeout),
+                Some(&pv),
+                ConsensusVerificationPolicy::Required,
+            ),
+            (None, Some(&pv), ConsensusVerificationPolicy::Required),
+            (
+                Some(&timeout),
+                None,
+                ConsensusVerificationPolicy::LocalFixtureUnsigned,
+            ),
+            (
+                None,
+                None,
+                ConsensusVerificationPolicy::LocalFixtureUnsigned,
+            ),
+        ] {
+            let mut engine = a17_engine(Some((5, anchor)));
+            let before = a17_engine_observation(&engine);
+            let mut mode = a17_mode(Some((5, anchor)));
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let origin = a17_origin(1);
+            let blocks = a17_suffix(&engine, 5, anchor, 1);
+            a17_dispatch_response(
+                &mut engine,
+                &mut stats,
+                &mut mode,
+                a17_response(1, 5, anchor, Some(100), blocks),
+                Some(&origin),
+                &gate,
+                timeout_ctx,
+                pv_ctx,
+                policy,
+            );
+            assert_eq!(a17_engine_observation(&engine), before);
+            assert!(mode.is_active());
+            assert_eq!(mode.peer_max_observed_committed_height, None);
+            assert_eq!(stats.restore_catchup_responses_rejected, 1);
+        }
+
+        // A stale request anchor is also refused before the helper can apply
+        // its existing stale-anchor peer-progress observation.
+        let mut engine = a17_engine(Some((5, anchor)));
+        let blocks = a17_suffix(&engine, 5, anchor, 1);
+        let mut mode = a17_mode(Some((5, anchor)));
+        let mut stats = BinaryConsensusLoopInboundStats::default();
+        let origin = a17_origin(1);
+        a17_dispatch_response(
+            &mut engine,
+            &mut stats,
+            &mut mode,
+            a17_response(1, 4, [0x65; 32], Some(50), blocks),
+            Some(&origin),
+            &gate,
+            Some(&timeout),
+            Some(&pv),
+            ConsensusVerificationPolicy::Required,
+        );
+        assert_eq!(mode.peer_max_observed_committed_height, None);
+        assert!(mode.is_active());
+        assert_eq!(stats.restore_catchup_responses_rejected, 1);
+    }
+
+    #[test]
+    fn a17_sender_binding_refusals_do_not_count_as_missing_endorsements() {
+        let anchor = [0x66; 32];
+        let gate = a17_binding_gate(4);
+        let cases = [
+            (
+                "missing origin",
+                None,
+                1,
+                ConsensusBindingReject::MissingOrigin,
+            ),
+            (
+                "mismatched authenticated tuple",
+                Some(AuthenticatedConsensusOrigin::new(
+                    a17_node_id(1),
+                    ValidatorId::new(2),
+                )),
+                1,
+                ConsensusBindingReject::AmbiguousMapping,
+            ),
+            (
+                "unmapped origin",
+                Some(AuthenticatedConsensusOrigin::new(
+                    NodeId::new([0xEE; 32]),
+                    ValidatorId::new(1),
+                )),
+                1,
+                ConsensusBindingReject::UnknownPeer,
+            ),
+            (
+                "claimed responder mismatch",
+                Some(a17_origin(1)),
+                2,
+                ConsensusBindingReject::ClaimedSenderMismatch,
+            ),
+        ];
+        for (label, origin, responder, expected_reject) in cases {
+            let mut engine = a17_engine(Some((5, anchor)));
+            let mut mode = a17_mode(Some((5, anchor)));
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let blocks = a17_suffix(&engine, 5, anchor, 1);
+            a17_dispatch_response(
+                &mut engine,
+                &mut stats,
+                &mut mode,
+                a17_response(responder, 5, anchor, Some(100), blocks),
+                origin.as_ref(),
+                &gate,
+                None,
+                None,
+                ConsensusVerificationPolicy::Required,
+            );
+            assert_eq!(stats.inbound_msgs_received, 1, "{label}");
+            assert_eq!(stats.inbound_sender_binding_rejected_total, 1, "{label}");
+            assert_eq!(stats.restore_catchup_responses_received, 0, "{label}");
+            assert_eq!(stats.restore_catchup_responses_rejected, 0, "{label}");
+            assert_eq!(gate.metrics().reject_count(expected_reject), 1, "{label}");
+        }
+    }
+
+    #[test]
+    fn a17_empty_responses_keep_existing_progress_exit_and_self_behavior() {
+        let anchor = [0x67; 32];
+        let gate = a17_binding_gate(4);
+        let origin = a17_origin(1);
+
+        // Empty non-self response at the local committed height can still
+        // update peer progress and exit restore mode, as before. This is
+        // observed behavior, not an accepted recovery/participation path.
+        let mut progressed = a17_engine(Some((5, anchor)));
+        let suffix = a17_suffix(&progressed, 5, anchor, 3);
+        let direct_blocks: Vec<_> = suffix
+            .iter()
+            .map(|block| EngineRestoreCatchupBlock {
+                height: block.height,
+                view: block.view,
+                parent_block_id: block.parent_block_id,
+                block_id: block.block_id,
+                proposer: ValidatorId::new(block.proposer_index as u64),
+                qc_signers: block
+                    .qc_signer_indices
+                    .iter()
+                    .copied()
+                    .map(|id| ValidatorId::new(id as u64))
+                    .collect(),
+            })
+            .collect();
+        progressed
+            .apply_restore_catchup_blocks(&direct_blocks)
+            .unwrap();
+        let height = progressed.committed_height().unwrap();
+        let mut exited_mode = a17_mode(Some((5, anchor)));
+        let mut exited_stats = BinaryConsensusLoopInboundStats::default();
+        a17_dispatch_response(
+            &mut progressed,
+            &mut exited_stats,
+            &mut exited_mode,
+            a17_response(1, height, anchor, Some(height), Vec::new()),
+            Some(&origin),
+            &gate,
+            None,
+            None,
+            ConsensusVerificationPolicy::Required,
+        );
+        assert!(!exited_mode.is_active());
+        assert_eq!(exited_mode.peer_max_observed_committed_height, Some(height));
+        assert_eq!(exited_stats.restore_catchup_mode_exited_at_height, height);
+        assert_eq!(exited_stats.restore_catchup_responses_rejected, 0);
+
+        // At the baseline, a non-self empty response records peer progress
+        // but does not exit without strict local progress.
+        let mut baseline_engine = a17_engine(Some((5, anchor)));
+        let mut active_mode = a17_mode(Some((5, anchor)));
+        let mut active_stats = BinaryConsensusLoopInboundStats::default();
+        a17_dispatch_response(
+            &mut baseline_engine,
+            &mut active_stats,
+            &mut active_mode,
+            a17_response(1, 5, anchor, Some(6), Vec::new()),
+            Some(&origin),
+            &gate,
+            None,
+            None,
+            ConsensusVerificationPolicy::Required,
+        );
+        assert!(active_mode.is_active());
+        assert_eq!(active_mode.peer_max_observed_committed_height, Some(6));
+        assert_eq!(active_stats.restore_catchup_responses_rejected, 0);
+
+        // Empty self-labelled response retains the helper's existing early
+        // return: it is counted as received, but has no peer-progress effect.
+        let mut self_engine = a17_engine(Some((5, anchor)));
+        let mut self_mode = a17_mode(Some((5, anchor)));
+        let mut self_stats = BinaryConsensusLoopInboundStats::default();
+        let self_origin = a17_origin(0);
+        a17_dispatch_response(
+            &mut self_engine,
+            &mut self_stats,
+            &mut self_mode,
+            a17_response(0, 5, anchor, Some(100), Vec::new()),
+            Some(&self_origin),
+            &gate,
+            None,
+            None,
+            ConsensusVerificationPolicy::Required,
+        );
+        assert!(self_mode.is_active());
+        assert_eq!(self_mode.peer_max_observed_committed_height, None);
+        assert_eq!(self_stats.restore_catchup_responses_received, 1);
+        assert_eq!(self_stats.restore_catchup_responses_rejected, 0);
+    }
 
     /// `RestoreCatchupModeState` is inactive when no baseline was applied.
     /// Non-restore binary path is unaffected.

@@ -26753,3 +26753,120 @@ not proof of absence**. It was not task-executed and is not authenticated
 currentness evidence or evidence about every machine/process namespace or past
 use. B/U, source-to-binary-to-runtime correspondence and all existing gates
 remain unresolved/unchanged; no technical acceptance or readiness follows.
+
+## RUN 422 A17-F1 / RS1-F7 catch-up containment implementation
+
+**IMPLEMENTED — INDEPENDENT REVIEW PENDING.** A17-F1 / RS1-F7, RS1 and
+A33-F1 / E27 remain **OPEN**; activation **DISABLED**; public DevNet
+**NO-GO**. The pre-implementation review disposition (PASS WITH LIMITATIONS)
+was supplied by the user. Reviewer identity and raw review artifact are
+unavailable and are not represented here. Earlier I1, W1/W2,
+voting-ancestry and retained-QC fixture acceptances remain closed only in
+their documented scopes.
+
+### Identity, source and behavior
+
+The protected base was `e584738c81814e70cbd58f80c921bea93983758c`, tree
+`693e9cdfbbdb9f3fece6c19fb6966c14e14d11ea`. At verification, local `main`
+and direct remote `main` matched that commit/tree; the task branch was
+`copilot/a17-f1-catchup-containment`, based exactly there. Source blob
+`crates/qbind-node/src/binary_consensus_loop.rs`:
+`b0d9ffe5d72d5a6dd1a55d4417ba1e71f4225d52`.
+At final pre-commit verification, direct `origin/main` had advanced to
+`619a75fa8355692823802754f605e6c02bb57537`; no main update, merge, or rebase
+was performed. The task branch remains based on the explicitly protected
+commit above and will be pushed only as its own branch.
+
+The actual inbound `RestoreCatchupResponse` arm is at
+`crates/qbind-node/src/binary_consensus_loop.rs:7393-7420`. It retains the
+authenticated sender binding first, then the existing
+`restore_catchup_responses_received` count, then refuses every non-empty
+response before `handle_restore_catchup_response`. It increments
+`restore_catchup_responses_rejected` once and logs that this wire format lacks
+verifiable constituent QC endorsements. A binding failure returns before the
+receipt or endorsement-refusal counters. There is no exception for
+configured authority, mode, request, anchor, self-label or compatibility
+policy. The helper at `:8450` retains its existing behavior for empty
+responses, and direct engine behavior remains characterized independently.
+The helper error comment now accurately states that a valid prefix can mutate
+engine state before a later invalid block returns an error.
+
+All non-empty responses, including honest suffixes, are now refused at
+network ingress. This intentionally removes non-empty network catch-up
+liveness. Empty non-self responses can still update peer progress and can
+produce a restore-mode exit; the dispatch tests preserve that observation
+without endorsing it as a recovery or participation path. The correction
+does not bound allocations during deserialization and establishes no inbound
+memory limit, durable quarantine, ownership/currentness, signer exclusivity,
+anti-rollback, or authenticated recovery.
+
+### Focused test evidence
+
+The six `a17_` tests exercise the real inbound consensus-message dispatch:
+non-empty valid progress is refused before engine/mode mutation; direct
+engine application separately witnesses progress; a valid-prefix/invalid-
+suffix response is rejected before dispatch can apply its prefix while the
+direct engine retains its separately characterized prefix; stale responses
+cannot produce the old helper's peer-progress/mode-exit effect; active and
+inactive restore modes, matching/missing/stale anchors, no outstanding
+request, self-labelled responses, coherent configured Timeout/PV authority
+and unsigned compatibility fixtures do not bypass the guard; sender-origin
+binding failures preserve their own counters; empty response progress/exit,
+no-exit and self-response controls remain; and a test-only direct-helper
+sensitivity control would observe application if the guard were omitted.
+Ingress receipt metrics are accounted separately from rejection and engine
+effect counters. A case that cannot reach the dispatch branch is not claimed
+as covered.
+
+Executed commands and results:
+
+```text
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib a17_
+  PASS: 6 passed, 0 failed, 0 ignored; 2,227 filtered out.
+
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib restore_mode_
+  PASS: 9 passed, 0 failed, 0 ignored; 2,224 filtered out.
+
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo check --locked -p qbind-node --bin qbind-node
+  PASS: production binary target checked in the dev profile; 37 qbind-consensus
+  and 8 qbind-node existing dead-code warnings.
+
+git -c core.whitespace=cr-at-eol diff --check
+  PASS.
+```
+
+No full workspace test suite or unrelated suite was run. The user's previous
+full-workspace result remains user-reported evidence and is not attributed to
+this task. Earlier environment attempts are retained as limitations:
+`cargo test --locked -p qbind-node --lib a17_ -- --nocapture` failed because
+bindgen could not find libclang; retrying
+`LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib a17_ -- --nocapture`
+also failed because that library was not yet present. Installing
+`libclang-dev` resolved the prerequisite. `apt-get update` emitted a
+non-blocking Google Chrome repository DNS warning. These attempts do not
+indicate source/test failures.
+
+Formatting checks were attempted but the repository-wide baseline is not
+rustfmt-clean: `cargo fmt --all -- --check` failed with existing formatting
+diffs in multiple files. A direct `rustfmt --check --edition 2021
+crates/qbind-node/src/binary_consensus_loop.rs` also reports pre-existing
+formatting differences outside the new A17 block (including earlier
+restore-mode tests and later existing tests); it reports no formatting diff
+within the added A17 tests. No unrelated formatting was applied.
+
+### Acceptance map and scope
+
+| Stage | Evidence | Acceptance boundary |
+|---|---|---|
+| Source | Task-branch source blob `b0d9ffe5d72d5a6dd1a55d4417ba1e71f4225d52`, based on protected commit/tree above | Guard is after authenticated sender binding and receipt count, before non-empty helper application |
+| Tests | Six `a17_` unit tests and nine `restore_mode_` regression tests, executed on the task-branch source | Component/library dispatch and engine characterization only; no release/runtime assertion |
+| Release binary | `cargo check --locked -p qbind-node --bin qbind-node` passed in dev profile | Type/build check only; no release binary artifact was built or hashed |
+| Running node | No node started or inspected for this change | No runtime correspondence evidence; exact run-time revision was not captured |
+
+Changed paths in this task are:
+`crates/qbind-node/src/binary_consensus_loop.rs`,
+`docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md`, and
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`. Historical evidence bytes
+and `Audit/QBIND_SECURITY_FINDINGS_REGISTER.md` are unchanged. This record
+does not close A17-F1 / RS1-F7, RS1 or A33-F1 / E27, authorize recovery or
+activation, or change the public DevNet NO-GO.
