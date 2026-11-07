@@ -236,3 +236,196 @@ signing-history continuity, exclusive signer control, application success,
 quarantine clearance or permission to resume. Preserve present containment;
 any later application attempt must retain known effects and Unknown outcomes
 and remain closed until separately reconciled and authorized.
+
+<a id="test-plan-correction"></a>
+
+## 6. Superseding test-plan correction
+
+**TEST-PLAN CORRECTION — INDEPENDENT REVIEW PENDING.**
+
+The user supplied **PASS WITH LIMITATIONS** for the options comparison and
+**CHANGES REQUIRED** for its proposed test plan. This section supersedes
+section 4's 16 KiB fixture cap and incomplete attribution of acceptance
+checks, not the accepted options analysis. AP1, I1, W1/W2 and all earlier
+bounded acceptances are preserved within their prior documented scopes.
+No reviewer identity or unavailable raw artifact is asserted. B and C remain
+unselected; current refusal remains in force. Every case below is
+**FUTURE / NOT EXECUTED**. No scaffolding described here has been implemented.
+
+### 6.1. Split fixture profiles and byte accounting
+
+**R: real-signature, positive/small-mutation profile.** Proposed backend:
+`qbind_crypto::ml_dsa44::MlDsa44Backend` registered under suite 100, using
+four synthetic equal-weight validators, one trusted epoch/domain/anchor,
+three own-QCs associated with G/P/B, three distinct signatures per QC, and
+one separately signed Proposal for the proposer-body tests. Existing
+test-only key and QC construction provides prior art, not execution evidence
+for this plan ([real fixture construction](https://github.com/olivexo28/QBIND/blob/9bf0eb43e4e3c601d02d3886d220b0abeb3a103e/crates/qbind-consensus/src/qc_verify_domain.rs#L1160-L1275)).
+A counting test adapter must **delegate** signature verification to the real
+backend, not return fake success. Test signatures and keys are not
+operational signing or a prototype B/C attestation.
+
+The source constants are 2,420 bytes per ML-DSA-44 signature, 1,312 per public
+key, and 2,560 per serialized secret key
+([sizes](https://github.com/olivexo28/QBIND/blob/9bf0eb43e4e3c601d02d3886d220b0abeb3a103e/crates/qbind-crypto/src/ml_dsa44.rs#L36-L43)).
+Thus **3 QCs x 3 signatures x 2,420 = 21,780 signature bytes before other
+data**. The old 16 KiB cap cannot hold even those signatures.
+
+For this particular artificial R fixture, the proposed **encoded fixture
+segment budget is 65,536 bytes (64 KiB)**. This is not a selected network
+format: it accounts for existing encoded QCs, one canonical Proposal body,
+its own detached signature and at most 512 bytes of test-only segment
+framing/graph metadata. With validator indices 0..3, a one-byte bitmap and
+exactly three signatures:
+
+| Encoded segment | Accounted bytes | Scope |
+|---|---:|---|
+| Three QCs | 3 x 7,336 = 22,008 | Each: 65 fixed bytes, 2-byte bitmap length + 1 bitmap byte, 2-byte signature count, and 3 x (2-byte length + 2,420 signature). Includes all nine signatures and QC framing. |
+| One Proposal canonical body | 7,750 | 150 header bytes + 4-byte embedded-QC length + one 7,336-byte QC + one 4-byte transaction length + at most 256 transaction bytes. The QC is a **duplicate** of one separately supplied QC; its signatures count again. |
+| Proposal's own detached signature | 2,420 | Excluded from canonical body, included in the fixture input budget. |
+| Test-only segment framing / graph metadata | At most 512 | Includes segment lengths and G/P/B association metadata; any excess rejects this profile, rather than silently being outside the budget. |
+| **Total fixture segments** | **At most 32,690** | Below 65,536; spare bytes are not permission to add unbounded content, certificates or validators. |
+
+QC field arithmetic follows the
+[encoder](https://github.com/olivexo28/QBIND/blob/9bf0eb43e4e3c601d02d3886d220b0abeb3a103e/crates/qbind-wire/src/consensus.rs#L304-L327);
+Proposal arithmetic follows the
+[canonical body](https://github.com/olivexo28/QBIND/blob/9bf0eb43e4e3c601d02d3886d220b0abeb3a103e/crates/qbind-wire/src/consensus.rs#L915-L954).
+The future harness must assert actual segment lengths and total, not simply
+assume this arithmetic matches its generated fixture.
+
+**Decoded, retained and working-memory accounting is separate.** The
+64 KiB figure covers encoded segments only, not the following:
+
+* Input `Vec` lengths/capacities and their container/object metadata; decoded
+  QCs (outer `Vec<Vec<u8>>` and each signature/bitmap capacity), Proposal
+  transaction/signature capacities, and graph/scaffolding structures. Record
+  these at actual entrypoints; do not equate `len()` with allocated capacity.
+* Four trusted public keys contain 5,248 serialized bytes; four setup secret
+  keys contain 10,240 serialized bytes. These are trusted fixture setup, not
+  encoded peer input. Count provider storage, provider-returned key clones,
+  allocator slack, key objects and setup/keygen working memory separately.
+  Do not treat serialized key sizes as backend object/stack sizes.
+* If encoded input, decoded evidence and verified output coexist, count each
+  simultaneously. The owning QC verifier clones the certificate on success
+  ([owning result](https://github.com/olivexo28/QBIND/blob/9bf0eb43e4e3c601d02d3886d220b0abeb3a103e/crates/qbind-consensus/src/qc_verify_domain.rs#L877-L912)).
+  Retaining all three results duplicates another 21,780 signature bytes plus
+  bitmap/container/domain/signer metadata. Drop each result before the next
+  case unless explicitly measuring that duplicate-retention scenario.
+* Measure peak simultaneously live vector **capacities**, outer vector
+  storage, inline structures, provider clones, temporary embedded-QC
+  encoding, canonical/preimage buffers, reconstructed Vote signature clones
+  and backend working memory. Setup and execution peaks are separate.
+  Backend heap/stack and allocator overhead need independent instrumentation.
+
+A total decoded/retained/process-memory cap remains **UNSELECTED / NOT
+JUSTIFIED** until that inventory is measured for the target build and
+allocator. The proposed encoded cap is feasible for the enumerated byte
+segments, not proof that the entire process fits within it. No runtime,
+deadline, cancellation or network-admission guarantee follows.
+
+**D: split decoded negative profile.** This intentionally bypasses
+R's admitted encoded shape to test the existing verifier *after fixture
+allocation*. It has one QC and at most four signatures, subject to the
+byte-vector-length cap below. One QC with a 65,536-byte signature, two 2,420-byte signatures
+and a one-byte bitmap has 70,377 decoded byte-vector payload bytes. A
+proposed 131,072-byte (128 KiB) **sum-of-byte-vector-lengths** fixture cap is
+feasible for that single case; it excludes keys, capacities, outer/inline
+objects and working memory, which remain separately measured/unselected.
+Do not call this a valid encoded QC: that signature cannot fit a u16 wire
+length. Do not canonical-encode it through panic-prone length helpers.
+It exercises decoded preflight, not pre-input-allocation enforcement.
+Duplicate entries and invalid extra fourth signatures also use D, not the
+three-signature R admission shape; distinguish preflight refusal from
+crypto-loop failure when extra signatures are structurally well formed.
+
+**S: proposed test-only pre-materialization / streaming-source profile.**
+An unimplemented `test_admit_fixture_segments` helper would first receive a
+fixed-size announced-length descriptor and a test source whose payload
+materialization callback has not been invoked. It would reject length
+greater than 65,536 or checked-sum overflow before that callback. A separate
+borrowed-segment scanner would inspect complete bounded segment headers and
+nested counts/lengths before calling any decode/materialization callback.
+For that scanner the borrowed input already exists; zero decoder allocations
+does **not** mean zero prior input allocations. Scanner bounds, truncation
+and exact-byte consumption must be specified and tested before using it.
+For R admission its proposed finite shape is at most six segments (three
+QCs, one Proposal body, one detached signature and metadata), three signatures
+per QC, one bitmap byte, 2,420 bytes per signature, one embedded QC and one
+transaction of at most 256 bytes. Checked sums must cover duplicate embedded
+material and segment framing. D is a separate intentionally allocated
+preflight case, not an exception that S silently admits.
+Neither helper is an existing production ingress or a claim that a streaming
+QC verifier exists. Production pre-network/input-allocation admission is
+**unresolved** and outside this slice.
+
+**M: structural mock profile.** Proposed `test_check_gpb_associations`
+scaffolding may use tiny labeled graph objects and a set of certificate IDs
+already verified by R. It does no signature verification and cannot create
+`VerifiedQuorumCertificate` values or recovery authority. It records only
+graph/coverage predicate outcomes. A fake signature backend is not used for
+cryptographic positive cases; structural M results cannot be reported as
+real-signature, existing-engine or production-verifier enforcement.
+M is limited to three fixed-field role records, one baseline/anchor and
+three certificate summaries in one epoch, with zero crypto calls and no
+multi-block prefix coverage. No variable-size content is copied into the
+graph model; it borrows R's bounded fixture content and explicit test oracle.
+Its objects/capacities still belong in the separate decoded/retained-memory
+inventory; no total-memory cap is asserted for M.
+
+### 6.2. Entrypoints, already-allocated state and exact observables
+
+The actual existing QC entrypoint is
+`qbind_consensus::verify_quorum_certificate_with_domain`. It receives
+`&WireQuorumCertificate` with **already allocated** bitmap/signature vectors.
+Its preflight checks structure and size before the cryptographic loop and
+signature cloning; it then verifies constituent Votes, uniqueness through
+bitmap association, membership and weighted quorum. It does **not** receive
+the G/P/B graph, full parent/content, or raw input before allocation
+([contract](https://github.com/olivexo28/QBIND/blob/9bf0eb43e4e3c601d02d3886d220b0abeb3a103e/crates/qbind-consensus/src/qc_verify_domain.rs#L849-L877),
+[preflight](https://github.com/olivexo28/QBIND/blob/9bf0eb43e4e3c601d02d3886d220b0abeb3a103e/crates/qbind-consensus/src/qc_verify_domain.rs#L995-L1057),
+[crypto and quorum](https://github.com/olivexo28/QBIND/blob/9bf0eb43e4e3c601d02d3886d220b0abeb3a103e/crates/qbind-consensus/src/qc_verify_domain.rs#L1059-L1120)).
+No production rejection counter is required to observe this function:
+assert its typed return and a proposed test adapter's backend-call count.
+
+The following rows replace section 4's six grouped acceptance cases. Every
+row is **FUTURE / NOT EXECUTED**; `test_*` names below are **proposed
+test-only scaffolding**, not current source functions.
+
+| Case / profile | Entrypoint and input state | Checker and observable | Sensitivity control |
+|---|---|---|---|
+| Proposal body/signature / R | Existing `BlockProposal::canonical_body` and `verify_proposal_msg_with_domain`; fully decoded Proposal, embedded QC and transactions already allocated; signature generated over original v2 preimage. | Canonical body includes embedded QC signatures but excludes its own signature. Existing Proposal verifier returns `Ok(())` for original, signature failure for changed parent, transaction or embedded-QC signature with original own signature. It verifies proposer authentication, not quorum-content agreement. | Change own signature only: body unchanged, verification fails. Change embedded-QC signature: body changes, old proposer signature fails; restore original for passing control. |
+| Valid QCs and insufficient weight / R | Existing `verify_quorum_certificate_with_domain` on each allocated G/P/B QC; trusted domain, epoch, set, provider and real registry. | `Ok(VerifiedQuorumCertificate)` for three distinct equal-weight signers; `verified_voting_power()==3`, `threshold()==3`, `signers().len()==3`; three backend invocations per QC. Consistent two-signer QC yields `InsufficientVotingPower { have: 2, need: 3 }` after two verifies. | Restore third authorized valid signature and bit: pass; in separate D add an invalid extra fourth signature: fail even though three good signatures already reach quorum. |
+| Signed Vote fields / R | Existing QC verifier, allocated QC, signature list retained from original; mutate block ID or height/round/step, not signatures. | QC reconstruction plus real signature check returns `InvalidSignature` for first affected authorized signer. Standalone `verify_vote_msg_with_domain` similarly recomputes from allocated Vote. | Restore original signed fields: pass; alteration must not be tested against an old caller-supplied preimage. |
+| Chain/epoch/domain / R | Existing QC verifier on allocated QC. Mismatch wire chain or supplied authorized epoch; separately change trusted genesis/authority/runtime domain while keeping wire chain/epoch matching. | Chain mismatch gives `WireChainMismatch`, epoch mismatch `EpochMismatch`, with zero backend calls. Changed signing domain gives signature failure after invocation. These outcomes are not graph or currentness checks. | Restore expected chain/epoch/domain for positive control. Test purpose/version sensitivity separately on existing domain-built preimages; future B/C purpose parsing remains unresolved, not credited to current QC parser. |
+| Signer structure / R + D | Existing QC verifier; allocated bitmap/signatures. In D duplicate a signature entry without a corresponding distinct bit; for the unauthorized R case use a separate four-member sparse set {0,1,3,4}, a one-byte bitmap with unauthorized bit 2 within its span, matching signature count and controlled provider. | Duplicate entry gives `SignatureCountMismatch` before backend calls. Unknown membership is rejected through existing membership verification; assert `UnknownSigner` using controlled provider/configuration, not transport identity. | Restore valid bit/count/membership; swapping a second signer's signature while keeping bit count constant must yield signature failure, not a second weight credit. |
+| QC versus full-parent/content association / R + M | Existing QC verifier gets original allocated QC only; proposed `test_check_gpb_associations` gets separate allocated full-parent/content objects, role positions, verified certificate summaries and explicit trusted expected associations. | Existing QC still verifies if only external parent/content changes. Proposed scaffold must return `ParentAssociationMismatch` or `ContentAssociationMismatch` against the explicit **test oracle**. The oracle is not authenticated historical binding and is not a recovery proof. | Change parent suffix / transaction while retaining derived ID and QC: QC remains valid, oracle rejects. Restore matching oracle data: scaffold passes. No collision/exploit assertion. |
+| G/P/B and committed endpoint / M | Proposed `test_check_gpb_associations` receives allocated labeled graph, expected own-QC identities and trusted baseline; no engine application API is called. | Proposed `MissingOwnQc`, `ParentLinkMismatch`, `ViewsNotIncreasing`, `NonMonotonicEndpoint` or `UnprovenEndpoint`. Predicate is modeled on pinned `try_commit_with_qc`; current private mutating engine function is **not** executed or credited as proof. Only G is marked supported, not P/B; multi-block coverage is unresolved outside one G slice. | Remove each own-QC, swap parent, equalize adjacent views, claim B as committed, or lower baseline endpoint. Restore exact G/P/B for passing structural control. Any defect-disabled variant is test-only and must be caught by the assertions. |
+| Unsupported epoch transition / M | Proposed scaffold gets allocated roles plus one independently trusted epoch; no transition authority is supplied. | Proposed `UnsupportedTransition`; existing QC verifier separately checks each QC's supplied authorized epoch but cannot validate a transition or inherit an old set. | Change P/B to another epoch: scaffold refuses; restore all roles to trusted epoch. Supplying arbitrary alternate epoch to existing QC verifier must not bypass scaffold policy. |
+| Decoded pre-crypto size / D | Existing QC verifier after all D vectors have been deliberately allocated; one late signature length 65,536, bitmap/count otherwise coherent. | `MalformedSignature(offending_signer)` with zero counting-adapter backend calls. This is a pre-crypto/post-input-allocation result. | Move oversized signature to last signer: still zero calls. Restore 2,420-byte real signatures: invokes backend and passes. Length below structural max with invalid crypto is a distinct signature failure, not a preflight-size claim. |
+| Before payload materialization / S | Proposed `test_admit_fixture_segments` gets only announced lengths and uninvoked payload callback. Separate proposed scanner gets already-existing borrowed encoded segments but no decoded vectors. | Proposed `EncodedBudgetExceeded`, `LengthOverflow`, `TruncatedSegment` or `NestedLengthExceeded`; assert zero payload callback calls for announced oversize/overflow and zero decoder/materializer calls for nested invalidity. Neither is current QC enforcement. | Announce 65,537 bytes or checked-add overflow: reject; 65,536 passes only the length gate, not structure verification or unsupported padding. Enumerated valid R segments are admitted through both gates. Disable the helper in a test-only mutant and verify materialization counter becomes nonzero / negative test fails. Scanner case truncates nested lengths while total frame stays within cap. |
+| Outbound/inbound distinction / R | Existing `ProposalVoteSigningDomainV2::{proposal_preimage,vote_preimage}` helpers, allocated messages; separate `verify_proposal_msg_with_domain` / `verify_vote_msg_with_domain` calls recompute from actual received message and trusted domain. | Compare captured helper bytes; assert real inbound verifier accepts originals and refuses post-signature mutation. No `ProposalVoteAuthority` production signer caller is wired, and helper byte construction is not signer admission. | Hold captured preimage fixed while mutating received message: inbound must fail. Passing a stale preimage to the public inbound API is not an available interface. |
+| Isolation / all | Proposed test runner references only the stated existing pure verification/encoding APIs and test-only scaffolds; no node dispatch, persistent stores, network, production signer or resume APIs. | Source/compile reachability check and proposed effect-oracle counters for application/write/network/signing-authority/clear/resume remain zero. Synthetic fixture signature generation is explicitly separated setup, not participation. | A test-only sentinel attempted-effect adapter increments an oracle and must fail isolation assertion; do not connect a real protected API to create that control. |
+
+Return labels for scaffolding are proposed assertion names, not repository
+error variants. Existing typed labels must be confirmed against the pinned
+error enum when future tests are authored. Proposed backend-call counters
+must be observed directly; they are not production telemetry.
+The existing
+[QC error enum](https://github.com/olivexo28/QBIND/blob/9bf0eb43e4e3c601d02d3886d220b0abeb3a103e/crates/qbind-consensus/src/qc_verify_domain.rs#L206-L328),
+[Proposal verifier](https://github.com/olivexo28/QBIND/blob/9bf0eb43e4e3c601d02d3886d220b0abeb3a103e/crates/qbind-consensus/src/proposal_vote_verify.rs#L405-L433)
+and [Vote verifier](https://github.com/olivexo28/QBIND/blob/9bf0eb43e4e3c601d02d3886d220b0abeb3a103e/crates/qbind-consensus/src/proposal_vote_verify.rs#L511-L540)
+support the stated separation of decoded message verification from graph
+and pre-materialization scaffolding.
+Graph model predicates are based on the
+[current private three-chain function](https://github.com/olivexo28/QBIND/blob/9bf0eb43e4e3c601d02d3886d220b0abeb3a103e/crates/qbind-consensus/src/hotstuff_state_engine.rs#L1819-L1938);
+their model acceptance does not demonstrate the production caller, quorum
+content correspondence or full prefix verification. Current wire decoding
+already materializes signature vectors
+([decoder](https://github.com/olivexo28/QBIND/blob/9bf0eb43e4e3c601d02d3886d220b0abeb3a103e/crates/qbind-wire/src/consensus.rs#L330-L358)).
+
+This correction makes the investigation boundaries reviewable; it does not
+complete them or approve implementation. Verification remains separate from
+durable application, currentness, ownership, signing-history continuity,
+signer exclusivity, quarantine clearance and resume. Unknown or missing
+evidence retains refusal. No source/tests, checker, format or authority have
+been added; activation remains DISABLED and public DevNet remains NO-GO.

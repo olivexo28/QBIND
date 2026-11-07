@@ -693,3 +693,10 @@ are recorded in `OPTIONS-CHECKS.txt`; current hashes are in
 `OPTIONS-SHA256SUMS`. The preceding inventory, contract, AP1, witness and
 quorum-binding records remain append-only. No unchanged Rust tests or builds
 were run, and the proposed test-only investigation was not executed.
+
+Superseding test-plan correction: commands, outcomes, fixture arithmetic,
+semantic source checks, links, append-only prefixes, producing-revision
+manifest checks and scope are in `TEST-PLAN-CORRECTION-CHECKS.txt`;
+new delivery hashes are in `TEST-PLAN-CORRECTION-SHA256SUMS`.
+No unchanged Rust tests or builds were rerun. All proposed cases remain
+FUTURE / NOT EXECUTED.

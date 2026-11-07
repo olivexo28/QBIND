@@ -1,0 +1,208 @@
+TEST-PLAN CORRECTION — DOCUMENTATION AND INTEGRITY RECORD
+
+User-supplied disposition: PASS WITH LIMITATIONS for the options comparison;
+CHANGES REQUIRED for its proposed test plan. No reviewer identity or raw
+review artifact is supplied. AP1, I1, W1/W2 and earlier bounded acceptances
+are preserved. B/C remain unselected, current refusal remains in force.
+All proposed cases are FUTURE / NOT EXECUTED.
+
+1. Pre-edit identity/ref/clean-state verification
+
+$ git remote get-url origin && git branch --show-current && git rev-parse HEAD 'HEAD^{tree}' && git rev-parse '9bf0eb43e4e3c601d02d3886d220b0abeb3a103e^{tree}' && git ls-remote --heads origin refs/heads/docs/authenticated-recovery-resume-inventory refs/heads/main && git merge-base --is-ancestor 9bf0eb43e4e3c601d02d3886d220b0abeb3a103e HEAD && git status --porcelain=v1 && git diff --cached --name-only
+Output:
+https://github.com/olivexo28/QBIND
+docs/authenticated-recovery-resume-inventory
+0a405c6063d49d8b0d0a4211d091f5405d79b6a6
+d8d6b95c3d36d464e86e2dfb38d15d69dd69051c
+56509b20084ee1cbe2c42fda9d73d87e4c82c33f
+0a405c6063d49d8b0d0a4211d091f5405d79b6a6	refs/heads/docs/authenticated-recovery-resume-inventory
+9bf0eb43e4e3c601d02d3886d220b0abeb3a103e	refs/heads/main
+Exit 0. No status/staging lines; ancestry succeeded. Main and task match
+the requested revisions/trees. No reset/rebase/discard was used.
+
+2. Source/link, arithmetic, prefix and producing-revision checks
+
+The script below was stored as a session artifact, not source/test code.
+Exact executed command:
+$ python3 /root/.copilot/session-state/0d9bc349d569421db76c851feaf5e01c/files/check_test_plan_correction.py && git diff --check && git diff --cached --check && git diff --name-only && git ls-files --others --exclude-standard
+
+Exact script body (also permits reproduction without the session artifact):
+----- BEGIN PYTHON -----
+import hashlib
+import pathlib
+import re
+import subprocess
+
+BASE = "0a405c6063d49d8b0d0a4211d091f5405d79b6a6"
+MAIN = "9bf0eb43e4e3c601d02d3886d220b0abeb3a103e"
+ROOT = "docs/security/evidence/recovery-resume-inventory-20261107/"
+APPENDED = [
+    "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+    ROOT + "README.md",
+    ROOT + "CHANGED_PATHS.txt",
+    ROOT + "commands.txt",
+    ROOT + "BINDING_OPTIONS_COMPARISON.md",
+]
+
+
+def blob(rev, path):
+    return subprocess.check_output(["git", "show", f"{rev}:{path}"])
+
+
+for path in APPENDED:
+    assert pathlib.Path(path).read_bytes().startswith(blob(BASE, path)), path
+print("PASS: all five appended documents preserve exact task-tip byte prefixes")
+old_paths = subprocess.check_output(
+    ["git", "ls-tree", "-r", "--name-only", BASE, ROOT, "Audit"]
+).decode().splitlines()
+preserved = 0
+for path in old_paths:
+    if path not in APPENDED:
+        assert pathlib.Path(path).read_bytes() == blob(BASE, path), path
+        preserved += 1
+print(f"PASS: {preserved} other historical evidence/Audit paths remain byte-identical")
+producers = [
+    ("SHA256SUMS", "61028eb6dbb91f0834a5235f20c935bb0ff5b549"),
+    ("CORRECTION-SHA256SUMS", "8344e92412d37882ef059b6158ead1959b0fa165"),
+    ("CONTRACT-SHA256SUMS", "a4620f1e9363fbd30b23f06448e8f19174de8192"),
+    ("AP1-CORRECTION-SHA256SUMS", "c12b46497a404171ca41c640f614f0c308ae514b"),
+    ("WITNESS-SHA256SUMS", "e893d0bf7359deb87998ff67e63fbd92aabffd91"),
+    ("BINDING-SHA256SUMS", "6ba38e9fa66f216e45906b3eb0575d67aa0cd071"),
+    ("OPTIONS-SHA256SUMS", BASE),
+]
+for manifest, rev in producers:
+    entries = blob(rev, ROOT + manifest).decode().splitlines()
+    for entry in entries:
+        digest, path = entry.split("  ", 1)
+        assert hashlib.sha256(blob(rev, path)).hexdigest() == digest, (manifest, path)
+    print(f"PASS: {manifest}: {len(entries)} entries at producing revision {rev}")
+text = pathlib.Path(ROOT + "BINDING_OPTIONS_COMPARISON.md").read_text()
+correction = text[text.index('<a id="test-plan-correction"></a>'):]
+links = re.findall(
+    r"https://github\.com/olivexo28/QBIND/blob/([0-9a-f]{40})/([^\s)#]+)#L(\d+)-L(\d+)",
+    correction,
+)
+assert links
+for rev, path, first, last in links:
+    assert rev == MAIN
+    assert 1 <= int(first) <= int(last) <= len(blob(rev, path).decode().splitlines())
+print(f"PASS: {len(links)} new pinned source links and line ranges")
+checks = [
+    ("crates/qbind-crypto/src/ml_dsa44.rs", 36, 43, ["1312", "2560", "2420"]),
+    ("crates/qbind-wire/src/consensus.rs", 304, 327, ["for sig in &self.signatures", "put_bytes(out, sig)"]),
+    ("crates/qbind-wire/src/consensus.rs", 330, 358, ["Vec::with_capacity(sig_count)", "to_vec()"]),
+    ("crates/qbind-wire/src/consensus.rs", 915, 954, ["qc.encode(&mut qc_buf)", "for tx in &self.txs", "put_bytes(&mut out, tx)"]),
+    ("crates/qbind-consensus/src/qc_verify_domain.rs", 877, 912, ["certificate: qc.clone()", "domain: domain.clone()"]),
+    ("crates/qbind-consensus/src/qc_verify_domain.rs", 995, 1057, ["SignatureCountMismatch", "MAX_SIGNATURE_LEN", "MalformedSignature"]),
+    ("crates/qbind-consensus/src/qc_verify_domain.rs", 1059, 1120, ["signature: signature.clone()", "verify_vote_msg_with_domain", "InsufficientVotingPower"]),
+    ("crates/qbind-consensus/src/proposal_vote_verify.rs", 405, 433, ["domain.proposal_preimage(proposal)", "WireChainMismatch"]),
+    ("crates/qbind-consensus/src/proposal_vote_verify.rs", 511, 540, ["domain.vote_preimage(vote)", "WireChainMismatch"]),
+    ("crates/qbind-consensus/src/hotstuff_state_engine.rs", 1819, 1938, ["fn try_commit_with_qc(&mut self", "own_qc", "g_view < p_view && p_view < b_view", "committed_block = Some(g_id.clone())"]),
+]
+for path, first, last, tokens in checks:
+    excerpt = "\n".join(blob(MAIN, path).decode().splitlines()[first - 1:last])
+    for token in tokens:
+        assert token in excerpt, (path, token)
+print(f"PASS: {len(checks)} semantic source-mechanism assertions (manual interpretation also required)")
+for source in ["docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md", ROOT + "README.md"]:
+    content = pathlib.Path(source).read_text()
+    new_text = content[len(blob(BASE, source).decode()):]
+    target = re.search(r"\]\(([^)]+)#test-plan-correction\)", new_text).group(1)
+    dest = pathlib.Path(source).parent / target
+    assert '<a id="test-plan-correction"></a>' in dest.read_text()
+print("PASS: both new relative links resolve to the exact stable test-plan-correction anchor")
+sig = 2420
+qc_fixed = sum([1, 1, 4, 8, 8, 8, 1, 32, 2])
+qc = qc_fixed + 2 + 1 + 2 + 3 * (2 + sig)
+header = sum([1, 4, 8, 8, 8, 32, 32, 2, 2, 4, 8, 1, 8, 32])
+proposal = header + 4 + qc + 4 + 256
+segments = 3 * qc + proposal + sig + 512
+assert (9 * sig, qc_fixed, qc, header, proposal, segments) == (21780, 65, 7336, 150, 7750, 32690)
+assert segments < 65536
+assert 65536 + 2 * sig + 1 == 70377 < 131072
+assert 4 * 1312 == 5248 and 4 * 2560 == 10240
+print("PASS: 21780 signature bytes; QC=7336; Proposal body=7750; R segments<=32690<65536")
+print("PASS: D decoded byte-vector lengths=70377<131072; public keys=5248; setup secret keys=10240")
+print("NOT ESTABLISHED: decoded capacity, total memory, runtime, cancellation or production ingress guarantees")
+print("NOT EXECUTED: all proposed Rust cases and scaffolding; no rendered GitHub click")
+----- END PYTHON -----
+
+Output:
+PASS: all five appended documents preserve exact task-tip byte prefixes
+PASS: 14 other historical evidence/Audit paths remain byte-identical
+PASS: SHA256SUMS: 8 entries at producing revision 61028eb6dbb91f0834a5235f20c935bb0ff5b549
+PASS: CORRECTION-SHA256SUMS: 8 entries at producing revision 8344e92412d37882ef059b6158ead1959b0fa165
+PASS: CONTRACT-SHA256SUMS: 8 entries at producing revision a4620f1e9363fbd30b23f06448e8f19174de8192
+PASS: AP1-CORRECTION-SHA256SUMS: 8 entries at producing revision c12b46497a404171ca41c640f614f0c308ae514b
+PASS: WITNESS-SHA256SUMS: 8 entries at producing revision e893d0bf7359deb87998ff67e63fbd92aabffd91
+PASS: BINDING-SHA256SUMS: 10 entries at producing revision 6ba38e9fa66f216e45906b3eb0575d67aa0cd071
+PASS: OPTIONS-SHA256SUMS: 13 entries at producing revision 0a405c6063d49d8b0d0a4211d091f5405d79b6a6
+PASS: 13 new pinned source links and line ranges
+PASS: 10 semantic source-mechanism assertions (manual interpretation also required)
+PASS: both new relative links resolve to the exact stable test-plan-correction anchor
+PASS: 21780 signature bytes; QC=7336; Proposal body=7750; R segments<=32690<65536
+PASS: D decoded byte-vector lengths=70377<131072; public keys=5248; setup secret keys=10240
+NOT ESTABLISHED: decoded capacity, total memory, runtime, cancellation or production ingress guarantees
+NOT EXECUTED: all proposed Rust cases and scaffolding; no rendered GitHub click
+docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+docs/security/evidence/recovery-resume-inventory-20261107/BINDING_OPTIONS_COMPARISON.md
+docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/README.md
+docs/security/evidence/recovery-resume-inventory-20261107/commands.txt
+Exit 0. Whitespace checks had no output; no untracked repository paths at
+that point. This log and the current manifest were added afterward.
+
+Manual source interpretation confirms that encoded QC signatures are
+duplicated in the Proposal body, decoding allocates vectors before the QC
+verifier, owning successful QC results clone certificates, and QC preflight
+precedes backend calls but does not check a parent graph. Range/token checks
+alone are not evidence that all claims are semantically true.
+
+Historical manifests were checked only at their producing revisions.
+Current appended files intentionally have new hashes; those are not an
+old-manifest pass. The old audit register and evidence files are preserved.
+
+3. Current correction manifest and staging
+
+The current manifest covers five appended documents, the prior options
+check log/manifest and the audit register. It excludes itself and this log
+to avoid circular hashing; report their final hashes separately.
+
+No unsuccessful documentation-check attempts occurred in this correction.
+No unchanged Rust tests/builds or proposed fixture tests were run. No
+production caller, input admission, graph checker, operational signing,
+recovery application, clearance, resume or network activation was implemented.
+
+Final pre-publication scope/whitespace/integrity command, after staging only
+the seven explicit documentation paths:
+$ git diff --cached --check && git diff --check && git diff --cached --name-only && sha256sum -c docs/security/evidence/recovery-resume-inventory-20261107/TEST-PLAN-CORRECTION-SHA256SUMS
+Output:
+docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+docs/security/evidence/recovery-resume-inventory-20261107/BINDING_OPTIONS_COMPARISON.md
+docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/README.md
+docs/security/evidence/recovery-resume-inventory-20261107/TEST-PLAN-CORRECTION-CHECKS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/TEST-PLAN-CORRECTION-SHA256SUMS
+docs/security/evidence/recovery-resume-inventory-20261107/commands.txt
+docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md: OK
+docs/security/evidence/recovery-resume-inventory-20261107/BINDING_OPTIONS_COMPARISON.md: OK
+docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt: OK
+docs/security/evidence/recovery-resume-inventory-20261107/README.md: OK
+docs/security/evidence/recovery-resume-inventory-20261107/commands.txt: OK
+docs/security/evidence/recovery-resume-inventory-20261107/OPTIONS-CHECKS.txt: OK
+docs/security/evidence/recovery-resume-inventory-20261107/OPTIONS-SHA256SUMS: OK
+Audit/QBIND_SECURITY_FINDINGS_REGISTER.md: OK
+Exit 0. No whitespace diagnostics; no Rust source/test path staged.
+The revision-aware script was rerun after refining S/M fixture bounds with
+the same successful results. Its exact body above was compared with the
+session artifact using:
+$ python3 - <<'PY'
+from pathlib import Path
+p=Path('docs/security/evidence/recovery-resume-inventory-20261107/TEST-PLAN-CORRECTION-CHECKS.txt')
+s=p.read_text().split('----- BEGIN PYTHON -----\n',1)[1].split('----- END PYTHON -----',1)[0]
+actual=Path('/root/.copilot/session-state/0d9bc349d569421db76c851feaf5e01c/files/check_test_plan_correction.py').read_text()
+assert s==actual
+print('PASS: durable check record embeds the exact executed script')
+PY
+Output: PASS: durable check record embeds the exact executed script
+Exit 0. Final check-log and manifest hashes are reported separately.

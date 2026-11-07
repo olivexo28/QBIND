@@ -469,3 +469,13 @@ LIMITATIONS for the prior analysis is carried forward within scope; AP1 and
 its navigation follow-up remain PASSED / CLOSED, and earlier bounded
 acceptances remain preserved. See `OPTIONS-CHECKS.txt` and
 `OPTIONS-SHA256SUMS`.
+
+## 13. Superseding test-plan correction
+
+The [stable test-plan correction](BINDING_OPTIONS_COMPARISON.md#test-plan-correction)
+supersedes the original fixture cap and ambiguous checker attribution, while
+preserving the accepted options comparison as an exact byte prefix.
+The user-supplied review is PASS WITH LIMITATIONS for the options comparison
+and CHANGES REQUIRED for its test plan. AP1, I1, W1/W2 and earlier bounded
+acceptances remain preserved; B and C remain unselected. See
+`TEST-PLAN-CORRECTION-CHECKS.txt` and `TEST-PLAN-CORRECTION-SHA256SUMS`.

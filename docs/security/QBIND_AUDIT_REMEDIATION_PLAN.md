@@ -4997,3 +4997,26 @@ See `evidence/recovery-resume-inventory-20261107/OPTIONS-CHECKS.txt` and
 `OPTIONS-SHA256SUMS` for current checks and integrity evidence. A17-F1 /
 RS1-F7, RS1 and A33-F1 / E27 remain **OPEN**; activation remains **DISABLED**;
 public DevNet remains **NO-GO**.
+
+## 41. Superseding binding-options test-plan correction — independent review pending
+
+The [test-plan correction](evidence/recovery-resume-inventory-20261107/BINDING_OPTIONS_COMPARISON.md#test-plan-correction)
+supersedes section 4's infeasible 16 KiB fixture cap and incomplete checker
+attribution. Real ML-DSA-44 signature segments, split decoded-negative and
+proposed pre-materialization/structural fixtures now have separate scopes.
+The feasible proposed encoded-segment cap is not a process-memory or ingress
+guarantee; decoded/retained/backend memory remains separately measured and
+unselected. Each future case identifies its actual verification function or
+unimplemented test-only scaffold, already-allocated input, result and control.
+
+The user supplied **PASS WITH LIMITATIONS** for the options comparison and
+**CHANGES REQUIRED** for the proposed test plan. AP1, I1, W1/W2 and prior
+bounded acceptances remain preserved; B and C remain unselected and current
+refusal remains in force. No reviewer identity or raw artifact is asserted.
+All cases remain **FUTURE / NOT EXECUTED**, with no production caller,
+application, signing authority, quarantine clear or resume capability.
+Current checks and hashes are in
+`evidence/recovery-resume-inventory-20261107/TEST-PLAN-CORRECTION-CHECKS.txt`
+and `TEST-PLAN-CORRECTION-SHA256SUMS`. A17-F1 / RS1-F7, RS1 and A33-F1 / E27
+remain **OPEN**; activation remains **DISABLED**; public DevNet remains
+**NO-GO**.
