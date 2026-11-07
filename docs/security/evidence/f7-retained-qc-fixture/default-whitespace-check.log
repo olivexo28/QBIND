@@ -1,0 +1,128 @@
+UTC_START=2026-11-07T07:49:23Z
+CWD=/workspaces/QBIND/olivexo28/QBIND
+COMMAND=git diff --check 
+REVISION (HEAD, tree, parent):
+01e5731617a1ca2a9894bad4e7c5d54466587c39
+63d25cc32d01d37f382fa101d2ecce7c78cf5cca
+e57a337fd5afc5f1bd2f49ea43a50c0a866c86aa
+WORKTREE_STATUS:
+ M crates/qbind-node/src/binary_consensus_loop.rs
+SOURCE_DIFF_SHA256:
+1ef410220ab8b4ba86376789b816828dd6c77b8fdffaa7e77224387236233db6  -
+TOOLCHAIN:
+rustc 1.99.1 (58cf8f9c3 2026-10-13)
+binary: rustc
+commit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67
+commit-date: 2026-10-13
+host: x86_64-unknown-linux-gnu
+release: 1.99.1
+LLVM version: 23.1.1
+cargo 1.99.1 (5f94df478 2026-08-27)
+stable-x86_64-unknown-linux-gnu (default)
+RELEVANT_ENVIRONMENT:
+CARGO_HOME=/usr/local/cargo
+HOSTNAME=adc-sandbox
+PATH=/usr/local/rubies/current/bin:/usr/local/cargo/bin:/usr/local/share/rbenv/shims:/usr/local/share/rbenv/bin:/usr/local/python/current/bin:/usr/local/py-utils/bin:/usr/local/jupyter:/usr/local/php/current/bin:/usr/local/sdkman/bin:/usr/local/sdkman/candidates/java/current/bin:/usr/local/sdkman/candidates/gradle/current/bin:/usr/local/sdkman/candidates/maven/current/bin:/usr/local/sdkman/candidates/ant/current/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/share/dotnet:/root/.dotnet/tools:/root/.cache/copilot/pkg/linux-x64/1.0.104-4/ripgrep/bin/linux-x64
+RUSTUP_HOME=/usr/local/rustup
+OUTPUT:
+crates/qbind-node/src/binary_consensus_loop.rs:25164: trailing whitespace.
++                    fn run422_f7_retained_qc_missing_locked_block_prevents_eviction() {
+crates/qbind-node/src/binary_consensus_loop.rs:25165: trailing whitespace.
++                        let mut fixture = make_f7_fixture_with_slots(2);
+crates/qbind-node/src/binary_consensus_loop.rs:25166: trailing whitespace.
++                        let lower = retain_lower_qc(&mut fixture);
+crates/qbind-node/src/binary_consensus_loop.rs:25167: trailing whitespace.
++                        fixture.engine.state_mut().set_locked_qc(lower.clone());
+crates/qbind-node/src/binary_consensus_loop.rs:25168: trailing whitespace.
++                        assert!(fixture.engine.state().get_block(&lower.block_id).is_none());
+crates/qbind-node/src/binary_consensus_loop.rs:25169: trailing whitespace.
++                        let before = observe(&fixture.engine);
+crates/qbind-node/src/binary_consensus_loop.rs:25170: trailing whitespace.
++                        assert!(!fixture.engine.state().can_admit_block_slot(&[0xEE; 32]));
+crates/qbind-node/src/binary_consensus_loop.rs:25171: trailing whitespace.
++                        assert!(matches!(
+crates/qbind-node/src/binary_consensus_loop.rs:25172: trailing whitespace.
++                            fixture.engine.state_mut().register_block_with_verified_justification(
+crates/qbind-node/src/binary_consensus_loop.rs:25173: trailing whitespace.
++                                [0xEE; 32], 3, None, Arc::new(fixture.proof.clone()),
+crates/qbind-node/src/binary_consensus_loop.rs:25174: trailing whitespace.
++                            ),
+crates/qbind-node/src/binary_consensus_loop.rs:25175: trailing whitespace.
++                            Err(qbind_consensus::hotstuff_state_engine::EvidenceRetentionError::SlotCapacityUnavailable {
+crates/qbind-node/src/binary_consensus_loop.rs:25176: trailing whitespace.
++                                block_count: 2,
+crates/qbind-node/src/binary_consensus_loop.rs:25177: trailing whitespace.
++                                max_pending_blocks: 2,
+crates/qbind-node/src/binary_consensus_loop.rs:25178: trailing whitespace.
++                            })
+crates/qbind-node/src/binary_consensus_loop.rs:25179: trailing whitespace.
++                        ));
+crates/qbind-node/src/binary_consensus_loop.rs:25180: trailing whitespace.
++                        assert_eq!(observe(&fixture.engine), before);
+crates/qbind-node/src/binary_consensus_loop.rs:25181: trailing whitespace.
++
+crates/qbind-node/src/binary_consensus_loop.rs:25182: trailing whitespace.
++                        // Legacy insertion may exceed the slot limit, but missing
+crates/qbind-node/src/binary_consensus_loop.rs:25183: trailing whitespace.
++                        // protected ancestry is not permission to evict either proof.
+crates/qbind-node/src/binary_consensus_loop.rs:25184: trailing whitespace.
++                        fixture.engine.state_mut().register_block([0xEE; 32], 3, None, None);
+crates/qbind-node/src/binary_consensus_loop.rs:25185: trailing whitespace.
++                        let mut expected = before;
+crates/qbind-node/src/binary_consensus_loop.rs:25186: trailing whitespace.
++                        expected.blocks += 1;
+crates/qbind-node/src/binary_consensus_loop.rs:25187: trailing whitespace.
++                        assert_eq!(observe(&fixture.engine), expected);
+crates/qbind-node/src/binary_consensus_loop.rs:25188: trailing whitespace.
++                        assert_eq!(
+crates/qbind-node/src/binary_consensus_loop.rs:25189: trailing whitespace.
++                            fixture.engine.state().get_block(&[0xCC; 32]).unwrap().justify_qc.as_ref(),
+crates/qbind-node/src/binary_consensus_loop.rs:25190: trailing whitespace.
++                            Some(&fixture.logical_qc),
+crates/qbind-node/src/binary_consensus_loop.rs:25191: trailing whitespace.
++                        );
+crates/qbind-node/src/binary_consensus_loop.rs:25192: trailing whitespace.
++                        assert_eq!(
+crates/qbind-node/src/binary_consensus_loop.rs:25193: trailing whitespace.
++                            fixture.engine.state().get_block(&[0xDD; 32]).unwrap().justify_qc.as_ref(),
+crates/qbind-node/src/binary_consensus_loop.rs:25194: trailing whitespace.
++                            Some(&lower),
+crates/qbind-node/src/binary_consensus_loop.rs:25195: trailing whitespace.
++                        );
+crates/qbind-node/src/binary_consensus_loop.rs:25196: trailing whitespace.
++                        assert!(fixture.engine.state().verified_justification(&[0xCC; 32]).is_some());
+crates/qbind-node/src/binary_consensus_loop.rs:25197: trailing whitespace.
++                        assert!(fixture.engine.state().verified_justification(&[0xDD; 32]).is_some());
+crates/qbind-node/src/binary_consensus_loop.rs:25198: trailing whitespace.
++                    }
+crates/qbind-node/src/binary_consensus_loop.rs:25199: trailing whitespace.
++
+crates/qbind-node/src/binary_consensus_loop.rs:25200: trailing whitespace.
++                    #[test]
+crates/qbind-node/src/binary_consensus_loop.rs:25203: trailing whitespace.
++                            let mut fixture = make_f7_fixture_with_slots(3);
+crates/qbind-node/src/binary_consensus_loop.rs:25205: trailing whitespace.
++                            // The lower QC's proof carrier is not its certified block.
+crates/qbind-node/src/binary_consensus_loop.rs:25206: trailing whitespace.
++                            // Retain a complete lock root so unrelated proof eviction
+crates/qbind-node/src/binary_consensus_loop.rs:25207: trailing whitespace.
++                            // is provably safe under conservative ancestry checks.
+crates/qbind-node/src/binary_consensus_loop.rs:25208: trailing whitespace.
++                            fixture.engine.state_mut().register_block(
+crates/qbind-node/src/binary_consensus_loop.rs:25209: trailing whitespace.
++                                lower.block_id, lower.view, None, None,
+crates/qbind-node/src/binary_consensus_loop.rs:25210: trailing whitespace.
++                            );
+crates/qbind-node/src/binary_consensus_loop.rs:25230: trailing whitespace.
++                            assert_eq!(fixture.engine.state().block_count(), 3);
+crates/qbind-node/src/binary_consensus_loop.rs:25231: trailing whitespace.
++                            assert!(fixture.engine.state().get_block(&lower.block_id).unwrap().parent_id.is_none());
+crates/qbind-node/src/binary_consensus_loop.rs:25232: trailing whitespace.
++                            assert!(fixture.engine.state().can_admit_block_slot(&[0xEE; 32]));
+crates/qbind-node/src/binary_consensus_loop.rs:25236: trailing whitespace.
++                            assert_eq!(fixture.engine.state().block_count(), 3);
+crates/qbind-node/src/binary_consensus_loop.rs:25237: trailing whitespace.
++                            assert!(fixture.engine.state().get_block(&lower.block_id).is_some());
+
+EXIT_CODE=2
+UTC_END=2026-11-07T07:49:23Z

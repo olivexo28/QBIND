@@ -4563,3 +4563,43 @@ regressions pass 485/485. Production compile and scope/format checks are
 recorded in that package. No authenticated-network reachability, exploit,
 unsafe production vote, signing-authority change or operational activation
 is established. Only the new task branch is published, without PR or merge.
+
+## 26. F7 retained-QC formed-TC library fixture correction
+
+**CORRECTION — INDEPENDENT REVIEW PENDING. Reviewer UNASSIGNED.**
+
+The reported eviction-counter assertion was independently reproduced by an
+exact single-test library run on clean, directly verified main
+`01e5731617a1ca2a9894bad4e7c5d54466587c39`, tree
+`63d25cc32d01d37f382fa101d2ecce7c78cf5cca`. The original reported run's
+command, revision, features and environment remain unknown. Its separately
+reported successful controlled-observer unwind is not the failing test.
+
+The unchanged F7 fixture locks the lower QC's certified block without retaining
+that block. Conservative eviction correctly cannot prove that this missing
+protected ancestry excludes either proof carrier. An isolated comparison
+passes at `60c03f9fc3f9860a14a971c0923363d7257059ac` and fails at its immediate
+conservative-eviction successor `38a0180c3905d02ff252f4b98915265271c730b4`.
+This establishes a fixture precondition mismatch, not flakiness or a reason
+to relax the accepted fail-closed predicate.
+
+The test-only correction retains a complete synthetic lower-lock root and
+allows its additional slot while still requiring real pressure, exactly one
+selected-proof eviction, lower-proof retention, refusal by both formed-TC
+handler paths and recovery only after genuine selected-proof restoration.
+A separate control requires the original missing-lock state to prevent
+eviction, including atomic verified-registration refusal and unchanged
+evidence/accounting. Production behavior is unchanged.
+
+The [revision-pinned investigation package](evidence/f7-retained-qc-fixture/README.md)
+retains exact commands, outputs, exit codes, native prerequisite restoration,
+failed compile/check attempts, before/after revision controls and limitations.
+Corrected focused test: 1/1. Direct retained-QC/TC, eviction and locking
+regressions: 134/134 (focused case also included). No full-suite or original-run
+provenance claim is made. Historical bytes and accepted checks remain unchanged;
+this append does not independently accept or close a consensus-policy finding.
+
+A33-F1 / E27 and all other unresolved obligations remain **OPEN**.
+Activation remains **DISABLED**; public DevNet remains **NO-GO**.
+Only `copilot/investigate-retained-qc-tc-eviction` is published, without PR,
+merge, main push or force-push.

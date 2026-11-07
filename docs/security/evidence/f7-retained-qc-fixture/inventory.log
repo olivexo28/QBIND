@@ -1,0 +1,80 @@
+UTC_START=2026-11-07T07:41:30Z
+CWD=/workspaces/QBIND/olivexo28/QBIND
+COMMAND=bash -c git\ remote\ -v\;\ git\ ls-remote\ origin\ refs/heads/main\;\ git\ status\ --porcelain=v1\;\ uname\ -a\;\ cat\ /etc/os-release\;\ nproc\;\ df\ -h\ .\;\ dpkg-query\ -W\ libclang-dev\ libclang-18-dev\ librocksdb-dev\;\ cc\ --version\;\ c++\ --version\;\ git\ show\ --format=fuller\ --stat\ 38a0180c3905d02ff252f4b98915265271c730b4\;\ git\ diff\ 60c03f9fc3f9860a14a971c0923363d7257059ac\ HEAD\ --\ crates/qbind-node/src/binary_consensus_loop.rs\;\ git\ show\ 60c03f9:crates/qbind-node/src/binary_consensus_loop.rs\ \|\ sha256sum\;\ sha256sum\ crates/qbind-node/src/binary_consensus_loop.rs 
+REVISION (HEAD, tree, parent):
+01e5731617a1ca2a9894bad4e7c5d54466587c39
+63d25cc32d01d37f382fa101d2ecce7c78cf5cca
+e57a337fd5afc5f1bd2f49ea43a50c0a866c86aa
+WORKTREE_STATUS:
+SOURCE_DIFF_SHA256:
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  -
+TOOLCHAIN:
+rustc 1.99.1 (58cf8f9c3 2026-10-13)
+binary: rustc
+commit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67
+commit-date: 2026-10-13
+host: x86_64-unknown-linux-gnu
+release: 1.99.1
+LLVM version: 23.1.1
+cargo 1.99.1 (5f94df478 2026-08-27)
+stable-x86_64-unknown-linux-gnu (default)
+RELEVANT_ENVIRONMENT:
+CARGO_HOME=/usr/local/cargo
+HOSTNAME=adc-sandbox
+PATH=/usr/local/rubies/current/bin:/usr/local/cargo/bin:/usr/local/share/rbenv/shims:/usr/local/share/rbenv/bin:/usr/local/python/current/bin:/usr/local/py-utils/bin:/usr/local/jupyter:/usr/local/php/current/bin:/usr/local/sdkman/bin:/usr/local/sdkman/candidates/java/current/bin:/usr/local/sdkman/candidates/gradle/current/bin:/usr/local/sdkman/candidates/maven/current/bin:/usr/local/sdkman/candidates/ant/current/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/share/dotnet:/root/.dotnet/tools:/root/.cache/copilot/pkg/linux-x64/1.0.104-4/ripgrep/bin/linux-x64
+RUSTUP_HOME=/usr/local/rustup
+OUTPUT:
+origin	https://github.com/olivexo28/QBIND (fetch)
+origin	https://github.com/olivexo28/QBIND (push)
+01e5731617a1ca2a9894bad4e7c5d54466587c39	refs/heads/main
+Linux adc-sandbox 6.12.8+ #1 SMP Thu Jul 30 23:01:31 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+PRETTY_NAME="Ubuntu 24.04.3 LTS"
+NAME="Ubuntu"
+VERSION_ID="24.04"
+VERSION="24.04.3 LTS (Noble Numbat)"
+VERSION_CODENAME=noble
+ID=ubuntu
+ID_LIKE=debian
+HOME_URL="https://www.ubuntu.com/"
+SUPPORT_URL="https://help.ubuntu.com/"
+BUG_REPORT_URL="https://bugs.launchpad.net/ubuntu/"
+PRIVACY_POLICY_URL="https://www.ubuntu.com/legal/terms-and-policies/privacy-policy"
+UBUNTU_CODENAME=noble
+LOGO=ubuntu-logo
+2
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/vdb         19G  9.0G  8.3G  53% /
+libclang-18-dev	1:18.1.3-1ubuntu1
+libclang-dev	1:18.0-59~exp2
+librocksdb-dev	8.9.1-2
+cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
+Copyright (C) 2023 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+c++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
+Copyright (C) 2023 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+commit 38a0180c3905d02ff252f4b98915265271c730b4
+Author:     olivexo28 <158057167+olivexo28@users.noreply.github.com>
+AuthorDate: Thu Nov 5 09:15:56 2026 +0000
+Commit:     olivexo28 <158057167+olivexo28@users.noreply.github.com>
+CommitDate: Thu Nov 5 09:15:56 2026 +0000
+
+    fix(consensus): bound eviction ancestry and protect indeterminate chains
+    
+    Use retained-map cardinality, not a new protocol limit, for both ancestry walks. Preserve committed, lock and QC protections, refuse uncertain slot admission without accounting mutation, and retain legacy capacity semantics. Voting semantics are unchanged.
+    
+    Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
+
+ .../qbind-consensus/src/hotstuff_state_engine.rs   |  94 ++++++---
+ crates/qbind-consensus/src/qc_verify_domain.rs     | 234 +++++++++++++++++++++
+ docs/security/evidence/a33_f1/run_witnesses.py     |  74 +++++++
+ 3 files changed, 375 insertions(+), 27 deletions(-)
+87a6dc3870308838c58cb1ecfe8ca3f527b941517dcf3735cdf596c2005d06f7  -
+87a6dc3870308838c58cb1ecfe8ca3f527b941517dcf3735cdf596c2005d06f7  crates/qbind-node/src/binary_consensus_loop.rs
+
+EXIT_CODE=0
+UTC_END=2026-11-07T07:41:31Z

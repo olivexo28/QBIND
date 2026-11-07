@@ -1,0 +1,83 @@
+UTC_START=2026-11-07T07:52:53Z
+CWD=/workspaces/QBIND/olivexo28/QBIND
+COMMAND=git -c core.whitespace=cr-at-eol diff --cached --check 
+REVISION (HEAD, tree, parent):
+01e5731617a1ca2a9894bad4e7c5d54466587c39
+63d25cc32d01d37f382fa101d2ecce7c78cf5cca
+e57a337fd5afc5f1bd2f49ea43a50c0a866c86aa
+WORKTREE_STATUS:
+M  crates/qbind-node/src/binary_consensus_loop.rs
+M  docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+A  docs/security/evidence/f7-retained-qc-fixture/README.md
+A  docs/security/evidence/f7-retained-qc-fixture/base-isolated-restored.log
+A  docs/security/evidence/f7-retained-qc-fixture/base-isolated.log
+A  docs/security/evidence/f7-retained-qc-fixture/consensus-ancestry-unit-controls.log
+A  docs/security/evidence/f7-retained-qc-fixture/consensus-regressions.log
+A  docs/security/evidence/f7-retained-qc-fixture/corrected-c3f.log
+A  docs/security/evidence/f7-retained-qc-fixture/corrected-focused-restored.log
+A  docs/security/evidence/f7-retained-qc-fixture/corrected-focused.log
+A  docs/security/evidence/f7-retained-qc-fixture/corrected-timeout-handlers.log
+A  docs/security/evidence/f7-retained-qc-fixture/crlf-whitespace-check.log
+A  docs/security/evidence/f7-retained-qc-fixture/default-whitespace-check.log
+A  docs/security/evidence/f7-retained-qc-fixture/dependencies.log
+A  docs/security/evidence/f7-retained-qc-fixture/inventory.log
+A  docs/security/evidence/f7-retained-qc-fixture/post-eviction-isolated.log
+A  docs/security/evidence/f7-retained-qc-fixture/pre-eviction-isolated.log
+A  docs/security/evidence/f7-retained-qc-fixture/run-control.sh
+A  docs/security/evidence/f7-retained-qc-fixture/scope-check.log
+A  docs/security/evidence/f7-retained-qc-fixture/scope-check.py
+SOURCE_DIFF_SHA256:
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  -
+TOOLCHAIN:
+rustc 1.99.1 (58cf8f9c3 2026-10-13)
+binary: rustc
+commit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67
+commit-date: 2026-10-13
+host: x86_64-unknown-linux-gnu
+release: 1.99.1
+LLVM version: 23.1.1
+cargo 1.99.1 (5f94df478 2026-08-27)
+stable-x86_64-unknown-linux-gnu (default)
+RELEVANT_ENVIRONMENT:
+CARGO_HOME=/usr/local/cargo
+HOSTNAME=adc-sandbox
+PATH=/usr/local/rubies/current/bin:/usr/local/cargo/bin:/usr/local/share/rbenv/shims:/usr/local/share/rbenv/bin:/usr/local/python/current/bin:/usr/local/py-utils/bin:/usr/local/jupyter:/usr/local/php/current/bin:/usr/local/sdkman/bin:/usr/local/sdkman/candidates/java/current/bin:/usr/local/sdkman/candidates/gradle/current/bin:/usr/local/sdkman/candidates/maven/current/bin:/usr/local/sdkman/candidates/ant/current/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/share/dotnet:/root/.dotnet/tools:/root/.cache/copilot/pkg/linux-x64/1.0.104-4/ripgrep/bin/linux-x64
+RUSTUP_HOME=/usr/local/rustup
+OUTPUT:
+docs/security/evidence/f7-retained-qc-fixture/base-isolated-restored.log:462: trailing whitespace.
++test binary_consensus_loop::tests::run420::run422_d7a::run422_d7c3e::c3f::run422_f7_retained_qc::run422_f7_retained_qc_formed_tc_handlers_refuse_evicted_selected_proof_then_recover ... 
+docs/security/evidence/f7-retained-qc-fixture/consensus-ancestry-unit-controls.log:3: trailing whitespace.
++COMMAND=cargo test --locked -p qbind-consensus --lib a33_f1_ -- --nocapture --test-threads=2 
+docs/security/evidence/f7-retained-qc-fixture/consensus-regressions.log:3: trailing whitespace.
++COMMAND=cargo test --locked -p qbind-consensus --test a33_f1_eviction_ancestry_tests --test consensus_state_memory_limits_tests --test hotstuff_state_locking_tests --test hotstuff_locked_block_safety_tests --test m5_timeout_view_change_tests -- --nocapture --test-threads=2 
+docs/security/evidence/f7-retained-qc-fixture/corrected-c3f.log:3: trailing whitespace.
++COMMAND=cargo test --locked -p qbind-node --lib binary_consensus_loop::tests::run420::run422_d7a::run422_d7c3e::c3f:: -- --nocapture --test-threads=2 
+docs/security/evidence/f7-retained-qc-fixture/corrected-focused-restored.log:3: trailing whitespace.
++COMMAND=cargo test --locked -p qbind-node --lib binary_consensus_loop::tests::run420::run422_d7a::run422_d7c3e::c3f::run422_f7_retained_qc::run422_f7_retained_qc_formed_tc_handlers_refuse_evicted_selected_proof_then_recover -- --exact --nocapture --test-threads=1 
+docs/security/evidence/f7-retained-qc-fixture/corrected-focused.log:3: trailing whitespace.
++COMMAND=cargo test --locked -p qbind-node --lib binary_consensus_loop::tests::run420::run422_d7a::run422_d7c3e::c3f::run422_f7_retained_qc::run422_f7_retained_qc_formed_tc_handlers_refuse_evicted_selected_proof_then_recover -- --exact --nocapture --test-threads=1 
+docs/security/evidence/f7-retained-qc-fixture/corrected-timeout-handlers.log:3: trailing whitespace.
++COMMAND=cargo test --locked -p qbind-node --lib binary_consensus_loop::tests::run030:: -- --nocapture --test-threads=2 
+docs/security/evidence/f7-retained-qc-fixture/crlf-whitespace-check.log:3: trailing whitespace.
++COMMAND=git -c core.whitespace=cr-at-eol diff --check 
+docs/security/evidence/f7-retained-qc-fixture/default-whitespace-check.log:3: trailing whitespace.
++COMMAND=git diff --check 
+docs/security/evidence/f7-retained-qc-fixture/dependencies.log:9: trailing whitespace.
++dpkg-preconfigure: unable to re-open stdin: 
+docs/security/evidence/f7-retained-qc-fixture/inventory.log:3: trailing whitespace.
++COMMAND=bash -c git\ remote\ -v\;\ git\ ls-remote\ origin\ refs/heads/main\;\ git\ status\ --porcelain=v1\;\ uname\ -a\;\ cat\ /etc/os-release\;\ nproc\;\ df\ -h\ .\;\ dpkg-query\ -W\ libclang-dev\ libclang-18-dev\ librocksdb-dev\;\ cc\ --version\;\ c++\ --version\;\ git\ show\ --format=fuller\ --stat\ 38a0180c3905d02ff252f4b98915265271c730b4\;\ git\ diff\ 60c03f9fc3f9860a14a971c0923363d7257059ac\ HEAD\ --\ crates/qbind-node/src/binary_consensus_loop.rs\;\ git\ show\ 60c03f9:crates/qbind-node/src/binary_consensus_loop.rs\ \|\ sha256sum\;\ sha256sum\ crates/qbind-node/src/binary_consensus_loop.rs 
+docs/security/evidence/f7-retained-qc-fixture/inventory.log:67: trailing whitespace.
++    
+docs/security/evidence/f7-retained-qc-fixture/inventory.log:69: trailing whitespace.
++    
+docs/security/evidence/f7-retained-qc-fixture/post-eviction-isolated.log:3: trailing whitespace.
++COMMAND=cargo test --locked -p qbind-node --lib binary_consensus_loop::tests::run420::run422_d7a::run422_d7c3e::c3f::run422_f7_retained_qc::run422_f7_retained_qc_formed_tc_handlers_refuse_evicted_selected_proof_then_recover -- --exact --nocapture --test-threads=1 
+docs/security/evidence/f7-retained-qc-fixture/post-eviction-isolated.log:409: trailing whitespace.
++test binary_consensus_loop::tests::run420::run422_d7a::run422_d7c3e::c3f::run422_f7_retained_qc::run422_f7_retained_qc_formed_tc_handlers_refuse_evicted_selected_proof_then_recover ... 
+docs/security/evidence/f7-retained-qc-fixture/pre-eviction-isolated.log:3: trailing whitespace.
++COMMAND=cargo test --locked -p qbind-node --lib binary_consensus_loop::tests::run420::run422_d7a::run422_d7c3e::c3f::run422_f7_retained_qc::run422_f7_retained_qc_formed_tc_handlers_refuse_evicted_selected_proof_then_recover -- --exact --nocapture --test-threads=1 
+docs/security/evidence/f7-retained-qc-fixture/scope-check.log:3: trailing whitespace.
++COMMAND=python docs/security/evidence/f7-retained-qc-fixture/scope-check.py 
+
+EXIT_CODE=2
+UTC_END=2026-11-07T07:52:53Z

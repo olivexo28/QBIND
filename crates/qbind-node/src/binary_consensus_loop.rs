@@ -25161,10 +25161,53 @@ mod tests {
                     }
 
                     #[test]
+                    fn run422_f7_retained_qc_missing_locked_block_prevents_eviction() {
+                        let mut fixture = make_f7_fixture_with_slots(2);
+                        let lower = retain_lower_qc(&mut fixture);
+                        fixture.engine.state_mut().set_locked_qc(lower.clone());
+                        assert!(fixture.engine.state().get_block(&lower.block_id).is_none());
+                        let before = observe(&fixture.engine);
+                        assert!(!fixture.engine.state().can_admit_block_slot(&[0xEE; 32]));
+                        assert!(matches!(
+                            fixture.engine.state_mut().register_block_with_verified_justification(
+                                [0xEE; 32], 3, None, Arc::new(fixture.proof.clone()),
+                            ),
+                            Err(qbind_consensus::hotstuff_state_engine::EvidenceRetentionError::SlotCapacityUnavailable {
+                                block_count: 2,
+                                max_pending_blocks: 2,
+                            })
+                        ));
+                        assert_eq!(observe(&fixture.engine), before);
+
+                        // Legacy insertion may exceed the slot limit, but missing
+                        // protected ancestry is not permission to evict either proof.
+                        fixture.engine.state_mut().register_block([0xEE; 32], 3, None, None);
+                        let mut expected = before;
+                        expected.blocks += 1;
+                        assert_eq!(observe(&fixture.engine), expected);
+                        assert_eq!(
+                            fixture.engine.state().get_block(&[0xCC; 32]).unwrap().justify_qc.as_ref(),
+                            Some(&fixture.logical_qc),
+                        );
+                        assert_eq!(
+                            fixture.engine.state().get_block(&[0xDD; 32]).unwrap().justify_qc.as_ref(),
+                            Some(&lower),
+                        );
+                        assert!(fixture.engine.state().verified_justification(&[0xCC; 32]).is_some());
+                        assert!(fixture.engine.state().verified_justification(&[0xDD; 32]).is_some());
+                    }
+
+                    #[test]
                     fn run422_f7_retained_qc_formed_tc_handlers_refuse_evicted_selected_proof_then_recover() {
                         for local_trigger in [false, true] {
-                            let mut fixture = make_f7_fixture_with_slots(2);
+                            let mut fixture = make_f7_fixture_with_slots(3);
                             let lower = retain_lower_qc(&mut fixture);
+                            // The lower QC's proof carrier is not its certified block.
+                            // Retain a complete lock root so unrelated proof eviction
+                            // is provably safe under conservative ancestry checks.
+                            fixture.engine.state_mut().register_block(
+                                lower.block_id, lower.view, None, None,
+                            );
                             fixture.engine.state_mut().set_locked_qc(lower.clone());
                             let signer = Arc::new(CountingTimeoutSigner {
                                 inner: LocalKeySigner::new(
@@ -25184,9 +25227,14 @@ mod tests {
                             }
                             assert_eq!(fixture.engine.timeout_count(0), 2);
                             assert_eq!(stats.retained_qc_admission_rejected_total, 0);
+                            assert_eq!(fixture.engine.state().block_count(), 3);
+                            assert!(fixture.engine.state().get_block(&lower.block_id).unwrap().parent_id.is_none());
+                            assert!(fixture.engine.state().can_admit_block_slot(&[0xEE; 32]));
                             let evictions = fixture.engine.state().evicted_blocks();
                             fixture.engine.state_mut().register_block([0xEE; 32], 3, None, None);
                             assert_eq!(fixture.engine.state().evicted_blocks(), evictions + 1);
+                            assert_eq!(fixture.engine.state().block_count(), 3);
+                            assert!(fixture.engine.state().get_block(&lower.block_id).is_some());
                             assert!(fixture.engine.state().get_block(&[0xCC; 32]).is_none());
                             assert!(fixture.engine.state()
                                 .retained_qc_for_timeout_projection(&fixture.logical_qc)
