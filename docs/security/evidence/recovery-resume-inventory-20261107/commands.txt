@@ -700,3 +700,9 @@ manifest checks and scope are in `TEST-PLAN-CORRECTION-CHECKS.txt`;
 new delivery hashes are in `TEST-PLAN-CORRECTION-SHA256SUMS`.
 No unchanged Rust tests or builds were rerun. All proposed cases remain
 FUTURE / NOT EXECUTED.
+
+Structural-control correction: exact arithmetic/source/link, scope, prefix,
+whitespace and revision-aware integrity commands and results are recorded in
+`STRUCTURAL-CONTROL-CHECKS.txt`; current hashes are in
+`STRUCTURAL-CONTROL-SHA256SUMS`. No Rust tests/builds were rerun; all proposed
+structural cases remain FUTURE / NOT EXECUTED.

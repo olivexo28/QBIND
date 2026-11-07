@@ -5020,3 +5020,22 @@ Current checks and hashes are in
 and `TEST-PLAN-CORRECTION-SHA256SUMS`. A17-F1 / RS1-F7, RS1 and A33-F1 / E27
 remain **OPEN**; activation remains **DISABLED**; public DevNet remains
 **NO-GO**.
+
+## 42. Non-monotonic structural-control correction — independent review pending
+
+The [superseding structural-control instruction](evidence/recovery-resume-inventory-20261107/BINDING_OPTIONS_COMPARISON.md#structural-control-correction)
+replaces "lower baseline endpoint" with fixed G/P/B values and coherent
+baselines at height/view 9, 10 and 11 for candidate G at 10/10.
+The positive case advances beyond baseline; equal/below cases must reach
+the same proposed checker's non-monotonic predicate with all other
+prerequisites valid. These remain test-only, FUTURE / NOT EXECUTED; the
+private mutating engine function is not executed.
+
+The user supplied PASS WITH LIMITATIONS; fixture-budget and
+entrypoint/oracle findings are PASSED / CLOSED within scope. Earlier
+bounded acceptances and historical bytes remain preserved. No reviewer
+identity or raw artifact is asserted. B/C remain unselected; current refusal
+remains in force. Current correction records are in
+`evidence/recovery-resume-inventory-20261107/STRUCTURAL-CONTROL-CHECKS.txt`
+and `STRUCTURAL-CONTROL-SHA256SUMS`. A17-F1 / RS1-F7, RS1 and A33-F1 / E27
+remain OPEN; activation remains DISABLED; public DevNet remains NO-GO.

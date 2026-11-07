@@ -479,3 +479,12 @@ The user-supplied review is PASS WITH LIMITATIONS for the options comparison
 and CHANGES REQUIRED for its test plan. AP1, I1, W1/W2 and earlier bounded
 acceptances remain preserved; B and C remain unselected. See
 `TEST-PLAN-CORRECTION-CHECKS.txt` and `TEST-PLAN-CORRECTION-SHA256SUMS`.
+
+## 14. Non-monotonic structural-control correction
+
+The [superseding structural control](BINDING_OPTIONS_COMPARISON.md#structural-control-correction)
+fixes the remaining baseline-direction instruction without changing the
+accepted budgets or entrypoint/oracle distinctions. The proposed test-only
+checker compares fixed G at 10/10 to coherent baselines at 9/9, 10/10 and
+11/11. All cases remain FUTURE / NOT EXECUTED. See
+`STRUCTURAL-CONTROL-CHECKS.txt` and `STRUCTURAL-CONTROL-SHA256SUMS`.

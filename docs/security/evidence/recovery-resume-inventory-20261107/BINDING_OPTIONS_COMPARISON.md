@@ -429,3 +429,87 @@ durable application, currentness, ownership, signing-history continuity,
 signer exclusivity, quarantine clearance and resume. Unknown or missing
 evidence retains refusal. No source/tests, checker, format or authority have
 been added; activation remains DISABLED and public DevNet remains NO-GO.
+
+<a id="structural-control-correction"></a>
+
+## 7. Superseding non-monotonic structural control
+
+**STRUCTURAL-CONTROL CORRECTION — INDEPENDENT REVIEW PENDING.**
+
+The user supplied **PASS WITH LIMITATIONS**: the fixture-budget and
+entrypoint/oracle findings are **PASSED / CLOSED** within scope. This
+addendum supersedes only the section 6.2 G/P/B structural row's instruction
+to "lower baseline endpoint" for the non-monotonic negative control.
+Lowering an otherwise coherent baseline can make G *more* eligible; it does
+not test the intended refusal. Accepted budgets and entrypoint distinctions,
+AP1, I1, W1/W2 and earlier bounded acceptances remain preserved. No reviewer
+identity or unavailable raw review artifact is asserted.
+
+**Proposed checker:** the same unimplemented, test-only
+`test_check_gpb_associations` from profile M. All three cases are
+**FUTURE / NOT EXECUTED**. Inputs are already allocated structural records
+and borrowed R fixture associations, not network input or production state.
+No signature backend or private mutating engine function is executed by M.
+
+Use the following fixed graph and exact scalar values:
+
+| Record | ID label | Parent | Height | View | Certificate/content association |
+|---|---|---|---:|---:|---|
+| Trusted anchor A | A | Outside slice | 9 | 9 | Independently supplied fixture anchor; no new QC required for A. |
+| Candidate G | G | A | 10 | 10 | Present own-QC summary for G and matching explicit test content/parent oracle. |
+| Supporting P | P | G | 11 | 11 | Present own-QC summary for P and matching explicit test content/parent oracle. |
+| Supporting B | B | P | 12 | 12 | Present own-QC summary for B and matching explicit test content/parent oracle. |
+
+Each label denotes a distinct fixed test identifier, with the exact same
+mapping in every case. All records and summaries use the same trusted
+fixture chain, epoch and authority. G/P/B views are strictly increasing,
+heights and full parent links are continuous, and no evidence is missing,
+oversized, conflicting or substituted. Requested endpoint is **always G**,
+not P/B. The baseline is a coherent tuple `(ID, height, view)` referencing
+an existing graph/anchor record; its height and view must match that record.
+
+| Case | Baseline tuple | Candidate tuple | Expected proposed result |
+|---|---|---|---|
+| Passing control | (A, 9, 9) | (G, 10, 10) | Structural `Ok`: G is strictly beyond baseline in height and view, with distinct ID. Only G has candidate support; no application/commit action occurs. |
+| Equal negative | (G, 10, 10) | (G, 10, 10) | `NonMonotonicEndpoint`: G equals baseline; neither strict inequality holds and ID is the same. |
+| Below negative | (P, 11, 11) | (G, 10, 10) | `NonMonotonicEndpoint`: G is below baseline in both height and view, despite valid G/P/B support. |
+
+For this model, baseline tuples are independently supplied **trusted test
+inputs**. The below case references P as a previously accepted baseline,
+not as a block newly finalized by G's witness. Replaying an older candidate
+against a newer retained baseline is a coherent structural rejection test.
+The three-record witness does **not** prove P's historical finality, nor
+provide a new trusted baseline, currentness or per-block prefix coverage.
+Reconstructing a production history that authenticated that baseline remains
+outside the model and unresolved; do not claim that this fixture supplies it.
+The anchor, G/P/B records and all associations remain fixed; only the
+baseline tuple changes between cases. No record has inconsistent height,
+view or ID, and no missing-baseline lookup/fallback is exercised.
+
+The proposed checker must first confirm the unchanged graph, own-QC
+summaries, parent/content oracle, epoch and requested-G prerequisites and
+coherent baseline tuple. Then observe the intended predicate:
+`G.height > baseline.height && G.view > baseline.view && G.id != baseline.id`.
+Record that all prior predicates passed and the monotonic predicate was
+reached. Both negatives must return `NonMonotonicEndpoint` **at that
+predicate**, not `UnprovenEndpoint`, transition, parent or missing-evidence
+failure from an earlier check. Restore baseline A for a passing control.
+A test-only defect variant that bypasses monotonic admission must make both
+negative assertions fail; it must never invoke a protected effect.
+
+This is a proposed structural predicate with proposed result labels. The
+[pinned source monotonic checks](https://github.com/olivexo28/QBIND/blob/9bf0eb43e4e3c601d02d3886d220b0abeb3a103e/crates/qbind-consensus/src/hotstuff_state_engine.rs#L1887-L1922)
+separately require increasing height, reject the already committed ID and
+compare view when the committed node is present. These fixtures intentionally
+provide that node rather than test source fallback behavior. They do not
+execute `try_commit_with_qc`, establish production caller coverage or
+authenticate content/consensus finality. If future scaffolding imposes an
+additional rule that makes these coherent baseline tuples inadmissible
+before monotonic admission, report that test coverage as **UNRESOLVED** and
+review the model; do not credit an unrelated refusal as the intended result.
+
+B/C remain unselected and current refusal remains in force. Verification
+remains separate from durable application, ownership, currentness,
+signing-history continuity, signer exclusivity, clearance and resume.
+A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN. Activation remains
+DISABLED; public DevNet remains NO-GO.

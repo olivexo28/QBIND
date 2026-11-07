@@ -59,3 +59,12 @@ docs/security/evidence/recovery-resume-inventory-20261107/commands.txt
 docs/security/evidence/recovery-resume-inventory-20261107/BINDING_OPTIONS_COMPARISON.md
 docs/security/evidence/recovery-resume-inventory-20261107/TEST-PLAN-CORRECTION-CHECKS.txt
 docs/security/evidence/recovery-resume-inventory-20261107/TEST-PLAN-CORRECTION-SHA256SUMS
+
+Non-monotonic structural-control correction:
+docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+docs/security/evidence/recovery-resume-inventory-20261107/BINDING_OPTIONS_COMPARISON.md
+docs/security/evidence/recovery-resume-inventory-20261107/README.md
+docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/commands.txt
+docs/security/evidence/recovery-resume-inventory-20261107/STRUCTURAL-CONTROL-CHECKS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/STRUCTURAL-CONTROL-SHA256SUMS
