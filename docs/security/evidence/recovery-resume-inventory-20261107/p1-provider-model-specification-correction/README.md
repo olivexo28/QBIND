@@ -246,10 +246,13 @@ and content claim. The largest structurally valid envelope is therefore:
 This is a feasible valid at-limit fixture for 8 members, 1,312-byte keys,
 32-byte source ID and 256-byte content. It is below the separate
 16,384-byte envelope ceiling. The 16,384-byte ceiling test is deliberately
-**size-gate-only**: a claimed/actual 16,384-byte buffer passes the size
-predicate, but cannot be a structurally valid envelope under this exact
+**size-gate-only**: a 16,384-byte descriptor passes the descriptor-size
+predicate without inspecting or materializing bytes. If its callback later
+returns exactly 16,384 bytes, the actual-length gate also passes, but strict
+framing cannot accept that buffer as a valid envelope under this exact
 schema; it must not be reported as a successful decode or admission. A
-16,385-byte envelope refuses at the size gate before materialization.
+16,385-byte claimed or actual envelope refuses at its corresponding size
+gate before the next stage.
 Separate valid 11,339-byte max-schema fixture proves scanner/decoder progress.
 
 The reproducible max-schema fixture values are: network `[0x10; 32]`,

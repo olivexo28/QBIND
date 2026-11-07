@@ -74,15 +74,22 @@ Checker attempt records (all complete stdout/stderr/exit files are retained):
   `PASS: correction links and appended plan/index discoverability`; all other
   stdout lines match `03`.
 
+After the 06 run, a final wording review caught that the size-gate-only
+descriptor case must not be phrased as observing actual bytes before its
+callback. The spec now states that the descriptor-size predicate sees only
+the claim; returned bytes are length-compared after callback and before
+framing. The prior 01-06 raw outputs remain preserved. The final rerun below
+checks the corrected exact wording.
+
 Final checker command and capture:
 ```sh
 python3 docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-specification-correction/check_artifacts.py \
-  >docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-specification-correction/06-correction-integrity.stdout \
-  2>docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-specification-correction/06-correction-integrity.stderr
+  >docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-specification-correction/07-correction-integrity.stdout \
+  2>docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-specification-correction/07-correction-integrity.stderr
 result=$?
-printf '%s\n' "$result" >docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-specification-correction/06-correction-integrity.exit
-cat docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-specification-correction/06-correction-integrity.stdout \
-  docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-specification-correction/06-correction-integrity.stderr
+printf '%s\n' "$result" >docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-specification-correction/07-correction-integrity.exit
+cat docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-specification-correction/07-correction-integrity.stdout \
+  docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-specification-correction/07-correction-integrity.stderr
 exit "$result"
 ```
 
@@ -102,7 +109,8 @@ paths = [
     root / "p1-provider-model-specification/SHA256SUMS",
 ]
 paths += [p for p in here.iterdir()
-          if p.is_file() and p != out and not p.name.startswith("06-manifest-check.")]
+          if p.is_file() and p != out
+          and not p.name.startswith(("06-manifest-check.", "08-manifest-check."))]
 paths = sorted(set(paths))
 out.write_text("".join(
     f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.as_posix()}\n"
@@ -113,8 +121,9 @@ PY
 sha256sum -c docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-specification-correction/SHA256SUMS
 ```
 
-The final checker `06-correction-integrity` exited 0 after the logged
-specification/command changes. Its full stdout is:
+The earlier checker `06-correction-integrity` exited 0 after the
+specification/command changes but before the final descriptor wording
+clarification. Its full stdout was:
 ```text
 PASS: four exact append-only prefixes at correction base
 PASS: 119 prior evidence files and audit register unchanged
@@ -127,10 +136,16 @@ PASS: whitespace checks; no Rust test/build execution
 NOT ESTABLISHED: production authority, wire compatibility, memory/runtime guarantees, application, signing, fencing or resume
 ```
 
-Its full stderr is empty; `.stdout`, `.stderr`, and `.exit` are preserved.
-The `06-correction-integrity.*` files and manifest verification transcript
-are listed in `CHANGED_PATHS.txt`; the manifest intentionally excludes itself
-and its own verification transcript to avoid self-reference. The manifest
+The final `07-correction-integrity` reran after the descriptor wording change
+and exited 0 with identical stdout and empty stderr. Both `.stdout`,
+`.stderr`, and `.exit` files are preserved.
+
+The `06-manifest-check.*` files retain the prior manifest verification before
+the descriptor wording refinement. After the final 07 checker passed, the
+manifest was regenerated with 31 entries. The final current manifest check is
+captured as `08-manifest-check.*`; those three transcript files and the
+manifest itself are excluded to avoid self-reference. All checker artifacts
+are listed in `CHANGED_PATHS.txt`. The manifest
 includes the plan/index/command appends, audit register, unchanged original
 P1 specification and manifest, correction text, checker and raw checker
 outputs. Their hashes plus the manifest hash are reported in the final

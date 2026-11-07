@@ -177,4 +177,6 @@ Raw correction integrity check artifacts, each .stdout/.stderr/.exit:
 04-correction-integrity
 05-correction-integrity
 06-correction-integrity
+07-correction-integrity
 06-manifest-check
+08-manifest-check
