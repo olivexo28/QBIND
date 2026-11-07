@@ -5140,3 +5140,22 @@ review and owner decisions precede any test implementation. Context admission
 does not authorize finality, application, signing, fencing, clearance or
 resume. A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
 Activation DISABLED; public DevNet NO-GO.
+
+## 48. P1 provider specification correction — independent review pending
+
+The [append-only P1 correction](evidence/recovery-resume-inventory-20261107/p1-provider-model-specification-correction/README.md)
+records user-supplied CHANGES REQUIRED findings P1-SPEC-1 through P1-SPEC-3.
+It supersedes the earlier decoded-entrypoint decoder counter and whole-pipeline
+duplicate sensitivity claim; replaces the ambiguous caller-owned admitted
+snapshot/copy model with a provider-owned, non-cloneable one-lease model; and
+defines exact test-only candidate/evidence frames with separate checked
+budgets and descriptor-versus-actual-byte checks. The original P1 document
+and raw outputs remain preserved as historical evidence. All corrected
+oracles remain FUTURE / NOT EXECUTED; no production/test code, wire format,
+cryptographic commitment, production resource limit, application, signing,
+clearance or resume authority is implemented or selected. P1/P2 and B/C remain
+unselected. Founder-bootstrap scope and all previously accepted evidence are
+preserved. See correction commands and integrity manifest for results.
+
+A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
+Activation DISABLED; public DevNet NO-GO.

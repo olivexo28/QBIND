@@ -1,0 +1,4 @@
+PASS: four exact append-only prefixes at correction base
+PASS: 119 prior evidence files and audit register unchanged
+PASS: original P1 manifest's 39 entries verified at producing commit
+PASS: original P1 specification bytes unchanged

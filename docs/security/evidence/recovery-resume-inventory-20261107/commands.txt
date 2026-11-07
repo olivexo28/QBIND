@@ -742,3 +742,12 @@ P1 provider-envelope specification is documentation-only:
 read, source/documentation checks and outcomes. Its integrity script checks
 historical prefixes, audit bytes and thirteen producing-revision manifests
 separately from current delivery hashes. No tests/builds rerun.
+
+P1 specification correction (user-supplied CHANGES REQUIRED; documentation
+only; no reviewer identity/raw artifact asserted):
+`p1-provider-model-specification-correction/COMMANDS.txt` records exact
+initial repository/ref checks, documentation-only integrity command,
+complete outputs/exits, producing-revision manifest verification and
+publication checks. It corrects P1-SPEC-1/2/3 without modifying the original
+specification or historical raw results. All model cases remain FUTURE /
+NOT EXECUTED. No unchanged Rust tests or builds were rerun.

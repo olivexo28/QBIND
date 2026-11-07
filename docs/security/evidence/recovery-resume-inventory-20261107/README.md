@@ -538,3 +538,17 @@ fixture bounds, typed refusals, use-time checks and sensitivity matrix.
 Every new case is FUTURE / NOT EXECUTED; no implementation or Rust execution
 occurred. Prior PASS WITH LIMITATIONS and bounded acceptances remain preserved.
 Current hashes and producing-revision integrity are recorded separately.
+
+## 20. P1 specification correction
+
+The [superseding P1 correction](p1-provider-model-specification-correction/README.md)
+records the user-supplied CHANGES REQUIRED disposition and corrects
+P1-SPEC-1 stage-specific decoder/uniqueness oracles, P1-SPEC-2 provider-owned
+single-lease lifetime/accounting, and P1-SPEC-3 exact separate envelope and
+evidence framing/budgets. The original P1 specification and its raw
+documentation-check outputs remain unchanged historical evidence. All
+corrected model cases remain FUTURE / NOT EXECUTED; no production or test code,
+wire format, or recovery/resume authority is added. Prior acceptances,
+founder-decision scope, open items and disabled activation are preserved.
+See the correction `COMMANDS.txt` and `SHA256SUMS` for checks and current
+hashes; no unchanged Rust test/build is rerun.

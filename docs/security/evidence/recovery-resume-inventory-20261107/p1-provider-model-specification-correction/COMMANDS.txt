@@ -1,0 +1,141 @@
+P1 SPECIFICATION CORRECTION — DOCUMENTATION-ONLY COMMANDS
+
+Working directory: /workspaces/QBIND/olivexo28/QBIND
+Correction base:
+  commit 6914c6257f11b55fddb0f24de42a1a0ed316ca7f
+  tree   3a9aeab263f14f74a3b98e92e5a98c81ba280ac1
+  parent 5d328c9ad5c15177960b5b5da50f8b181169b723
+Protected main:
+  commit 9bf0eb43e4e3c601d02d3886d220b0abeb3a103e
+  tree   56509b20084ee1cbe2c42fda9d73d87e4c82c33f
+
+Initial exact identity and clean-state check:
+$ printf 'origin=' && git remote get-url origin && printf 'branch=' && git branch --show-current && printf 'HEAD=' && git rev-parse HEAD && printf 'tree=' && git rev-parse 'HEAD^{tree}' && printf 'parent=' && git rev-parse 'HEAD^' && printf '%s\n' 'remote refs:' && git ls-remote --heads origin refs/heads/docs/authenticated-recovery-resume-inventory refs/heads/main && printf 'main_tree=' && git rev-parse '9bf0eb43e4e3c601d02d3886d220b0abeb3a103e^{tree}' && git merge-base --is-ancestor 9bf0eb43e4e3c601d02d3886d220b0abeb3a103e HEAD && printf '%s\n' 'ancestry=protected main ancestor' && printf '%s\n' 'status:' && git status --short --branch && printf '%s\n' 'staged:' && git diff --cached --name-only
+Exit0. Exact repository, branch, local tip/tree/parent, direct remote task/main,
+protected main tree and ancestry matched. Worktree clean; staged paths empty.
+
+The original P1 specification, its original integrity script/manifest and
+the six original complete raw documentation-check outputs are preserved
+byte-for-byte. The correction checker verifies this against the base.
+Documentation-only checks:
+  python3 docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-specification-correction/check_artifacts.py
+  git diff --check
+  git diff --cached --check
+The final correction checker output, stderr and exit are captured as
+`06-correction-integrity.stdout`, `.stderr`, and `.exit`. The checker also
+verifies all 39 entries of the original P1 SHA256SUMS at the exact producing
+commit, historical evidence immutability, append prefixes, permitted path
+scope, links/discoverability and the test-frame arithmetic
+(11,339 / 19,389 / 35,773 bytes).
+
+`01-correction-integrity.*` is the first successful run before deterministic
+fixture byte patterns and the named uniqueness-stage functions were added.
+`02-correction-integrity.*` exited 1 because the checker expected the phrase
+`16,384-byte size-gate-only` without accounting for the Markdown emphasis
+boundary in the document. Its complete output/exit is retained. The corrected
+phrase assertions run as `03-correction-integrity.*`. No repository content
+was rolled back; the checker is corrected to validate the two actual
+independent phrases `16,384-byte ceiling test` and `size-gate-only`.
+`03-correction-integrity.*` passed the text and framing-arithmetic checks.
+`04-correction-integrity.*` reruns them with local-link and appended
+plan/index-discoverability checks. Its exit was 0; stdout additionally
+reported `PASS: correction links and appended plan/index discoverability`.
+The 05 run, immediately before this final results paragraph was appended,
+also exited 0 with the same eight PASS/NOT ESTABLISHED output lines as 04.
+
+No Rust test, cargo check/build, formatter, dependency operation, live
+network, signer operation or activation is run. Existing author-executed
+tests and accepted review evidence are neither repeated nor upgraded.
+
+Current correction manifest is generated after all records are final:
+`sha256sum -c docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-specification-correction/SHA256SUMS`
+It excludes itself; its hash and final Git identities are reported separately.
+
+Checker attempt records (all complete stdout/stderr/exit files are retained):
+
+* `01-correction-integrity`: exit 0 before the final test-value/stage-name
+  detail was added. Stdout:
+  `PASS: four exact append-only prefixes at correction base`;
+  `PASS: 119 prior evidence files and audit register unchanged`;
+  `PASS: original P1 manifest's 39 entries verified at producing commit`;
+  `PASS: original P1 specification bytes unchanged`;
+  `PASS: documentation-only scope and all three correction findings`;
+  `PASS: test framing arithmetic: envelope=11339, evidence=19389, combined=35773`;
+  `PASS: whitespace checks; no Rust test/build execution`;
+  `NOT ESTABLISHED: production authority, wire compatibility, memory/runtime guarantees, application, signing, fencing or resume`.
+* `02-correction-integrity`: exit 1. The first four PASS lines above were
+  emitted; stderr retained the `AssertionError` for the expected phrase
+  `16,384-byte size-gate-only`, which spanned Markdown emphasis in the actual
+  text. The assertion was corrected to check the two actual phrases.
+* `03-correction-integrity`: exit 0. The stdout is the same seven PASS and
+  NOT ESTABLISHED lines as `01`; it includes the corrected fixture/stage
+  assertions and arithmetic check.
+* `04-correction-integrity`: exit 0. It additionally emitted
+  `PASS: correction links and appended plan/index discoverability`; all other
+  stdout lines match `03`.
+
+Final checker command and capture:
+```sh
+python3 docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-specification-correction/check_artifacts.py \
+  >docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-specification-correction/06-correction-integrity.stdout \
+  2>docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-specification-correction/06-correction-integrity.stderr
+result=$?
+printf '%s\n' "$result" >docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-specification-correction/06-correction-integrity.exit
+cat docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-specification-correction/06-correction-integrity.stdout \
+  docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-specification-correction/06-correction-integrity.stderr
+exit "$result"
+```
+
+Final current-manifest generation command:
+```sh
+python3 - <<'PY'
+import hashlib
+from pathlib import Path
+root = Path("docs/security/evidence/recovery-resume-inventory-20261107")
+here = root / "p1-provider-model-specification-correction"
+out = here / "SHA256SUMS"
+paths = [
+    Path("Audit/QBIND_SECURITY_FINDINGS_REGISTER.md"),
+    Path("docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md"),
+    root / "README.md", root / "CHANGED_PATHS.txt", root / "commands.txt",
+    root / "p1-provider-model-specification/README.md",
+    root / "p1-provider-model-specification/SHA256SUMS",
+]
+paths += [p for p in here.iterdir()
+          if p.is_file() and p != out and not p.name.startswith("06-manifest-check.")]
+paths = sorted(set(paths))
+out.write_text("".join(
+    f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.as_posix()}\n"
+    for p in paths
+))
+print(f"entries={len(paths)}; excludes itself and verification transcript")
+PY
+sha256sum -c docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-specification-correction/SHA256SUMS
+```
+
+The final checker `06-correction-integrity` exited 0 after the logged
+specification/command changes. Its full stdout is:
+```text
+PASS: four exact append-only prefixes at correction base
+PASS: 119 prior evidence files and audit register unchanged
+PASS: original P1 manifest's 39 entries verified at producing commit
+PASS: original P1 specification bytes unchanged
+PASS: documentation-only scope and all three correction findings
+PASS: correction links and appended plan/index discoverability
+PASS: test framing arithmetic: envelope=11339, evidence=19389, combined=35773
+PASS: whitespace checks; no Rust test/build execution
+NOT ESTABLISHED: production authority, wire compatibility, memory/runtime guarantees, application, signing, fencing or resume
+```
+
+Its full stderr is empty; `.stdout`, `.stderr`, and `.exit` are preserved.
+The `06-correction-integrity.*` files and manifest verification transcript
+are listed in `CHANGED_PATHS.txt`; the manifest intentionally excludes itself
+and its own verification transcript to avoid self-reference. The manifest
+includes the plan/index/command appends, audit register, unchanged original
+P1 specification and manifest, correction text, checker and raw checker
+outputs. Their hashes plus the manifest hash are reported in the final
+delivery record.
+
+Unsuccessful attempts: only the recorded `02-correction-integrity` assertion
+failure; no source, test, dependency or repository history was modified to
+work around it.

@@ -1,0 +1,9 @@
+PASS: four exact append-only prefixes at correction base
+PASS: 119 prior evidence files and audit register unchanged
+PASS: original P1 manifest's 39 entries verified at producing commit
+PASS: original P1 specification bytes unchanged
+PASS: documentation-only scope and all three correction findings
+PASS: correction links and appended plan/index discoverability
+PASS: test framing arithmetic: envelope=11339, evidence=19389, combined=35773
+PASS: whitespace checks; no Rust test/build execution
+NOT ESTABLISHED: production authority, wire compatibility, memory/runtime guarantees, application, signing, fencing or resume
