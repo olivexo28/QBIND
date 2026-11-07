@@ -268,3 +268,48 @@ No Rust tests, builds, live network, operational signing, or activation were
 run. The old manifest verification described above was performed at its
 producing revision; the new correction manifest is the current integrity
 record.
+
+Post-push verification record:
+
+  Unsuccessful assertion in the first final shell check:
+    test "$commit" = 8344e92
+    stdout: empty.
+    exit 1. The shell variable held full `git rev-parse HEAD`; the expected
+    value was abbreviated. This was a verification-command typo, not a
+    repository identity or integrity mismatch.
+
+  Corrected command:
+    git show -s --format='commit=%H%ntree=%T%nparent=%P' HEAD
+    stdout:
+      commit=8344e92412d37882ef059b6158ead1959b0fa165
+      tree=86aa6dea70815a2cc47d394048d90808735da159
+      parent=61028eb6dbb91f0834a5235f20c935bb0ff5b549
+    exit 0.
+  git ls-remote origin refs/heads/docs/authenticated-recovery-resume-inventory refs/heads/main
+    stdout:
+      8344e92412d37882ef059b6158ead1959b0fa165 refs/heads/docs/authenticated-recovery-resume-inventory
+      9bf0eb43e4e3c601d02d3886d220b0abeb3a103e refs/heads/main
+    exit 0.
+  sha256sum -c docs/security/evidence/recovery-resume-inventory-20261107/CORRECTION-SHA256SUMS
+    stdout: all eight listed paths report `OK`.
+    exit 0.
+  git status --porcelain; git diff --cached --name-only
+    stdout: empty for both.
+    exit 0; worktree and staging clean.
+
+  Unsuccessful follow-up scope assertion:
+    The documentation-link checker compared the current unstaged delta with
+    all five paths already committed by 8344e92412d37882ef059b6158ead1959b0fa165.
+    stdout: AssertionError; current delta was only
+      docs/security/evidence/recovery-resume-inventory-20261107/commands.txt
+    exit 1. This was an incorrect expected scope after appending the failure
+    record below; it was not a repository-content or link failure. The
+    corrected scope assertion compares the pending delta with that single
+    log path; cumulative branch changes remain the five paths listed above.
+    Corrected expected scope:
+      expected = ["docs/security/evidence/recovery-resume-inventory-20261107/commands.txt"]
+      actual = git status --porcelain paths with the 3-character status prefix removed
+      assert sorted(actual) == expected
+    Corrected checker stdout: PASS: 39 relative links/anchors, 35 pinned
+    source ranges, whitespace, and current one-path log delta.
+    Corrected checker exit 0.
