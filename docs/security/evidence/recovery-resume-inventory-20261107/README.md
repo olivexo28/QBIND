@@ -509,3 +509,13 @@ and their 87 author-reported passes remain PASSED / CLOSED within scope,
 unchanged and not rerun. This new experiment does not select B/C or establish
 production/historical binding, finality, application or resume authority.
 Current hashes and producer-revision integrity are recorded separately.
+
+## 17. Independently supplied test authority context
+
+The [authority-context experiment](authority-context-experiment/README.md)
+records nine new passing author tests comparing witness claims with an
+immutable expected fixture. Witness-trust/label-only sensitivities do not
+establish external authority or a selected protocol. Seven accepted prior
+content-binding controls and R/D/S/M remain PASSED / CLOSED within their
+scopes, preserved and not rerun. Complete commands, outputs, current hashes
+and separate producing-revision integrity checks are retained.

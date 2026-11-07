@@ -1,0 +1,18 @@
+
+running 9 tests
+test allocated_fixture_bounds_and_invalid_contexts_refuse_without_crypto ... LIMITS already allocated vectors: context/count/content/signature/weight checks before encoding or crypto, not pre-input-allocation
+ok
+test duplicate_identity_and_key_assignments_refuse_in_expected_and_claims ... ok
+test duplicate_unauthorized_insufficient_and_corrupt_signatures_refuse ... ok
+test immutable_expected_context_positive_and_separate_accounting ... ACCOUNTING statement=358 conceptual_claim_context=5354 positive_bundle=12986 maximum_bundle=15410 expected_public_keys=5248 claimed_public_keys=5248 signatures=7260 sequential_secret=2560; actual structures allocated, no context serializer; total memory/work UNMEASURED
+ok
+test label_only_or_witness_committee_trust_accepts_other_keys_and_is_detected ... SENSITIVITY same label/new synthetic committee: defective label-only and witness-trust branches pass; strict expected context refuses; no external authority established
+ok
+test lowered_threshold_and_altered_weight_claims_do_not_override_expected ... ok
+test same_label_substituted_member_or_public_key_refuses_before_crypto ... ok
+test trusting_witness_threshold_and_weights_is_detected_by_strict_controls ... SENSITIVITY witness threshold/weight bypass accepts insufficient expected weight; strict context mismatch detects defect
+ok
+test wrong_chain_epoch_authority_statement_and_other_set_context_refuse ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.91s
+

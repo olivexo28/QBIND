@@ -5080,3 +5080,24 @@ history/exclusivity, clearance or resume authority. Working-memory/runtime
 and operational guarantees remain unmeasured/unselected; current refusal
 remains. A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
 Activation remains DISABLED; public DevNet remains NO-GO.
+
+## 45. Test-only expected authority context — independent review pending
+
+The [separate authority-context experiment](evidence/recovery-resume-inventory-20261107/authority-context-experiment/README.md)
+compares witness context with a caller-owned immutable expected fixture and
+uses only expected keys/weights/threshold in strict mode. Nine focused author
+tests passed, zero failed/ignored/filtered; private witness-trust/label-only
+defects demonstrate sensitivity with real synthetic signatures. Exact
+statement/context accounting, allocation boundaries, counters and complete
+commands/outputs/exits are retained. No production or accepted tests change.
+
+User-supplied PASS WITH LIMITATIONS for the seven prior content-binding
+controls remains PASSED / CLOSED within test-only scope. Accepted R/D/S/M
+and earlier bounded evidence remain preserved, unchanged and not rerun.
+No reviewer identity, raw report or reviewer execution is invented.
+The expected fixture's origin/trust is only a test assumption, not an
+authenticated production context, committed set digest or external/current
+authority. No finality, historical binding, durable application, signer
+exclusivity or resume authority is established. B/C remain unselected;
+current refusal remains. A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
+Activation remains DISABLED; public DevNet remains NO-GO.

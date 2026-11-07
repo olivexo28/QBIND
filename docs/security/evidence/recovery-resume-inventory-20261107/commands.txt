@@ -722,3 +722,10 @@ Only its new test target ran; accepted R/D/S/M suites were not rerun.
 `check_artifacts.py` checks historical prefixes, immutable prior files,
 producing-revision manifests, source scope, exact counts/arithmetic and links;
 current `SHA256SUMS` is generated only after final artifact checks.
+
+Separate authority-context experiment commands/full outputs/exits:
+`authority-context-experiment/COMMANDS.txt` and numbered raw artifacts.
+Only the new `authority_context_experiment_tests` target ran. Accepted
+content-binding and R/D/S/M files remain unchanged and were not rerun.
+Artifact checks preserve historical prefixes/audit and verify eleven
+manifests at producing revisions, separately from current delivery hashes.

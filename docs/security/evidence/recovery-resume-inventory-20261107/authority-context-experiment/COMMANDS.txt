@@ -1,0 +1,99 @@
+TEST-ONLY AUTHORITY CONTEXT — AUTHOR COMMANDS / OUTCOMES
+
+Working directory /workspaces/QBIND/olivexo28/QBIND
+Evidence directory P (notation, not a required shell variable):
+docs/security/evidence/recovery-resume-inventory-20261107/authority-context-experiment
+
+Initial exact verification:
+$ git remote get-url origin && git branch --show-current && git rev-parse HEAD 'HEAD^{tree}' '9bf0eb43e4e3c601d02d3886d220b0abeb3a103e^{tree}' && git ls-remote --heads origin refs/heads/docs/authenticated-recovery-resume-inventory refs/heads/main && git merge-base --is-ancestor 9bf0eb43e4e3c601d02d3886d220b0abeb3a103e HEAD && git status --porcelain=v1 && git diff --cached --name-only
+Exit0; output:
+https://github.com/olivexo28/QBIND
+docs/authenticated-recovery-resume-inventory
+e531a7c5a96b978cd1b82b006396c08b24e0933e
+b0af01d91cee4ba1f5e24b8e375dd99a1eb41597
+56509b20084ee1cbe2c42fda9d73d87e4c82c33f
+e531a7c5a96b978cd1b82b006396c08b24e0933e refs/heads/docs/authenticated-recovery-resume-inventory
+9bf0eb43e4e3c601d02d3886d220b0abeb3a103e refs/heads/main
+No worktree/staging output. Origin, branch, exact refs/trees/ancestry matched.
+
+$ mkdir -p docs/security/evidence/recovery-resume-inventory-20261107/authority-context-experiment
+Exit0, no output.
+$ rustfmt --edition 2021 crates/qbind-consensus/tests/authority_context_experiment_tests.rs
+Exit0, no output. Only new test file formatted.
+
+For each numbered command below, exact executed shell capture:
+  <command> > <P>/<name>.stdout 2> <P>/<name>.stderr
+  result=$?
+  printf '%s\n' "$result" > <P>/<name>.exit
+  <console previews only>
+  exit "$result"
+Complete stdout/stderr preserved, not previews or pipes; no secret/key/
+signature bytes printed. Statement fixture constants are documented.
+
+01-discovery:
+$ cargo test -p qbind-consensus --test authority_context_experiment_tests -- --list
+Exit0; 9 tests, 0 benchmarks. Complete outputs retained. Preview cat stdout,
+tail -5 stderr. Discovery is not execution.
+
+02-focused:
+$ cargo test -p qbind-consensus --test authority_context_experiment_tests -- --nocapture --test-threads=1
+Exit0; 9 passed, 0 failed/ignored/measured/filtered, 0.91s. Complete output
+retained, including 37 unchanged library warnings. Preview cat stdout,
+tail -5 stderr. No accepted/unrelated suite rerun.
+
+03-format:
+$ rustfmt --edition 2021 --check crates/qbind-consensus/tests/authority_context_experiment_tests.rs
+Exit0; stdout/stderr empty, fully retained.
+
+04-integrity:
+$ python3 docs/security/evidence/recovery-resume-inventory-20261107/authority-context-experiment/check_artifacts.py
+Complete stdout/stderr/exit retained; exact script committed. Checks four
+historical byte prefixes, all old evidence/Audit/accepted tests, eleven
+producer manifests/166 entries, exact names/counts/arithmetic, scope and
+pinned backend ranges. Original raw cargo stdout EOF blank line excepted
+from scoped whitespace rather than normalized.
+Exit0; stderr empty; complete stdout reports four exact prefixes,75
+unchanged evidence/Audit files, unchanged audit hash, eleven producer
+manifests/166 entries, nine test names/counts, arithmetic/sensitivity,
+unchanged accepted tests/production/configuration and pinned links/scope.
+No unsuccessful compile/test/documentation execution occurred in this
+experiment. Deliberate defective branches are not unsuccessful commands;
+their expected false authority selection is the measured sensitivity.
+
+Current manifest generation:
+$ python3 - <<'PY'
+import hashlib
+from pathlib import Path
+root = Path('docs/security/evidence/recovery-resume-inventory-20261107')
+here = root / 'authority-context-experiment'
+out = here / 'SHA256SUMS'
+paths = [Path('crates/qbind-consensus/tests/authority_context_experiment_tests.rs'),
+         Path('docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md'),
+         Path('Audit/QBIND_SECURITY_FINDINGS_REGISTER.md')]
+paths += [root / name for name in ['README.md', 'CHANGED_PATHS.txt', 'commands.txt']]
+paths += list(root.glob('*SHA256SUMS'))
+paths += [root / 'binding-sensitivity-execution/SHA256SUMS', root / 'content-binding-experiment/SHA256SUMS']
+paths += [p for p in here.iterdir() if p.is_file() and p != out]
+out.write_text(''.join(f'{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.as_posix()}\n' for p in sorted(set(paths))))
+print(f'current entries={len(set(paths))}; excludes itself')
+PY
+$ sha256sum -c docs/security/evidence/recovery-resume-inventory-20261107/authority-context-experiment/SHA256SUMS
+Historical manifests verified at producers, not current appended files.
+Current manifest covers every changed path except itself; its own hash
+and publication commit IDs are reported separately to avoid circularity.
+
+Publication only after checks and exact original-ref revalidation:
+$ git add -- crates/qbind-consensus/tests/authority_context_experiment_tests.rs docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md docs/security/evidence/recovery-resume-inventory-20261107/README.md docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt docs/security/evidence/recovery-resume-inventory-20261107/commands.txt docs/security/evidence/recovery-resume-inventory-20261107/authority-context-experiment
+$ git diff --cached --check -- . ':!docs/security/evidence/recovery-resume-inventory-20261107/authority-context-experiment/02-focused.stdout'
+$ git diff --cached --stat && git diff --cached --name-only
+$ git commit -m "test: isolate expected authority context sensitivity" -m "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+$ git push origin HEAD:refs/heads/docs/authenticated-recovery-resume-inventory
+$ git show -s --format='commit=%H%ntree=%T%nparent=%P' HEAD && git ls-remote --heads origin refs/heads/docs/authenticated-recovery-resume-inventory refs/heads/main && git status --porcelain=v1 && git diff --cached --name-only && sha256sum docs/security/evidence/recovery-resume-inventory-20261107/authority-context-experiment/SHA256SUMS
+Staged bytes compared to current validated bytes; no unrelated staged/
+unstaged/untracked paths allowed. No reset/rebase/force, production caller,
+operational signing, network, activation, PR, merge or main push.
+
+Final delivery:21 changed paths;32 current manifest entries including
+every changed path except the manifest itself, preserved audit and eleven
+producer manifests. Exact final identities/direct refs and clean worktree/
+staging are checked after push and reported outside this self-hashed commit.
