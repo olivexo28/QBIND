@@ -417,3 +417,16 @@ are not reopened here. This disposition does not close A17-F1 / RS1-F7, RS1,
 or A33-F1 / E27, nor does it approve the proposed authenticated-prefix slice.
 The contract and its current integrity evidence are recorded in the appended
 plan section 36 and `CONTRACT-SHA256SUMS`.
+
+## 9. AP1 authenticated-prefix citation correction
+
+The append-only [AP1 correction in the authenticated-prefix
+contract](AUTHENTICATED_PREFIX_VERIFICATION_CONTRACT.md#8-ap1-block-identity-and-committed-prefix-citation-correction)
+corrects the block-ID source citation and distinguishes the three-chain
+committed grandparent G from supporting descendants P and B. The user supplied
+**PASS WITH LIMITATIONS** for the proposed design direction and identified
+AP1 as an open documentation citation; this correction preserves the prior
+inventory corrections and bounded acceptances without reopening them or
+inventing reviewer metadata. Current correction integrity is recorded in
+`AP1-CORRECTION-SHA256SUMS`; prior manifests remain verified at their
+producing revisions.

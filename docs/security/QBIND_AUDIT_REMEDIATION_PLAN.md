@@ -4911,3 +4911,27 @@ corrections as PASSED / CLOSED within their documented scope. That disposition
 does not close A17-F1 / RS1-F7, RS1, or A33-F1 / E27. Current append-only
 delivery hashes are in the inventory's `CONTRACT-SHA256SUMS`; historical
 manifests remain tied to their producer revisions.
+
+## 37. AP1 authenticated-prefix citation correction — append-only
+
+The [AP1 correction in the authenticated-prefix
+contract](evidence/recovery-resume-inventory-20261107/AUTHENTICATED_PREFIX_VERIFICATION_CONTRACT.md#8-ap1-block-identity-and-committed-prefix-citation-correction)
+supersedes its earlier block-ID citation with protected-main
+`basic_hotstuff_engine.rs:3875-3890`. The cited function takes proposer, view
+and parent ID, writes proposer and view, and copies only the first 16 parent
+ID bytes; it has no payload input. This source description does not establish
+a collision, exploit, or new production failure.
+
+The addendum also clarifies that the current three-chain implementation
+commits the grandparent G when its QC, increasing-view and monotonicity
+conditions hold; P and B are supporting descendants. A future witness must
+identify the committed prefix separately from those descendants. This is not
+a completed finality proof and chooses no witness format. The user supplied
+**PASS WITH LIMITATIONS** for the proposed design direction and identified
+AP1 as an open citation. Prior inventory corrections and bounded acceptances
+remain preserved; no reviewer identity or raw review artifact is asserted.
+Current correction hashes are in
+`evidence/recovery-resume-inventory-20261107/AP1-CORRECTION-SHA256SUMS`;
+historical manifests are checked only against their producing revisions.
+A17-F1 / RS1-F7, RS1, and A33-F1 / E27 remain **OPEN**; activation remains
+**DISABLED**; public DevNet remains **NO-GO**.

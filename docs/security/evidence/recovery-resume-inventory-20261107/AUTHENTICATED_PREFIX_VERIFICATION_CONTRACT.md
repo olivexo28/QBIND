@@ -261,3 +261,39 @@ This contract is **PROPOSED — INDEPENDENT REVIEW PENDING**. It changes no
 source, tests, recovery behavior, audit-register finding, signer path or
 activation state. A17-F1 / RS1-F7, RS1, and A33-F1 / E27 remain **OPEN**;
 activation remains **DISABLED**; public DevNet remains **NO-GO**.
+
+## 8. AP1 — block identity and committed-prefix citation correction
+
+The user supplied **PASS WITH LIMITATIONS** for the proposed design direction
+and identified AP1 as an open documentation citation. This correction
+supersedes the block-ID source citation in section 1; it does not reopen the
+three inventory corrections, their bounded acceptances, or any other prior
+accepted evidence. No reviewer identity or raw review artifact is asserted.
+
+The correct protected-main source for `derive_block_id_from_header` is
+[`basic_hotstuff_engine.rs:3875-3890`](https://github.com/olivexo28/QBIND/blob/9bf0eb43e4e3c601d02d3886d220b0abeb3a103e/crates/qbind-consensus/src/basic_hotstuff_engine.rs#L3875-L3890).
+The function takes `proposer`, `view`, and `parent_block_id`; it writes the
+little-endian proposer and view into the first 16 result bytes, then copies
+only `parent_block_id[..16]` into the remaining result bytes. It has no
+payload input. This describes the implementation and does not demonstrate a
+collision, exploit, or new production failure. The earlier section-1
+`1922-1937` citation was incorrect and is superseded by this citation.
+
+The pinned three-chain implementation
+[`try_commit_with_qc`](https://github.com/olivexo28/QBIND/blob/9bf0eb43e4e3c601d02d3886d220b0abeb3a103e/crates/qbind-consensus/src/hotstuff_state_engine.rs#L1819-L1938)
+identifies B as the block certified by the incoming QC, P as B's parent, and
+G as P's parent. When all three nodes have `own_qc`, their views strictly
+increase G < P < B, and the monotonic commit conditions hold, the engine
+sets `committed_block` and `committed_height` to G. P and B are supporting
+descendants in that rule; the newest certified block B is not thereby the
+committed block. A future witness must identify the committed prefix through
+G separately from the supporting P/B descendants and their certificates.
+This source clarification is not itself a complete finality proof, does not
+establish that arbitrary supplied QCs are authenticated, and selects no
+witness format.
+
+The plan addendum and current AP1 hashes are recorded in
+[`AP1-CORRECTION-SHA256SUMS`](AP1-CORRECTION-SHA256SUMS). The pre-correction
+`CONTRACT-SHA256SUMS` and earlier inventory manifests remain historical
+evidence verified against their producing revisions, not against these
+appended bytes.

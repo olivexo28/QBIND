@@ -14,3 +14,11 @@ docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt
 docs/security/evidence/recovery-resume-inventory-20261107/commands.txt
 docs/security/evidence/recovery-resume-inventory-20261107/AUTHENTICATED_PREFIX_VERIFICATION_CONTRACT.md
 docs/security/evidence/recovery-resume-inventory-20261107/CONTRACT-SHA256SUMS
+
+AP1 documentation correction:
+docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+docs/security/evidence/recovery-resume-inventory-20261107/README.md
+docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/commands.txt
+docs/security/evidence/recovery-resume-inventory-20261107/AUTHENTICATED_PREFIX_VERIFICATION_CONTRACT.md
+docs/security/evidence/recovery-resume-inventory-20261107/AP1-CORRECTION-SHA256SUMS

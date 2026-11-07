@@ -467,3 +467,206 @@ not rewrite the prior `SHA256SUMS` or `CORRECTION-SHA256SUMS`. The command log
 and manifest itself are not self-listed; their final SHA-256 values are
 reported separately. No production source, test, build, live network,
 operational signing, or activation was performed.
+
+AP1 citation correction — documentation-only record
+====================================================
+
+Pre-edit identity and scope were verified before changes:
+
+  git remote get-url origin && git branch --show-current &&
+  git rev-parse HEAD HEAD^{tree} &&
+  git ls-remote origin refs/heads/docs/authenticated-recovery-resume-inventory refs/heads/main &&
+  git merge-base --is-ancestor 9bf0eb43e4e3c601d02d3886d220b0abeb3a103e HEAD &&
+  git status --porcelain=v1 --untracked-files=all &&
+  git diff --cached --name-only &&
+  git show -s --format='commit=%H%ntree=%T%nparent=%P' HEAD
+    stdout:
+      origin=https://github.com/olivexo28/QBIND
+      branch=docs/authenticated-recovery-resume-inventory
+      HEAD=a4620f1e9363fbd30b23f06448e8f19174de8192
+      tree=75b60b3cd3b53e1d4d7f0203df074cbbaa827611
+      remote task=a4620f1e9363fbd30b23f06448e8f19174de8192
+      remote main=9bf0eb43e4e3c601d02d3886d220b0abeb3a103e
+      ancestry confirmed; worktree and staging empty
+      parent=1cc217b8f7d03514c420066c32c0d7b42d357752
+    exit 0.
+
+Semantic source review used pinned source, not a line-range existence test:
+
+  git show 9bf0eb43e4e3c601d02d3886d220b0abeb3a103e:crates/qbind-consensus/src/basic_hotstuff_engine.rs |
+    nl -ba | sed -n '3871,3890p'
+    stdout showed `derive_block_id_from_header(proposer, view,
+    parent_block_id)`, writes to id[..8] and id[8..16], and
+    `id[16..32].copy_from_slice(&parent_block_id[..16])`; there is no
+    payload argument. Exit 0.
+
+  git show 9bf0eb43e4e3c601d02d3886d220b0abeb3a103e:crates/qbind-consensus/src/hotstuff_state_engine.rs |
+    nl -ba | sed -n '1819,1829p;1887,1938p'
+    stdout showed B=`qc.block_id`, P=parent(B), G=parent(P), the own-QC
+    and increasing-view rule, monotonic guards, and assignment of
+    `committed_block`/`committed_height` to G. Exit 0.
+
+  python3 - <<'PY'
+  import subprocess
+  rev='9bf0eb43e4e3c601d02d3886d220b0abeb3a103e'
+  checks={
+   'crates/qbind-consensus/src/basic_hotstuff_engine.rs':[
+    'fn derive_block_id_from_header(', 'proposer: ValidatorId,',
+    'view: u64,', 'parent_block_id: &[u8; 32],',
+    'id[..8].copy_from_slice(&proposer_bytes);',
+    'id[8..16].copy_from_slice(&view_bytes);',
+    'id[16..32].copy_from_slice(&parent_block_id[..16]);'],
+   'crates/qbind-consensus/src/hotstuff_state_engine.rs':[
+    'fn try_commit_with_qc(&mut self, qc: &QuorumCertificate<BlockIdT>)',
+    'let b_view = match self.blocks.get(&qc.block_id)',
+    'let (p_id, p_view) =', 'let (g_id, g_view, g_height) =',
+    'if !(g_view < p_view && p_view < b_view)',
+    'if should_commit && height_ok',
+    'self.committed_block = Some(g_id.clone());',
+    'self.committed_height = Some(g_height);']}
+  for path,needles in checks.items():
+   text=subprocess.check_output(['git','show',f'{rev}:{path}'],text=True)
+   missing=[needle for needle in needles if needle not in text]
+   if missing: raise SystemExit(f'FAIL {path}: {missing}')
+   print(f'PASS semantic source inspection at {rev}: {path}; verified {len(needles)} required code statements')
+  print('Interpretation: block ID inputs are proposer, view, parent ID; only parent bytes 0..15 are copied; function has no payload argument. Three-chain identifies incoming-QC block B and ancestors P/G, enforces own-QC/view and monotonic conditions, and assigns committed state to G.')
+  PY
+    stdout: both source files PASS (7 and 8 code statements); interpretation
+    printed as above; exit 0. Human interpretation is the source-backed
+    meaning; the assertions corroborate code statements, not protocol proof.
+
+Historical manifests were verified at their own producing commits, not
+against the corrected working files:
+
+  python3 - <<'PY'
+  import hashlib, subprocess
+  cases=[
+   ('61028eb6dbb91f0834a5235f20c935bb0ff5b549','docs/security/evidence/recovery-resume-inventory-20261107/SHA256SUMS'),
+   ('8344e92412d37882ef059b6158ead1959b0fa165','docs/security/evidence/recovery-resume-inventory-20261107/CORRECTION-SHA256SUMS'),
+   ('a4620f1e9363fbd30b23f06448e8f19174de8192','docs/security/evidence/recovery-resume-inventory-20261107/CONTRACT-SHA256SUMS')]
+  for rev,path in cases:
+   manifest=subprocess.check_output(['git','show',f'{rev}:{path}'],text=True)
+   count=0
+   for line in manifest.splitlines():
+    if not line.strip(): continue
+    expected,file=line.split('  ',1)
+    content=subprocess.check_output(['git','show',f'{rev}:{file}'])
+    if hashlib.sha256(content).hexdigest()!=expected:
+     raise SystemExit(f'FAIL {rev} {file}')
+    count+=1
+   print(f'PASS {path} at producer {rev}: {count} entries verified against that revision')
+  PY
+    stdout: SHA256SUMS at 61028eb6... verified 8 entries;
+      CORRECTION-SHA256SUMS at 8344e924... verified 8 entries;
+      CONTRACT-SHA256SUMS at a4620f1e... verified 8 entries.
+    exit 0.
+
+Unsuccessful attempts: one `apply_patch` context lookup for the contract EOF
+failed because the expected section-7 ending text did not match the actual
+last lines. It changed no file; the actual ending was read and the append was
+then applied. No unsuccessful shell validation command had occurred at the time
+this note was written; later AP1 checker failures are recorded below.
+
+Final AP1 documentation validation
+===================================
+
+Unsuccessful validation attempts (no files changed by these attempts):
+
+  Python local-link checker with heading slug helper
+    The first checker transformed punctuation before spaces and did not
+    collapse the resulting duplicate hyphens. It reported the valid
+    `README.md` link to
+    `AUTHENTICATED_PREFIX_VERIFICATION_CONTRACT.md#8-ap1-block-identity-and-committed-prefix-citation-correction`
+    as a missing anchor; exit 1. The checker was corrected to normalize runs
+    of whitespace/hyphens after punctuation removal. The corrected checks
+    below pass.
+
+  Python local-link checker applied to every plan link
+    It required every target to be a file and reported the pre-existing
+    section-30 link `evidence/a33_f1/` as missing; exit 1. This link targets
+    an existing directory, not a file. The corrected check accepts existing
+    directory link targets and verifies the new section-37 contract link and
+    anchor. No plan link was changed.
+
+  if test -e docs/security/evidence/a33_f1/pre-implementation-review.txt; then
+    echo 'unexpected target exists'; exit 1
+  else echo 'PASS target absent'; fi
+    An incorrect diagnostic assumption expected that file not to exist; it
+    printed `unexpected target exists` and exited 1. `stat` confirmed it is
+    a regular file, and `git ls-tree` confirmed it is present in the protected
+    task-base tree. This check is not evidence of a link defect.
+
+Corrected successful link/source checks:
+
+  python3 - <<'PY'
+  from pathlib import Path
+  import re, subprocess
+  root=Path('docs/security/evidence/recovery-resume-inventory-20261107')
+  docs=[root/'README.md',root/'AUTHENTICATED_PREFIX_VERIFICATION_CONTRACT.md',Path('docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md')]
+  for doc in docs:
+   text=doc.read_text(); links=re.findall(r'(?<!!)\[[^]]+\]\(([^)]+)\)',text); n=0
+   for link in links:
+    if link.startswith(('https://','http://','mailto:')): continue
+    path,_,frag=link.partition('#'); target=(doc.parent/path).resolve() if path else doc
+    assert target.exists(),f'missing local target: {doc}: {link}'
+    if frag:
+     assert target.is_file(),f'fragment target is not a file: {doc}: {link}'
+     hs=re.findall(r'^#+\s+(.+)$',target.read_text(),re.M)
+     slug=lambda h: re.sub(r'[\s-]+','-',re.sub(r'[^a-z0-9 -]','',h.lower())).strip('-')
+     assert frag in {slug(h) for h in hs},f'missing anchor: {doc}: {link}'
+    n+=1
+   print(f'PASS {doc}: {n} local links/anchors (directories accepted as path targets)')
+  contract=(root/'AUTHENTICATED_PREFIX_VERIFICATION_CONTRACT.md').read_text()
+  refs=re.findall(r'https://github\.com/olivexo28/QBIND/blob/([0-9a-f]{40})/([^#]+)#L(\d+)(?:-L(\d+))?',contract)
+  assert {r for r,*_ in refs}=={'9bf0eb43e4e3c601d02d3886d220b0abeb3a103e'}
+  for rev,path,a,b in refs:
+   blob=subprocess.check_output(['git','show',f'{rev}:{path}'],text=True); assert 1<=int(a)<=int(b or a)<=len(blob.splitlines()),path
+  print(f'PASS {len(refs)} contract source links pinned to protected main with in-bounds ranges')
+  PY
+    stdout:
+      PASS README.md: 6 local links/anchors
+      PASS AUTHENTICATED_PREFIX_VERIFICATION_CONTRACT.md: 3 local links/anchors
+      PASS QBIND_AUDIT_REMEDIATION_PLAN.md: 55 local links/anchors
+      PASS 30 contract source links pinned to protected main with in-bounds ranges
+    exit 0. (The earlier semantic function-body inspection is separately
+    recorded above; in-bounds line checks alone are not treated as semantic
+    support.)
+
+  BASE=a4620f1e9363fbd30b23f06448e8f19174de8192
+  for path in \
+    docs/security/evidence/recovery-resume-inventory-20261107/README.md \
+    docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md \
+    docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt \
+    docs/security/evidence/recovery-resume-inventory-20261107/commands.txt \
+    docs/security/evidence/recovery-resume-inventory-20261107/AUTHENTICATED_PREFIX_VERIFICATION_CONTRACT.md; do
+    cmp <(git show "$BASE:$path") \
+      <(head -c "$(git cat-file -s "$BASE:$path")" "$path")
+  done
+    PASS; all five original files remain exact byte prefixes of task base
+    `a4620f1e9363fbd30b23f06448e8f19174de8192`; exit 0.
+  cmp <(git show "$BASE:Audit/QBIND_SECURITY_FINDINGS_REGISTER.md") \
+    Audit/QBIND_SECURITY_FINDINGS_REGISTER.md
+    PASS; audit register bytes unchanged; exit 0.
+  git diff --quiet "$BASE" -- \
+    docs/security/evidence/empty-restore-response \
+    docs/security/evidence/voting_ancestry
+    PASS; selected preserved evidence unchanged; exit 0.
+
+  sha256sum -c docs/security/evidence/recovery-resume-inventory-20261107/AP1-CORRECTION-SHA256SUMS
+    PASS; all eight current AP1 entries report `OK`; exit 0.
+  git diff --check && git diff --cached --check
+    PASS; no whitespace errors; exit 0.
+
+The three older manifests were separately verified against their producer
+trees: `SHA256SUMS` at `61028eb6dbb91f0834a5235f20c935bb0ff5b549`,
+`CORRECTION-SHA256SUMS` at `8344e92412d37882ef059b6158ead1959b0fa165`, and
+`CONTRACT-SHA256SUMS` at `a4620f1e9363fbd30b23f06448e8f19174de8192`, eight
+entries each. They were not checked as though their older hashes covered the
+new append-only bytes. `AP1-CORRECTION-SHA256SUMS` is the current correction
+manifest; it does not self-list or hash this command log. The command log's
+final SHA-256 is reported separately.
+
+No source or test files changed. No unchanged Rust tests or builds were run.
+The three prior inventory corrections and their bounded acceptances remain
+preserved. AP1 is corrected; A17-F1 / RS1-F7, RS1, and A33-F1 / E27 remain
+OPEN; activation remains DISABLED; public DevNet remains NO-GO.
