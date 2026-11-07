@@ -1,0 +1,9 @@
+PASS: all four append-only plan/index/log prefixes preserved
+PASS: 184 prior evidence files and audit-register bytes unchanged
+PASS: the only Rust change is the standalone integration-test target
+PASS: all 17 named test-only cases and accepted fixture limits present
+PASS: captured test outputs and limitations/status are documented
+PASS: 25 evidence hashes verified
+PASS: original P1 specification and both corrections remain byte-identical
+PASS: committed whitespace check
+NOT ESTABLISHED: real authority/currentness, finality, application, fencing or resume

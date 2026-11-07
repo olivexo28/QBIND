@@ -1,0 +1,27 @@
+Pre-edit repository identity check (captured before any implementation edit):
+
+$ git remote get-url origin && printf '\nBRANCH\n' && git branch --show-current && printf '\nHEAD\n' && git rev-parse HEAD && git rev-parse HEAD^{tree} && git rev-parse HEAD^ && printf '\nSTATUS\n' && git status --short --branch && printf '\nSTAGED\n' && git diff --cached --quiet && echo empty && printf '\nREMOTE REFS\n' && git ls-remote origin refs/heads/docs/authenticated-recovery-resume-inventory refs/heads/main
+
+https://github.com/olivexo28/QBIND
+
+BRANCH
+docs/authenticated-recovery-resume-inventory
+
+HEAD
+1d0b66739633b1232187b0cdc04849900f6f411e
+6df51c18a5a80d9d4793a4ebfc94f51623895795
+4c9b39fe17e7879fa6555dcf5adc151eea627e2a
+
+STATUS
+## docs/authenticated-recovery-resume-inventory
+
+STAGED
+empty
+
+REMOTE REFS
+1d0b66739633b1232187b0cdc04849900f6f411e	refs/heads/docs/authenticated-recovery-resume-inventory
+9bf0eb43e4e3c601d02d3886d220b0abeb3a103e	refs/heads/main
+
+Exit 0. Repository, branch, expected local tip/tree/parent, direct remote
+task/main refs, worktree and staging matched. Protected-main tree and ancestry
+are checked again for final publication below.

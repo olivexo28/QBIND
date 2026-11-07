@@ -758,3 +758,13 @@ only nested evidence-limit isolation remained open):
 `p1-nested-evidence-controls/COMMANDS.txt` records the exact identity check,
 scanner-fixture arithmetic/preservation checks, outputs/exits, and hashes.
 This documentation-only addendum does not rerun accepted tests or builds.
+
+P1 test-only provider-model implementation and evidence:
+`p1-provider-model-implementation/COMMANDS.txt` records the focused 16-case
+run, related 9+7 regressions, toolchain/platform, intermediate failures,
+source and documentation checks, and final hashes. The integration target is
+isolated test support; no production code, existing tests, or activation
+surface changed. The raw accepted prior artifacts and audit register are
+checked unchanged. Synthetic test success does not establish production
+authority/currentness, finality, durable application, signer fencing, or
+resume permission.

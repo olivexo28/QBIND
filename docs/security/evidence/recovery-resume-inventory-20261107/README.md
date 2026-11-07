@@ -565,3 +565,22 @@ size refusals from nested count/entry-length checks and gives exact
 stage/decoder oracles. All cases remain FUTURE / NOT EXECUTED and are not
 cryptographic evidence. Historical records and the audit register remain
 unchanged; see the new command and integrity records.
+
+## 22. P1 test-only provider model — implementation and evidence
+
+The [isolated provider model](p1-provider-model-implementation/README.md)
+implements the reviewed test-only provider slot and lease, exact fixture
+framing, independent catalog/currentness inputs, descriptor/returned-buffer
+checks, and stage-specific sensitivity controls. It adds only the
+`qbind-consensus` integration-test source; no production caller, application,
+signer, clearance, or resume capability is added. The focused target passed
+17/17, with related authority-context and content-binding regressions passing
+9/9 and 7/7. The checks remain synthetic: they establish no real authority,
+currentness, non-rollback, finality, durable application, signer fencing, or
+resume decision. User-supplied PASS WITH LIMITATIONS at the task base remains
+in force; independent implementation review is pending. The exact commands,
+failed attempts, outputs, source scope, preservation checks and hashes are
+recorded in the linked evidence directory.
+
+A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
+Activation DISABLED; public DevNet NO-GO.

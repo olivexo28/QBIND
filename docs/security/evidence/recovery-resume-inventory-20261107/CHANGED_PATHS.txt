@@ -201,3 +201,18 @@ Raw nested-control check artifacts, each .stdout/.stderr/.exit:
 09-manifest-check
 10-nested-check
 11-manifest-check
+
+P1 test-only provider model — implementation/evidence:
+crates/qbind-consensus/tests/p1_provider_model_tests.rs
+docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+docs/security/evidence/recovery-resume-inventory-20261107/README.md
+docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/commands.txt
+docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-implementation/README.md
+docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-implementation/COMMANDS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-implementation/00-identity.txt
+docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-implementation/check_artifacts.py
+docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-implementation/SHA256SUMS
+Raw command outputs and exits are in p1-provider-model-implementation/; the
+integrity checker verifies the exact prior-evidence prefix and unchanged
+audit-register bytes. No production source or existing test was modified.

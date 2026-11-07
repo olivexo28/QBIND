@@ -1,0 +1,78 @@
+P1 TEST-ONLY PROVIDER MODEL — COMMANDS AND RESULTS
+
+Task base:
+  commit 1d0b66739633b1232187b0cdc04849900f6f411e
+  tree   6df51c18a5a80d9d4793a4ebfc94f51623895795
+Protected main:
+  commit 9bf0eb43e4e3c601d02d3886d220b0abeb3a103e
+  tree   56509b20084ee1cbe2c42fda9d73d87e4c82c33f
+Repository: https://github.com/olivexo28/QBIND
+Branch: docs/authenticated-recovery-resume-inventory
+
+The exact pre-edit identity check is recorded in `00-identity.txt`:
+origin, branch, local HEAD/tree/parent, direct task/main refs, and clean
+worktree/staging matched. The initial result was:
+  task ref 1d0b66739633b1232187b0cdc04849900f6f411e
+  main ref 9bf0eb43e4e3c601d02d3886d220b0abeb3a103e
+  worktree clean; staging empty
+Protected-main ancestry and tree are rechecked in final publication checks.
+
+Toolchain/platform:
+  rustc 1.99.1 (58cf8f9c3 2026-10-13)
+  cargo 1.99.0 (5f94df478 2026-08-27)
+  Linux x86_64, kernel 6.12.8+
+
+Source formatting and focused target:
+  rustfmt --edition 2021 crates/qbind-consensus/tests/p1_provider_model_tests.rs
+  cargo test -p qbind-consensus --test p1_provider_model_tests
+Final result: exit 0; 17 passed, 0 failed, 0 ignored, 0 filtered. All 17
+test names and full Cargo output are gzip-compressed in
+`03-focused-provider.log.gz`. Cargo emitted 37 existing dead-code warnings
+from the qbind-consensus library; the new integration-test target emitted no
+warnings in the final run.
+
+Related direct regressions:
+  cargo test -p qbind-consensus --test authority_context_experiment_tests --test content_binding_experiment_tests
+Final result: exit 0; authority-context 9 passed, content-binding 7 passed,
+none failed/ignored/filtered. Full output is gzip-compressed in
+`04-related-regressions.log.gz`.
+
+Intermediate attempts, retained accurately:
+1. `cargo test -p qbind-consensus --test p1_provider_model_tests` exited 101
+   during first compilation. It exposed assertions requiring Debug/PartialEq
+   for the non-cloneable lease token plus one borrow conflict. The raw first
+   compiler output is retained as `01-initial-compile-failure.txt`.
+2. `rustfmt --edition 2021 crates/qbind-consensus/tests/p1_provider_model_tests.rs && cargo test -p qbind-consensus --test p1_provider_model_tests > /tmp/p1-provider-test.log 2>&1; result=$?; tail -n 80 /tmp/p1-provider-test.log; exit "$result"`
+   exited 101 on compilation: `unwrap_err` required Debug for the token.
+   This was corrected by inspecting the error result without requiring
+   token formatting/equality.
+3. The same rustfmt/test command with the tail changed to 55 lines compiled
+   and exited 101 on one assertion expecting the scanner uniqueness-stage
+   counter to remain zero; the intended uniqueness predicate had been
+   entered, so the oracle was corrected to require that stage counter.
+4. The same rustfmt/test command with the tail changed to 75 lines exited
+   101: one member-count-stage assertion was wrong and Rust warned that the
+   fixture-identity test had been nested inside another test. The expected
+   per-stage counts were corrected and the fixture-identity case made a
+   standalone discovered test. No production behavior was involved.
+5. A `rustfmt --edition 2021 --check` was run in parallel with the final
+   `rustfmt --edition 2021` formatter and briefly observed the pre-format
+   layout, exiting 1 with a formatting diff. This was a tool-ordering race,
+   not a Rust/test failure. A subsequent serial format check exited 0.
+   The observed diff is preserved in `08-format-race.txt.gz`.
+6. The first staged preservation check exited 1 because the readable copy of
+   that raw diff contained a whitespace-only diff line rejected by
+   `git diff --check`. The exact checker stdout/stderr is retained compressed
+   as `09-integrity-check-failure.*.gz`; the raw formatting diff is retained
+   compressed, then the preservation/whitespace checks are rerun.
+
+The following documentation/evidence commands are run after the final test
+source and records are in place:
+  rustfmt --edition 2021 --check crates/qbind-consensus/tests/p1_provider_model_tests.rs
+  python3 docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-implementation/check_artifacts.py
+  sha256sum -c docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-implementation/SHA256SUMS
+  git diff --check
+
+No whole workspace test suite or unrelated Rust test/build was run. No
+network protocol, operational signing, key provisioning, production wiring,
+PR, merge, or main-branch write was performed.
