@@ -1,0 +1,18 @@
+{
+  "argv": [
+    "cargo",
+    "test",
+    "--locked",
+    "-p",
+    "qbind-consensus",
+    "--test",
+    "a33_f1_voting_ancestry_tests",
+    "--no-run"
+  ],
+  "head": "e4876fc2bef1217035d484568cd791fca1f88d69",
+  "tree": "0a1df93882027fe5a3dfc1dd3532725b91ed1614",
+  "status": "",
+  "start_utc": "2026-11-07T06:58:52.771458+00:00",
+  "end_utc": "2026-11-07T06:58:53.065152+00:00",
+  "exit_code": 0
+}

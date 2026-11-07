@@ -2125,8 +2125,10 @@ where
     /// vote, including the justification-view short-circuit (the ancestry walk
     /// is NOT performed once [`SafetyBranch::ViewSufficiency`] holds).
     ///
-    /// The boolean outcome, the OR structure and the short-circuit are
-    /// identical to the historical predicate; only the typed branch is added.
+    /// The OR structure and short-circuits are unchanged. The ancestry branch
+    /// visits at most the actual retained block count; exhaustion is `Unsafe`,
+    /// since an indeterminate chain is not proof that the candidate extends the
+    /// lock. Complete acyclic ancestry keeps its historical result.
     pub fn safety_decision(&self, block_id: &BlockIdT) -> SafetyDecision {
         // 1. If no locked qc yet, allow.
         let locked = match self.locked_qc.as_ref() {
@@ -2155,10 +2157,10 @@ where
             }
         }
 
-        // 4. Walk ancestors until genesis or until we find locked_qc.block_id.
+        // 4. A complete acyclic retained chain has at most blocks.len() nodes.
         let locked_block_id = &locked.block_id;
         let mut current = block_node;
-        loop {
+        for _ in 0..self.blocks.len() {
             if &current.id == locked_block_id {
                 return SafetyDecision::Safe(SafetyBranch::Ancestry);
             }
@@ -2172,9 +2174,7 @@ where
             };
         }
 
-        // If we walked the chain and didn't find the locked block, and the
-        // justify_qc.view was not >= locked_qc.view, this block conflicts
-        // with our lock; do not vote.
+        // Missing or exhausted ancestry cannot establish extension of the lock.
         SafetyDecision::Unsafe
     }
 
@@ -2187,7 +2187,7 @@ where
     /// candidate ⇒ `CandidateAbsent`; `justify_qc.view >= locked.view` ⇒
     /// `SafeViewSufficiency` WITHOUT walking ancestry. Only when neither
     /// short-circuit applies is the parent chain walked, and then for **at most
-    /// `max_hops` parent transitions**. This method NEVER calls the unbounded
+    /// `max_hops` parent transitions**. This method NEVER calls
     /// [`Self::safety_decision`] first and performs at most `max_hops` parent
     /// dereferences, so it is finite even on a cyclically registered graph
     /// (it returns `BoundExhausted` rather than looping).

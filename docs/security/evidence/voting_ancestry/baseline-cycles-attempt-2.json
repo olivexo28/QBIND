@@ -1,0 +1,15 @@
+{
+  "argv": [
+    "python",
+    "docs/security/evidence/voting_ancestry/run_cases.py",
+    "target/debug/deps/a33_f1_voting_ancestry_tests-7fc5a16951aaca9c",
+    "e4876fc2bef1217035d484568cd791fca1f88d69",
+    "docs/security/evidence/voting_ancestry/baseline"
+  ],
+  "head": "e4876fc2bef1217035d484568cd791fca1f88d69",
+  "tree": "0a1df93882027fe5a3dfc1dd3532725b91ed1614",
+  "status": "?? docs/security/evidence/voting_ancestry/baseline-build.json\n?? docs/security/evidence/voting_ancestry/baseline-build.log\n?? docs/security/evidence/voting_ancestry/baseline-cycles.json\n?? docs/security/evidence/voting_ancestry/baseline-cycles.log\n",
+  "start_utc": "2026-11-07T06:59:08.301315+00:00",
+  "end_utc": "2026-11-07T06:59:23.364741+00:00",
+  "exit_code": 0
+}

@@ -1,0 +1,12 @@
+Traceback (most recent call last):
+  File "/workspaces/QBIND/olivexo28/QBIND/docs/security/evidence/voting_ancestry/run_cases.py", line 66, in <module>
+    main()
+  File "/workspaces/QBIND/olivexo28/QBIND/docs/security/evidence/voting_ancestry/run_cases.py", line 26, in main
+    binary = args.binary.resolve(strict=True)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/pathlib.py", line 1242, in resolve
+    s = self._flavour.realpath(self, strict=strict)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen posixpath>", line 432, in realpath
+  File "<frozen posixpath>", line 476, in _joinrealpath
+FileNotFoundError: [Errno 2] No such file or directory: 'target/debug/deps/a33_f1_voting_ancestry_tests-39cba5285a60bf52'
