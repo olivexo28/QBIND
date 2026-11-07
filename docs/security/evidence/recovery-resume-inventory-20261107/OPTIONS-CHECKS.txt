@@ -1,0 +1,110 @@
+BINDING OPTIONS COMPARISON — DOCUMENTATION CHECK RECORD
+
+Expected baseline:
+  branch docs/authenticated-recovery-resume-inventory
+  task commit 6ba38e9fa66f216e45906b3eb0575d67aa0cd071
+  task tree   6f8e6b10d98cd264135260bb22b85e8231747dfd
+  main commit 9bf0eb43e4e3c601d02d3886d220b0abeb3a103e
+  main tree   56509b20084ee1cbe2c42fda9d73d87e4c82c33f
+
+Before editing:
+$ printf 'origin='; git remote get-url origin; printf 'branch='; git branch --show-current; printf 'HEAD='; git rev-parse HEAD; printf 'tree='; git rev-parse 'HEAD^{tree}'; printf 'status='; git status --porcelain=v1; printf 'staged='; git diff --cached --name-only; printf '%s\n' 'direct remote refs:'; git ls-remote --heads origin refs/heads/docs/authenticated-recovery-resume-inventory refs/heads/main; git merge-base --is-ancestor 9bf0eb43e4e3c601d02d3886d220b0abeb3a103e HEAD; printf 'main_ancestor_exit=%s\n' "$?"; git show -s --format='parent=%P' HEAD
+Output:
+origin=https://github.com/olivexo28/QBIND
+branch=docs/authenticated-recovery-resume-inventory
+HEAD=6ba38e9fa66f216e45906b3eb0575d67aa0cd071
+tree=6f8e6b10d98cd264135260bb22b85e8231747dfd
+status=staged=
+direct remote refs:
+6ba38e9fa66f216e45906b3eb0575d67aa0cd071	refs/heads/docs/authenticated-recovery-resume-inventory
+9bf0eb43e4e3c601d02d3886d220b0abeb3a103e	refs/heads/main
+main_ancestor_exit=0
+parent=e893d0bf7359deb87998ff67e63fbd92aabffd91
+Exit 0. Worktree and index were clean; expected values matched.
+
+Pinned source/link/semantic check. All source links target protected main
+9bf0eb43e4e3c601d02d3886d220b0abeb3a103e; valid line ranges are checked
+against `git show <revision>:<path>`. The semantic excerpts are inspected,
+not treated as proof based on range existence alone.
+
+First command attempt was a test-script assertion only:
+  assert len(links)>=10,len(links)
+Output: `AssertionError: 8`, exit 1. The document had 8 source links;
+the arbitrary count expectation was wrong. No repository check failed.
+
+Second attempt corrected the count expectation to 8 but used the incorrect
+expected literal `put_bytes(&mut out, &self.txs)` for a loop over `tx`.
+Output: `AssertionError: ('crates/qbind-wire/src/consensus.rs', 915, 954, 'put_bytes(&mut out, &self.txs)')`, exit 1.
+The source is encoded by iterating `for tx in &self.txs` and writing each
+`tx`; the assertion was corrected to those actual source statements.
+
+Successful check command:
+$ python3 - <<'PY'
+import re,pathlib,subprocess
+p=pathlib.Path('docs/security/evidence/recovery-resume-inventory-20261107/BINDING_OPTIONS_COMPARISON.md'); text=p.read_text(); rev='9bf0eb43e4e3c601d02d3886d220b0abeb3a103e'
+links=re.findall(r'https://github\.com/olivexo28/QBIND/blob/([0-9a-f]{40})/([^\s)#]+)#L(\d+)-L(\d+)',text)
+assert len(links)>=8,len(links)
+for r,f,a,b in links:
+ assert r==rev and int(a)>0 and int(b)>=int(a)
+ lines=subprocess.check_output(['git','show',f'{r}:{f}']).decode().splitlines(); assert int(b)<=len(lines),(f,a,b,len(lines))
+print(f'PASS: {len(links)} source links use pinned main and valid line ranges')
+checks=[('crates/qbind-wire/src/consensus.rs',915,954,['qc.encode(&mut qc_buf)','put_bytes(&mut out, &qc_bytes)','for tx in &self.txs','put_bytes(&mut out, tx)']),('crates/qbind-wire/src/consensus.rs',300,332,['for sig in &self.signatures','put_bytes(out, sig)']),('crates/qbind-node/src/binary_consensus_loop.rs',1113,1120,['signing_domain.proposal_preimage(proposal)','signing_domain.vote_preimage(vote)']),('crates/qbind-node/src/binary_consensus_loop.rs',4728,4742,['ctx.proposal_preimage(&proposal)','SigningPosition']),('crates/qbind-node/src/binary_consensus_loop.rs',5155,5170,['ctx.vote_preimage(&vote)','SigningPosition']),('crates/qbind-node/src/binary_consensus_loop.rs',6352,6370,['verify_proposal_msg_with_domain','&proposal']),('crates/qbind-node/src/binary_consensus_loop.rs',6824,6840,['verify_vote_msg_with_domain','&vote']),('crates/qbind-consensus/src/basic_hotstuff_engine.rs',3875,3890,['proposer.0.to_le_bytes()','view.to_le_bytes()','parent_block_id[..16]']),('crates/qbind-consensus/src/hotstuff_state_engine.rs',1819,1938,['own_qc','g_view < p_view && p_view < b_view','committed_block = Some(g_id.clone())'])]
+for f,a,b,tokens in checks:
+ src=subprocess.check_output(['git','show',f'{rev}:{f}']).decode().splitlines(); excerpt='\n'.join(src[a-1:b])
+ for token in tokens: assert token in excerpt,(f,a,b,token)
+print(f'PASS: {len(checks)} semantic source excerpts contain their asserted mechanisms')
+for src,target in [('docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md','evidence/recovery-resume-inventory-20261107/BINDING_OPTIONS_COMPARISON.md'),('docs/security/evidence/recovery-resume-inventory-20261107/README.md','BINDING_OPTIONS_COMPARISON.md')]:
+ assert target in pathlib.Path(src).read_text() and (pathlib.Path(src).parent/target).is_file()
+print('PASS: 2 new relative documentation links resolve')
+PY
+Output:
+PASS: 8 source links use pinned main and valid line ranges
+PASS: 9 semantic source excerpts contain their asserted mechanisms
+PASS: 2 new relative documentation links resolve
+Exit 0. The v2 outbound preimage helpers and inbound message-bound domain
+verifiers were also read in context. The Proposal body excludes its own
+signature and contains encoded embedded QC bytes, whose encoder includes
+signature bytes. Source range/token checks support manual semantic review;
+they are not a formal proof. Rendered GitHub clicks were not checked.
+
+Append-only and historical-integrity check:
+$ python3 - <<'PY'
+import pathlib,subprocess,hashlib
+base='6ba38e9fa66f216e45906b3eb0575d67aa0cd071'; root='docs/security/evidence/recovery-resume-inventory-20261107/'
+paths=['docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md',root+'README.md',root+'CHANGED_PATHS.txt',root+'commands.txt']
+for path in paths: assert pathlib.Path(path).read_bytes().startswith(subprocess.check_output(['git','show',f'{base}:{path}'])),path
+print('PASS: four modified documents retain exact task-tip byte prefixes')
+for manifest,rev in [('SHA256SUMS','61028eb6dbb91f0834a5235f20c935bb0ff5b549'),('CORRECTION-SHA256SUMS','8344e92412d37882ef059b6158ead1959b0fa165'),('CONTRACT-SHA256SUMS','a4620f1e9363fbd30b23f06448e8f19174de8192'),('AP1-CORRECTION-SHA256SUMS','c12b46497a404171ca41c640f614f0c308ae514b'),('WITNESS-SHA256SUMS','e893d0bf7359deb87998ff67e63fbd92aabffd91'),('BINDING-SHA256SUMS',base)]:
+ data=subprocess.check_output(['git','show',f'{rev}:{root+manifest}']).decode(); n=0
+ for line in data.splitlines():
+  digest,path=line.split('  ',1); blob=subprocess.check_output(['git','show',f'{rev}:{path}']); assert hashlib.sha256(blob).hexdigest()==digest,(manifest,path); n+=1
+ print(f'PASS: {manifest} {n} entries verify at producer {rev}')
+ assert pathlib.Path(root+manifest).read_bytes()==subprocess.check_output(['git','show',f'{base}:{root+manifest}'])
+for path in [root+'QUORUM_CONTENT_BINDING_ANALYSIS.md',root+'BINDING-CHECKS.txt',root+'BINDING-SHA256SUMS',root+'AUTHENTICATED_PREFIX_VERIFICATION_CONTRACT.md',root+'FINALITY_WITNESS_CONTRACT.md',root+'WITNESS-CHECKS.txt','Audit/QBIND_SECURITY_FINDINGS_REGISTER.md']:
+ assert pathlib.Path(path).read_bytes()==subprocess.check_output(['git','show',f'{base}:{path}']),path
+print('PASS: prior analysis, prefix/witness evidence, and audit register are unchanged')
+PY
+$ git diff --check && git diff --cached --check && echo 'PASS: worktree and index whitespace checks'
+Output:
+PASS: four modified documents retain exact task-tip byte prefixes
+PASS: SHA256SUMS 8 entries verify at producer 61028eb6dbb91f0834a5235f20c935bb0ff5b549
+PASS: CORRECTION-SHA256SUMS 8 entries verify at producer 8344e92412d37882ef059b6158ead1959b0fa165
+PASS: CONTRACT-SHA256SUMS 8 entries verify at producer a4620f1e9363fbd30b23f06448e8f19174de8192
+PASS: AP1-CORRECTION-SHA256SUMS 8 entries verify at producer c12b46497a404171ca41c640f614f0c308ae514b
+PASS: WITNESS-SHA256SUMS 8 entries verify at producer e893d0bf7359deb87998ff67e63fbd92aabffd91
+PASS: BINDING-SHA256SUMS 10 entries verify at producer 6ba38e9fa66f216e45906b3eb0575d67aa0cd071
+PASS: prior analysis, prefix/witness evidence, and audit register are unchanged
+PASS: worktree and index whitespace checks
+Exit 0. Old manifests were checked against their own producers, not against
+the current appended documents. This record makes no assertion that a
+historical hash covers later bytes.
+
+$ sha256sum -c docs/security/evidence/recovery-resume-inventory-20261107/OPTIONS-SHA256SUMS
+All 13 listed paths reported `OK`; exit 0 before this check log was added.
+The manifest excludes itself and this check log. Final hashes are reported
+separately after the log is complete.
+
+No source or test files changed. No unchanged Rust tests or builds were run.
+The proposed sensitivity investigation is FUTURE / NOT EXECUTED. There was
+no rendered GitHub click, production caller, data application, live network,
+operational signing, quarantine clear or resume action.

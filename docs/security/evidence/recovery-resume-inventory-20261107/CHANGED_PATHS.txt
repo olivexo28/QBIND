@@ -41,3 +41,12 @@ docs/security/evidence/recovery-resume-inventory-20261107/commands.txt
 docs/security/evidence/recovery-resume-inventory-20261107/QUORUM_CONTENT_BINDING_ANALYSIS.md
 docs/security/evidence/recovery-resume-inventory-20261107/BINDING-CHECKS.txt
 docs/security/evidence/recovery-resume-inventory-20261107/BINDING-SHA256SUMS
+
+Binding options and test-only slice delivery:
+docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+docs/security/evidence/recovery-resume-inventory-20261107/README.md
+docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/commands.txt
+docs/security/evidence/recovery-resume-inventory-20261107/BINDING_OPTIONS_COMPARISON.md
+docs/security/evidence/recovery-resume-inventory-20261107/OPTIONS-CHECKS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/OPTIONS-SHA256SUMS

@@ -4977,3 +4977,23 @@ no reviewer identity or raw review artifact is asserted. Resource ceilings
 and deadlines in the earlier witness are unvalidated, not operational
 guarantees. A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain **OPEN**;
 activation remains **DISABLED**; public DevNet remains **NO-GO**.
+
+## 40. Binding options and first test-only investigation — independent review pending
+
+The [append-only comparison](evidence/recovery-resume-inventory-20261107/BINDING_OPTIONS_COMPARISON.md)
+compares current fail-closed refusal, a future content-bound consensus vote
+version, and separately purposed recovery attestations. It recommends one
+bounded test-only signed-artifact sensitivity investigation before selecting
+either future route. No new format or construction is selected; no production
+caller, recovery application, signer override, quarantine clear or resume
+capability is proposed as part of that slice.
+
+The user supplied **PASS WITH LIMITATIONS** for the quorum-to-content
+analysis at `6ba38e9f`; both B and C remain unselected. AP1 and its
+document-source navigation follow-up remain **PASSED / CLOSED** within their
+documented scope. Earlier inventory corrections and bounded acceptances
+remain preserved. No reviewer identity or raw review artifact is asserted.
+See `evidence/recovery-resume-inventory-20261107/OPTIONS-CHECKS.txt` and
+`OPTIONS-SHA256SUMS` for current checks and integrity evidence. A17-F1 /
+RS1-F7, RS1 and A33-F1 / E27 remain **OPEN**; activation remains **DISABLED**;
+public DevNet remains **NO-GO**.

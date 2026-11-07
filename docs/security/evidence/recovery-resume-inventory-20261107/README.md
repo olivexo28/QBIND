@@ -457,3 +457,15 @@ The earlier corrections and bounded acceptances remain preserved; no reviewer
 identity or raw review artifact is asserted. Earlier numerical ceilings and
 deadlines remain unvalidated proposals. See `BINDING-CHECKS.txt` and
 `BINDING-SHA256SUMS` for this revision's evidence.
+
+## 12. Binding options and test-only slice
+
+The [decision-ready comparison](BINDING_OPTIONS_COMPARISON.md) keeps
+continued refusal in place and leaves consensus-version binding and
+recovery-purpose attestations unselected. It recommends only a bounded,
+test-only artifact-sensitivity investigation; it grants no production,
+application, clear or resume capability. The user-supplied PASS WITH
+LIMITATIONS for the prior analysis is carried forward within scope; AP1 and
+its navigation follow-up remain PASSED / CLOSED, and earlier bounded
+acceptances remain preserved. See `OPTIONS-CHECKS.txt` and
+`OPTIONS-SHA256SUMS`.

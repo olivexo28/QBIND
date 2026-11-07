@@ -686,3 +686,10 @@ The original log remains an exact byte prefix. The user supplied PASS WITH
 LIMITATIONS for the finality-witness direction and PASSED / CLOSED for AP1
 and its document-source navigation follow-up. No rendered GitHub click was
 performed and no unchanged Rust test or build was run.
+
+Binding-options comparison follow-up: exact source, relative-link, semantic
+excerpt, prefix, historical-manifest, scope and whitespace commands/results
+are recorded in `OPTIONS-CHECKS.txt`; current hashes are in
+`OPTIONS-SHA256SUMS`. The preceding inventory, contract, AP1, witness and
+quorum-binding records remain append-only. No unchanged Rust tests or builds
+were run, and the proposed test-only investigation was not executed.
