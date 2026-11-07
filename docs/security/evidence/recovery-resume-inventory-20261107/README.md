@@ -401,3 +401,19 @@ uncertain outcome separately, require the node to remain closed, and require
 reconciliation without assuming rollback. These clauses supersede the
 unqualified wording in the earlier “Test-only verifier” and “Actual inbound
 caller” matrix rows.
+
+## 8. Authenticated-prefix verification contract
+
+The follow-on
+[Authenticated-prefix verification contract](AUTHENTICATED_PREFIX_VERIFICATION_CONTRACT.md)
+defines proposed anchor, chain/epoch authority, endorsement, continuity,
+finality, resource-ordering, epoch-scope, pre-effect refusal, and future
+acceptance obligations. It is not a wire format, implemented verifier,
+recovery approval, or resume authority.
+
+The user supplied **PASS WITH LIMITATIONS** for the three section-7 inventory
+corrections. They are **PASSED / CLOSED within their documented scope** and
+are not reopened here. This disposition does not close A17-F1 / RS1-F7, RS1,
+or A33-F1 / E27, nor does it approve the proposed authenticated-prefix slice.
+The contract and its current integrity evidence are recorded in the appended
+plan section 36 and `CONTRACT-SHA256SUMS`.

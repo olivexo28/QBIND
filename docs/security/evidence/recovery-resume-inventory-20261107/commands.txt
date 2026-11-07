@@ -329,3 +329,141 @@ Final log-follow-up identity check:
     Corrected checker stdout: PASS: 39 relative links/anchors, 35 pinned
     source ranges, whitespace, and current one-path log delta.
     Corrected checker exit 0.
+
+Authenticated-prefix contract delivery — documentation-only checks
+==================================================================
+
+Before creating or publishing changes, the existing branch and direct remote
+refs were rechecked:
+
+  git branch --show-current
+    stdout: docs/authenticated-recovery-resume-inventory
+    exit 0.
+  git remote get-url origin
+    stdout: https://github.com/olivexo28/QBIND
+    exit 0.
+  git ls-remote origin refs/heads/docs/authenticated-recovery-resume-inventory refs/heads/main
+    stdout:
+      1cc217b8f7d03514c420066c32c0d7b42d357752 refs/heads/docs/authenticated-recovery-resume-inventory
+      9bf0eb43e4e3c601d02d3886d220b0abeb3a103e refs/heads/main
+    exit 0.
+  git show -s --format='commit=%H%ntree=%T%nparent=%P' HEAD
+    stdout:
+      commit=1cc217b8f7d03514c420066c32c0d7b42d357752
+      tree=02d57c09e99daf107d1a58442685284e87a9f2a3
+      parent=826b1c19a00cea08114cec10c0b64d49becb296f
+    exit 0.
+  git merge-base --is-ancestor 9bf0eb43e4e3c601d02d3886d220b0abeb3a103e HEAD
+    stdout: empty (ancestor confirmed)
+    exit 0.
+
+Unsuccessful verification attempts, retained for audit accuracy:
+
+  git status --short --branch && git branch --show-current && git rev-parse HEAD HEAD^{tree} && git rev-parse refs/remotes/origin/docs/authenticated-recovery-resume-inventory refs/remotes/origin/main
+    stdout: HEAD and its tree resolved; the local
+      refs/remotes/origin/docs/authenticated-recovery-resume-inventory
+    tracking ref was absent. Git reported “fatal: ambiguous argument” and
+    advised `--` separation.
+    exit 128. This used local tracking refs, not direct remote refs; the
+    successful `git ls-remote` result above is authoritative.
+
+  BASE=1cc217b8f7d03514c420066c32c0d7b42d357752
+  for path in README.md remediation-plan CHANGED_PATHS.txt commands.txt; do
+    cmp <(git show "$BASE:$path") \
+      <(head -c "$(git cat-file -s "$BASE:$path")" "$path")
+  done
+    First two append-prefix attempts stopped at the plan: the section-36
+    appendix had matched an earlier repeated end phrase rather than the file
+    end. The first run reported a mismatch at plan character 380578, line
+    4845; the second reported character 381641, line 4862. Both exited 1.
+    The misplaced text was moved to the physical EOF; no baseline bytes were
+    overwritten. The full final prefix loop below then passed for all four
+    files.
+
+Final validation commands and results:
+
+  git diff --check && git diff --cached --check
+    PASS; no whitespace errors; exit 0.
+
+  BASE=1cc217b8f7d03514c420066c32c0d7b42d357752
+  for path in \
+    docs/security/evidence/recovery-resume-inventory-20261107/README.md \
+    docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md \
+    docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt \
+    docs/security/evidence/recovery-resume-inventory-20261107/commands.txt; do
+    cmp <(git show "$BASE:$path") \
+      <(head -c "$(git cat-file -s "$BASE:$path")" "$path")
+  done
+    PASS; each original file is an exact byte prefix at the expected task
+    tip; exit 0.
+
+  cmp <(git show "$BASE:Audit/QBIND_SECURITY_FINDINGS_REGISTER.md") \
+    Audit/QBIND_SECURITY_FINDINGS_REGISTER.md
+    PASS; audit register remains byte-identical; exit 0.
+
+  git diff --quiet "$BASE" -- \
+    docs/security/evidence/empty-restore-response \
+    docs/security/evidence/voting_ancestry
+    PASS; selected preserved evidence directories remain unchanged; exit 0.
+
+  python3 - <<'PY'
+  from pathlib import Path
+  import re, subprocess
+  root=Path('docs/security/evidence/recovery-resume-inventory-20261107')
+  for doc in (root/'README.md',root/'AUTHENTICATED_PREFIX_VERIFICATION_CONTRACT.md'):
+   text=doc.read_text(); links=re.findall(r'(?<!!)\[[^]]+\]\(([^)]+)\)',text)
+   for link in links:
+    if link.startswith(('https://','http://','mailto:','#')): continue
+    path,_,frag=link.partition('#'); target=(doc.parent/path).resolve(); assert target.is_file(),f'{doc}: {link}'
+    if frag:
+     hs=re.findall(r'^#+\s+(.+)$',target.read_text(),re.M)
+     slug=lambda h: re.sub(r'-+','-',re.sub(r'[^a-z0-9 -]','',h.lower())).strip().replace(' ','-')
+     assert frag in {slug(h) for h in hs},f'{doc}: {link}'
+   src=re.findall(r'https://github\.com/olivexo28/QBIND/blob/([0-9a-f]{40})/([^#]+)#L(\d+)(?:-L(\d+))?',text)
+   assert src and {r for r,*_ in src}=={'9bf0eb43e4e3c601d02d3886d220b0abeb3a103e'},f'{doc}: source pins'
+   for _,path,a,b in src: assert 1<=int(a)<=int(b or a)<=len(Path(path).read_text().splitlines()),f'{path}:{a}-{b}'
+   print(f'PASS {doc}: {len(links)} relative links/anchors; {len(src)} source ranges pinned to protected main')
+  plan=Path('docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md').read_text()
+  assert plan.rstrip().endswith('manifests remain tied to their producer revisions.') and plan.count('## 36. Authenticated-prefix verification contract')==1
+  contract=(root/'AUTHENTICATED_PREFIX_VERIFICATION_CONTRACT.md').read_text()
+  assert contract.count('**FUTURE / NOT EXECUTED**')>=12 and 'SIGNING_OR_RESUME_AUTHORITY=NOT GRANTED' in contract
+  assert all(not line.endswith((' ','\t')) for p in (root/'README.md',root/'CHANGED_PATHS.txt',root/'commands.txt',root/'AUTHENTICATED_PREFIX_VERIFICATION_CONTRACT.md',Path('docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md')) for line in p.read_text().splitlines())
+  changed=subprocess.check_output(['git','status','--porcelain=v1','--untracked-files=all'],text=True)
+  paths={x[3:] for x in changed.splitlines()}
+  expected={'docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md',str(root/'README.md'),str(root/'CHANGED_PATHS.txt'),str(root/'AUTHENTICATED_PREFIX_VERIFICATION_CONTRACT.md')}
+  assert paths==expected, (paths,expected)
+  assert not subprocess.check_output(['git','diff','--cached','--name-only'],text=True)
+  print('PASS plan section at EOF; all acceptance cases FUTURE / NOT EXECUTED; whitespace clean; documentation-only scope; staging empty')
+  PY
+    stdout:
+      PASS README.md: 40 relative links/anchors; 35 source ranges pinned to protected main.
+      PASS AUTHENTICATED_PREFIX_VERIFICATION_CONTRACT.md: 30 relative links/anchors; 28 source ranges pinned to protected main.
+      PASS plan section at EOF; all acceptance cases FUTURE / NOT EXECUTED; whitespace clean; documentation-only scope; staging empty.
+    exit 0.
+
+  git ls-remote origin refs/heads/docs/authenticated-recovery-resume-inventory refs/heads/main
+    stdout: task ref 1cc217b8f7d03514c420066c32c0d7b42d357752;
+      main ref 9bf0eb43e4e3c601d02d3886d220b0abeb3a103e.
+    exit 0.
+
+No Rust tests or builds were run. The three inventory correction dispositions
+remain PASSED / CLOSED within their documented scope. All contract acceptance
+cases are FUTURE / NOT EXECUTED. A17-F1 / RS1-F7, RS1, and A33-F1 / E27 remain
+OPEN; activation remains DISABLED; public DevNet remains NO-GO.
+
+Current contract integrity manifest:
+
+  sha256sum -c docs/security/evidence/recovery-resume-inventory-20261107/CONTRACT-SHA256SUMS
+    stdout: all eight listed paths report `OK` (the appended plan, inventory,
+    changed-path list, contract, audit register, and three preserved evidence
+    files).
+    exit 0.
+  git diff --check
+    stdout: empty (no whitespace errors).
+    exit 0.
+
+`CONTRACT-SHA256SUMS` is a new revision-current manifest and deliberately does
+not rewrite the prior `SHA256SUMS` or `CORRECTION-SHA256SUMS`. The command log
+and manifest itself are not self-listed; their final SHA-256 values are
+reported separately. No production source, test, build, live network,
+operational signing, or activation was performed.

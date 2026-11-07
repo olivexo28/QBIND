@@ -4887,3 +4887,27 @@ fencing, and separate-resume directions remain proposed only. No recovery
 mechanism or authority is approved. A17-F1 / RS1-F7, RS1 and A33-F1 / E27
 remain **OPEN**; activation remains **DISABLED** and public DevNet remains
 **NO-GO**.
+
+## 36. Authenticated-prefix verification contract — proposed, pending review
+
+The delivered
+[Authenticated-prefix verification contract](evidence/recovery-resume-inventory-20261107/AUTHENTICATED_PREFIX_VERIFICATION_CONTRACT.md)
+sets out proposed anchor, chain/genesis/epoch authority, individual
+endorsement, prefix-continuity, finality, resource-admission, and effect-order
+obligations, with a bounded single-epoch first-review slice and explicit
+refusal of unsupported transitions. It compares current fail-closed catch-up
+with that proposed slice and marks every new acceptance case FUTURE / NOT
+EXECUTED.
+
+The contract is documentation only: no wire or persistence format,
+cryptographic construction, currentness service, authority source, verifier,
+recovery mechanism, or clear/resume decision is selected or approved.
+Successful prefix verification is expressly separate from global currentness,
+rollback resistance, durable ownership, signing-history continuity, signer
+exclusivity/fencing, and separately authorized resume. Its source links pin to
+protected main `9bf0eb43e4e3c601d02d3886d220b0abeb3a103e`; the inventory and
+contract carry the user-supplied PASS WITH LIMITATIONS for the three section-7
+corrections as PASSED / CLOSED within their documented scope. That disposition
+does not close A17-F1 / RS1-F7, RS1, or A33-F1 / E27. Current append-only
+delivery hashes are in the inventory's `CONTRACT-SHA256SUMS`; historical
+manifests remain tied to their producer revisions.
