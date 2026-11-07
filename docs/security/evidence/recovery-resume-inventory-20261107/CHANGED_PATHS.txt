@@ -234,3 +234,21 @@ docs/security/evidence/recovery-resume-inventory-20261107/p1-fixture-binding-cor
 docs/security/evidence/recovery-resume-inventory-20261107/p1-fixture-binding-correction/regressions.log.gz
 docs/security/evidence/recovery-resume-inventory-20261107/p1-fixture-binding-correction/integrity.txt
 docs/security/evidence/recovery-resume-inventory-20261107/p1-fixture-binding-correction/SHA256SUMS
+
+P1 provider-to-verifier test-only handoff:
+crates/qbind-consensus/tests/p1_provider_model_tests.rs
+crates/qbind-consensus/tests/p1_provider_verifier_handoff_tests.rs
+crates/qbind-consensus/tests/support/p1_provider_verifier_handoff.rs
+docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+docs/security/evidence/recovery-resume-inventory-20261107/README.md
+docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/commands.txt
+docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-verifier-handoff/README.md
+docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-verifier-handoff/COMMANDS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-verifier-handoff/check_artifacts.py
+docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-verifier-handoff/first-focused.log.gz
+docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-verifier-handoff/discovery.log.gz
+docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-verifier-handoff/focused.log.gz
+docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-verifier-handoff/provider-regression.log.gz
+docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-verifier-handoff/integrity.txt
+docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-verifier-handoff/SHA256SUMS

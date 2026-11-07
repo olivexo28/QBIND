@@ -774,3 +774,8 @@ P1-IMPL-1 fixture-lifetime correction: see
 corrected model and directly related regression executions, toolchain,
 preservation checks and hashes. The baseline diagnostic reproduces a
 synthetic test-model gap and is not a passing security control.
+
+P1 provider-to-verifier handoff: see
+`p1-provider-verifier-handoff/COMMANDS.txt` for discovery, focused and
+directly affected regression commands, output, preservation and hashes.
+Real signature verification is limited to the specified test message.

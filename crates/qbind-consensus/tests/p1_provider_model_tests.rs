@@ -4,6 +4,9 @@
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
+#[path = "support/p1_provider_verifier_handoff.rs"]
+mod p1_provider_verifier_handoff;
+
 const CANDIDATE_MAGIC: &[u8; 8] = b"QBP1TEST";
 const EVIDENCE_MAGIC: &[u8; 8] = b"QBE1TEST";
 const CANDIDATE_HEADER: usize = 12;

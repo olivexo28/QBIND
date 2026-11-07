@@ -598,3 +598,16 @@ claim; P1-SPEC-1/2/3 and earlier bounded acceptances retain their prior scope.
 
 A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
 Activation DISABLED; public DevNet NO-GO.
+
+## 24. P1 provider-to-verifier handoff
+
+The [test-only handoff](p1-provider-verifier-handoff/README.md) connects the
+accepted provider's live lease and simulated currentness checks to the real
+ML-DSA backend. A private witness-selection mutant is caught by the same
+context-selection oracle despite successful real signature verification.
+The backend signs/verifies a constant synthetic message, not a consensus
+preimage or authenticated full context. This is not a recovery or resume
+authority. Independent review is pending; prior bounded acceptances remain.
+
+A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
+Activation DISABLED; public DevNet NO-GO.

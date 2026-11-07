@@ -1,0 +1,50 @@
+P1 provider-to-verifier handoff command record
+
+Origin https://github.com/olivexo28/QBIND
+Branch docs/authenticated-recovery-resume-inventory
+Starting HEAD 25a03a1e82aca9643ea86f8368a3c6cedfe2826f
+Tree 56397f449fc4c0abff67f28901badcb612a7873f
+Parent f4ed8a123762dfc9aa1f1a9bdcffa78942894eed
+Direct task ref 25a03a1e82aca9643ea86f8368a3c6cedfe2826f
+Direct main ref 9bf0eb43e4e3c601d02d3886d220b0abeb3a103e
+Main tree 56509b20084ee1cbe2c42fda9d73d87e4c82c33f
+Before editing: git remote get-url origin, git branch --show-current,
+git rev-parse HEAD/HEAD^{tree}/HEAD^/main^{tree}, git merge-base --is-ancestor,
+git ls-remote origin for task and main, git status --porcelain=v1 and
+git diff --cached --name-only. Exit 0; expected refs matched, main ancestor,
+worktree and index clean. No reset, rebase or force-push.
+
+Linux 6.12.8+ x86_64; rustc 1.99.1 (58cf8f9c3 2026-10-13),
+host x86_64-unknown-linux-gnu, LLVM 23.1.1; cargo 1.99.1
+(5f94df478 2026-08-27).
+
+Intermediate:
+  rustfmt --edition 2021 crates/qbind-consensus/tests/p1_provider_model_tests.rs crates/qbind-consensus/tests/p1_provider_verifier_handoff_tests.rs crates/qbind-consensus/tests/support/p1_provider_verifier_handoff.rs
+  cargo test -p qbind-consensus --test p1_provider_verifier_handoff_tests -- --nocapture
+Exit 0; 22 passed, 0 failed, 0 ignored, 0 filtered. Output retained in
+first-focused.log.gz. An additional explicit fixture-argument binding
+assertion was added afterwards.
+
+Final, serial:
+  rustfmt --edition 2021 crates/qbind-consensus/tests/p1_provider_model_tests.rs crates/qbind-consensus/tests/p1_provider_verifier_handoff_tests.rs crates/qbind-consensus/tests/support/p1_provider_verifier_handoff.rs
+  rustfmt --edition 2021 --check crates/qbind-consensus/tests/p1_provider_model_tests.rs crates/qbind-consensus/tests/p1_provider_verifier_handoff_tests.rs crates/qbind-consensus/tests/support/p1_provider_verifier_handoff.rs
+  cargo test -p qbind-consensus --test p1_provider_verifier_handoff_tests -- --list
+  cargo test -p qbind-consensus --test p1_provider_verifier_handoff_tests -- --nocapture
+  cargo test -p qbind-consensus --test p1_provider_model_tests
+All exit 0. discovery.log.gz lists all 22 names; focused.log.gz and
+provider-regression.log.gz each show 22 passed, 0 failed, 0 ignored,
+0 measured, 0 filtered. The standalone target includes 19 original tests
+and 3 new tests; it does not represent 22 new handoff controls. Existing
+compiler warnings are retained in the raw logs. No command failed.
+Authority-context and content-binding targets were inspected, not changed
+or rerun; this target reuses only their real backend API, not their helpers.
+
+Integrity and documentation:
+  python3 docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-verifier-handoff/check_artifacts.py
+  git diff --check
+  git diff --cached --check
+  sha256sum -c docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-verifier-handoff/SHA256SUMS
+All exit 0; integrity.txt retains the checker results. Previous manifest
+entries are verified against their producing revision, not the current
+append-only files. SHA256SUMS excludes itself; final commit and direct refs
+are reported at delivery because a commit cannot contain its own hash.

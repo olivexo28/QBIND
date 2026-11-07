@@ -5217,3 +5217,19 @@ The synthetic model does not establish production enforcement, authenticated
 currentness, durable application, signer fencing or resume authority.
 A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
 Activation DISABLED; public DevNet NO-GO.
+
+## 52. P1 provider-to-verifier test-only handoff
+
+The [handoff evidence](evidence/recovery-resume-inventory-20261107/p1-provider-verifier-handoff/README.md)
+records a bounded test-only connection from the accepted provider model to the
+real ML-DSA signature backend, with simulated fixture/currentness checks and
+stage-specific positive, negative, replacement and trust-selection controls.
+The backend verifies a synthetic constant message, not candidate fields, a
+quorum certificate or committed-prefix finality. No production wiring or
+authority is added. User-supplied PASS WITH LIMITATIONS at the task base
+closes P1-IMPL-1 within the test model; this handoff is independent-review
+pending. Prior bounded acceptances, the founder scope, refusal containment,
+and unselected P1/P2 and B/C approaches remain unchanged.
+
+A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
+Activation DISABLED; public DevNet NO-GO.

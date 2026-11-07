@@ -1,0 +1,6 @@
+PASS: four append-only prefixes, 219 historical files and audit bytes
+PASS: 16 previous manifest entries against producing revision 25a03a1e82aca9643ea86f8368a3c6cedfe2826f
+PASS: prior provider source differs only by test-module inclusion; scope restricted
+PASS: three discovered handoff controls and focused/provider result counts
+NOT ESTABLISHED: authenticated currentness, quorum finality, application or resume
+PASS: unstaged whitespace and targeted rustfmt checks
