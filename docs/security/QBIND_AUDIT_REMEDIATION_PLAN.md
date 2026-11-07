@@ -4603,3 +4603,44 @@ A33-F1 / E27 and all other unresolved obligations remain **OPEN**.
 Activation remains **DISABLED**; public DevNet remains **NO-GO**.
 Only `copilot/investigate-retained-qc-tc-eviction` is published, without PR,
 merge, main push or force-push.
+
+## 27. A17-F1 / RS1-F7 non-empty catch-up ingress containment
+
+**IMPLEMENTED — INDEPENDENT REVIEW PENDING.** A17-F1 / RS1-F7, RS1, and
+A33-F1 / E27 remain **OPEN**; activation remains **DISABLED**; public DevNet
+remains **NO-GO**. Earlier I1, W1/W2, voting-ancestry and retained-QC fixture
+acceptances remain closed only within their recorded scopes.
+
+Protected base `e584738c81814e70cbd58f80c921bea93983758c`, tree
+`693e9cdfbbdb9f3fece6c19fb6966c14e14d11ea`, was verified against direct
+remote `main`; the task branch is `copilot/a17-f1-catchup-containment`.
+The pre-implementation disposition was supplied by the user as PASS WITH
+LIMITATIONS. No reviewer identity or raw review artifact is asserted.
+
+At the actual `RestoreCatchupResponse` inbound dispatch, successful authenticated
+sender binding and the existing receipt count precede an unconditional refusal
+of every non-empty response. The existing rejection counter increments once;
+the log states that this wire format lacks verifiable constituent QC
+endorsements. Binding failures keep their original binding accounting and do
+not reach the endorsement refusal. No authority, mode, anchor, request,
+self-label, or compatibility exception was added. Empty responses continue
+through their prior helper behavior. That behavior can observe peer progress
+and may exit restore mode; it is recorded as remaining behavior, not an
+approved recovery or participation path. All non-empty suffix imports,
+including honest ones, are refused, so catch-up liveness is intentionally
+unavailable through this wire format.
+
+The helper's former transactional-error claim was corrected: a later invalid
+block can be reported after the engine retained a valid prefix. The engine
+operation was not changed to be transactional, and the ingress guard does not
+roll back earlier work. The direct-engine prefix characterization remains
+separate from actual-dispatch refusal tests.
+
+Source-to-runtime acceptance map and exact commands, outcomes, dependency
+attempts, formatting limitations, changed paths and revision scope are in the
+append-only [Run 422 A17-F1 evidence record](../devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md#run-422-a17-f1-rs1-f7-catch-up-containment-implementation).
+This source/test/binary evidence does not establish a release artifact or
+running-node behavior. It does not establish deserialization allocation
+bounds, inbound memory limits, durable quarantine, ownership, currentness,
+signer exclusivity, rollback, or authenticated recovery. The audit register
+and all historical evidence bytes remain unchanged.
