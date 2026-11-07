@@ -32,3 +32,12 @@ docs/security/evidence/recovery-resume-inventory-20261107/AUTHENTICATED_PREFIX_V
 docs/security/evidence/recovery-resume-inventory-20261107/FINALITY_WITNESS_CONTRACT.md
 docs/security/evidence/recovery-resume-inventory-20261107/WITNESS-CHECKS.txt
 docs/security/evidence/recovery-resume-inventory-20261107/WITNESS-SHA256SUMS
+
+Quorum-to-content binding analysis delivery:
+docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+docs/security/evidence/recovery-resume-inventory-20261107/README.md
+docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/commands.txt
+docs/security/evidence/recovery-resume-inventory-20261107/QUORUM_CONTENT_BINDING_ANALYSIS.md
+docs/security/evidence/recovery-resume-inventory-20261107/BINDING-CHECKS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/BINDING-SHA256SUMS

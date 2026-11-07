@@ -445,3 +445,15 @@ prior inventory corrections and bounded acceptances remain preserved. The
 [stable AP1 navigation note](AUTHENTICATED_PREFIX_VERIFICATION_CONTRACT.md#ap1-correction)
 supersedes the earlier single-hyphen link in section 9 without changing
 historical bytes; a rendered GitHub click was not checked.
+
+## 11. Quorum-to-content binding analysis
+
+The [quorum-to-content binding analysis](QUORUM_CONTENT_BINDING_ANALYSIS.md)
+compares continued refusal with future content-bound quorum statements. It
+does not select a construction or authorize recovery, application or resume.
+The user supplied **PASS WITH LIMITATIONS** for the finality-witness direction
+and **PASSED / CLOSED** for AP1 and its document-source navigation follow-up.
+The earlier corrections and bounded acceptances remain preserved; no reviewer
+identity or raw review artifact is asserted. Earlier numerical ceilings and
+deadlines remain unvalidated proposals. See `BINDING-CHECKS.txt` and
+`BINDING-SHA256SUMS` for this revision's evidence.

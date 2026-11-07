@@ -678,3 +678,11 @@ The original log above remains an exact byte prefix. The user supplied
 PASS WITH LIMITATIONS for the authenticated-prefix direction and AP1
 PASSED / CLOSED within its documented scope. The AP1 navigation follow-up
 does not reopen AP1; no rendered GitHub click was performed.
+
+Quorum-to-content binding follow-up: source, links, revision-aware integrity,
+scope, prefix and whitespace commands and outcomes are recorded in
+`BINDING-CHECKS.txt`; current delivery hashes are in `BINDING-SHA256SUMS`.
+The original log remains an exact byte prefix. The user supplied PASS WITH
+LIMITATIONS for the finality-witness direction and PASSED / CLOSED for AP1
+and its document-source navigation follow-up. No rendered GitHub click was
+performed and no unchanged Rust test or build was run.

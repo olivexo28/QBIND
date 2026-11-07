@@ -4957,3 +4957,23 @@ historical bytes; a rendered GitHub click was not checked.
 
 A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain **OPEN**; activation remains
 **DISABLED**; public DevNet remains **NO-GO**.
+
+## 39. Quorum-to-content binding analysis — independent review pending
+
+The [analysis](evidence/recovery-resume-inventory-20261107/QUORUM_CONTENT_BINDING_ANALYSIS.md)
+distinguishes existing Proposal signatures, Vote signatures and verified wire
+QCs from quorum authentication of a complete parent and content. Continued
+refusal is compared with conceptual future content-bound consensus votes and
+separately purposed quorum attestations. Independent review must decide whether
+to pursue either and resolve the binding, quorum/fault, finality coverage,
+history, compatibility, resource and authority boundaries before any format
+or activation. Successful verification alone would not authorize application
+or participation.
+
+The user supplied **PASS WITH LIMITATIONS** for the finality-witness direction
+and **PASSED / CLOSED** for AP1 and its document-source navigation follow-up.
+The prior inventory corrections and bounded acceptances remain preserved;
+no reviewer identity or raw review artifact is asserted. Resource ceilings
+and deadlines in the earlier witness are unvalidated, not operational
+guarantees. A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain **OPEN**;
+activation remains **DISABLED**; public DevNet remains **NO-GO**.

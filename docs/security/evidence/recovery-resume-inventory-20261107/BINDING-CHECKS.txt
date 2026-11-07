@@ -1,0 +1,121 @@
+QUORUM-CONTENT BINDING — DOCUMENTATION CHECK RECORD
+
+Expected baseline task commit e893d0bf7359deb87998ff67e63fbd92aabffd91,
+tree 9a7e3e0892012aa4ee141a3bff1a73e8763d82d6; protected main
+9bf0eb43e4e3c601d02d3886d220b0abeb3a103e, tree
+56509b20084ee1cbe2c42fda9d73d87e4c82c33f. Before modification identity,
+branch, direct refs, ancestry, empty worktree and staging were checked.
+The following recheck occurred after documentation edits:
+
+$ git remote get-url origin; git branch --show-current; git rev-parse HEAD HEAD^{tree}; git ls-remote --heads origin refs/heads/docs/authenticated-recovery-resume-inventory refs/heads/main; git merge-base --is-ancestor 9bf0eb43e4e3c601d02d3886d220b0abeb3a103e HEAD; echo "ancestry_exit=$?"; git diff --cached --name-only; git status --short
+https://github.com/olivexo28/QBIND
+docs/authenticated-recovery-resume-inventory
+e893d0bf7359deb87998ff67e63fbd92aabffd91
+9a7e3e0892012aa4ee141a3bff1a73e8763d82d6
+e893d0bf7359deb87998ff67e63fbd92aabffd91	refs/heads/docs/authenticated-recovery-resume-inventory
+9bf0eb43e4e3c601d02d3886d220b0abeb3a103e	refs/heads/main
+ancestry_exit=0
+ M docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+ M docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt
+ M docs/security/evidence/recovery-resume-inventory-20261107/README.md
+ M docs/security/evidence/recovery-resume-inventory-20261107/commands.txt
+?? docs/security/evidence/recovery-resume-inventory-20261107/QUORUM_CONTENT_BINDING_ANALYSIS.md
+Exit 0. No staged paths printed. These refs do not prove later publication.
+
+Source/link check, exact command:
+
+$ python3 - <<'PY'
+import re, pathlib, subprocess
+p=pathlib.Path('docs/security/evidence/recovery-resume-inventory-20261107/QUORUM_CONTENT_BINDING_ANALYSIS.md')
+s=p.read_text(); rev='9bf0eb43e4e3c601d02d3886d220b0abeb3a103e'
+links=re.findall(r'https://github\.com/olivexo28/QBIND/blob/([0-9a-f]{40})/([^\s)#]+)#L(\d+)-L(\d+)',s)
+assert links
+for r,f,a,b in links:
+    assert r==rev and 1<=int(a)<=int(b)
+    lines=subprocess.check_output(['git','show',f'{r}:{f}']).decode().splitlines()
+    assert int(b)<=len(lines), (f,a,b,len(lines))
+print(f'PASS: {len(links)} pinned source links and line ranges exist')
+checks=[('crates/qbind-consensus/src/basic_hotstuff_engine.rs',3875,3890,['proposer','view','parent','[..16]']),('crates/qbind-wire/src/consensus.rs',200,220,['self.epoch','self.block_id','self.validator_index','self.suite_id']),('crates/qbind-wire/src/consensus.rs',915,958,['parent_block_id','payload_hash','batch_commitment','self.txs']),('crates/qbind-consensus/src/qc_verify_domain.rs',1055,1119,['verify_vote_msg_with_domain','signer_bitmap','checked_add','threshold']),('crates/qbind-consensus/src/hotstuff_state_engine.rs',1819,1938,['own_qc','g_view < p_view && p_view < b_view','g_height > h','committed_block = Some(g_id.clone())']),('crates/qbind-node/src/binary_consensus_loop.rs',7398,7440,['bind_sender(claimed)','!resp.blocks.is_empty()','restore_catchup_empty_responses_ignored_total','return;'])]
+for f,a,b,tokens in checks:
+    text='\n'.join(subprocess.check_output(['git','show',f'{rev}:{f}']).decode().splitlines()[a-1:b])
+    for t in tokens: assert t in text,(f,t)
+print(f'PASS: {len(checks)} semantic source excerpts contain their asserted mechanisms; manual interpretation remains necessary')
+for src,target in [('docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md','evidence/recovery-resume-inventory-20261107/QUORUM_CONTENT_BINDING_ANALYSIS.md'),('docs/security/evidence/recovery-resume-inventory-20261107/README.md','QUORUM_CONTENT_BINDING_ANALYSIS.md')]:
+    assert target in pathlib.Path(src).read_text() and (pathlib.Path(src).parent/target).is_file()
+print('PASS: 2 new relative documentation links resolve')
+PY
+PASS: 29 pinned source links and line ranges exist
+PASS: 6 semantic source excerpts contain their asserted mechanisms; manual interpretation remains necessary
+PASS: 2 new relative documentation links resolve
+Exit 0. The source excerpts were also read in context; existence or token
+checks alone do not prove a semantic claim. Rendered GitHub clicks were not
+checked.
+
+Revision-aware prefix and integrity check, exact command:
+
+$ python3 - <<'PY'
+import hashlib,pathlib,subprocess
+root='docs/security/evidence/recovery-resume-inventory-20261107/'
+base='e893d0bf7359deb87998ff67e63fbd92aabffd91'
+paths=['docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md',root+'README.md',root+'CHANGED_PATHS.txt',root+'commands.txt']
+for p in paths:
+    old=subprocess.check_output(['git','show',f'{base}:{p}'])
+    assert pathlib.Path(p).read_bytes().startswith(old),p
+print('PASS: 4 modified documents retain the exact task-tip byte prefix')
+for name,rev in [('SHA256SUMS','61028eb6dbb91f0834a5235f20c935bb0ff5b549'),('CORRECTION-SHA256SUMS','8344e92412d37882ef059b6158ead1959b0fa165'),('CONTRACT-SHA256SUMS','a4620f1e9363fbd30b23f06448e8f19174de8192'),('AP1-CORRECTION-SHA256SUMS','c12b46497a404171ca41c640f614f0c308ae514b'),('WITNESS-SHA256SUMS',base)]:
+    data=subprocess.check_output(['git','show',f'{rev}:{root+name}']).decode()
+    count=0
+    for line in data.splitlines():
+        digest,p=line.split('  ',1)
+        content=subprocess.check_output(['git','show',f'{rev}:{p}'])
+        assert hashlib.sha256(content).hexdigest()==digest,(name,p)
+        count+=1
+    assert pathlib.Path(root+name).read_bytes()==subprocess.check_output(['git','show',f'{base}:{root+name}'])
+    print(f'PASS: {name} {count} entries at {rev}; manifest unchanged from task tip')
+for p in [root+'AUTHENTICATED_PREFIX_VERIFICATION_CONTRACT.md',root+'FINALITY_WITNESS_CONTRACT.md',root+'WITNESS-CHECKS.txt','Audit/QBIND_SECURITY_FINDINGS_REGISTER.md']:
+    assert pathlib.Path(p).read_bytes()==subprocess.check_output(['git','show',f'{base}:{p}']),p
+print('PASS: prefix contract, witness, prior checks and audit register byte-identical to task tip')
+PY
+git diff --check && git diff --cached --check && echo 'PASS: tracked and staged whitespace checks'
+PASS: 4 modified documents retain the exact task-tip byte prefix
+PASS: SHA256SUMS 8 entries at 61028eb6dbb91f0834a5235f20c935bb0ff5b549; manifest unchanged from task tip
+PASS: CORRECTION-SHA256SUMS 8 entries at 8344e92412d37882ef059b6158ead1959b0fa165; manifest unchanged from task tip
+PASS: CONTRACT-SHA256SUMS 8 entries at a4620f1e9363fbd30b23f06448e8f19174de8192; manifest unchanged from task tip
+PASS: AP1-CORRECTION-SHA256SUMS 8 entries at c12b46497a404171ca41c640f614f0c308ae514b; manifest unchanged from task tip
+PASS: WITNESS-SHA256SUMS 8 entries at e893d0bf7359deb87998ff67e63fbd92aabffd91; manifest unchanged from task tip
+PASS: prefix contract, witness, prior checks and audit register byte-identical to task tip
+PASS: tracked and staged whitespace checks
+Exit 0. Old manifests were checked against their own producing revisions,
+not the appended files. No old-plan mismatch is presented as a current pass.
+
+$ sha256sum -c docs/security/evidence/recovery-resume-inventory-20261107/BINDING-SHA256SUMS && git diff --name-only && git ls-files --others --exclude-standard && git diff --check && git diff --cached --check
+All ten manifest entries: OK. The four modified tracked paths are the plan,
+README, CHANGED_PATHS and commands; the then-untracked paths are the new
+analysis and BINDING-SHA256SUMS. No whitespace diagnostics. Exit 0.
+This log was added afterward and is excluded from that manifest to avoid
+self-reference; its final hash and the manifest's hash are reported separately.
+
+No unsuccessful documentation checks were observed in this follow-up.
+No unchanged Rust tests or builds were rerun. The recorded checks do not
+establish production recovery, runtime resource limits or authorization.
+
+Final staged documentation scope and integrity command:
+$ git diff --cached --check && git diff --cached --name-only && sha256sum -c docs/security/evidence/recovery-resume-inventory-20261107/BINDING-SHA256SUMS
+docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+docs/security/evidence/recovery-resume-inventory-20261107/BINDING-CHECKS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/BINDING-SHA256SUMS
+docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/QUORUM_CONTENT_BINDING_ANALYSIS.md
+docs/security/evidence/recovery-resume-inventory-20261107/README.md
+docs/security/evidence/recovery-resume-inventory-20261107/commands.txt
+docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md: OK
+docs/security/evidence/recovery-resume-inventory-20261107/README.md: OK
+docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt: OK
+docs/security/evidence/recovery-resume-inventory-20261107/commands.txt: OK
+docs/security/evidence/recovery-resume-inventory-20261107/QUORUM_CONTENT_BINDING_ANALYSIS.md: OK
+docs/security/evidence/recovery-resume-inventory-20261107/AUTHENTICATED_PREFIX_VERIFICATION_CONTRACT.md: OK
+docs/security/evidence/recovery-resume-inventory-20261107/FINALITY_WITNESS_CONTRACT.md: OK
+docs/security/evidence/recovery-resume-inventory-20261107/WITNESS-CHECKS.txt: OK
+docs/security/evidence/recovery-resume-inventory-20261107/WITNESS-SHA256SUMS: OK
+Audit/QBIND_SECURITY_FINDINGS_REGISTER.md: OK
+Exit 0. No whitespace diagnostics; no source or test paths staged.
