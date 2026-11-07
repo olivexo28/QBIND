@@ -26870,3 +26870,63 @@ Changed paths in this task are:
 and `Audit/QBIND_SECURITY_FINDINGS_REGISTER.md` are unchanged. This record
 does not close A17-F1 / RS1-F7, RS1 or A33-F1 / E27, authorize recovery or
 activation, or change the public DevNet NO-GO.
+
+## RUN 422 A17-F1 / RS1-F7 acceptance-control correction
+
+**TEST CONTROLS CORRECTED — INDEPENDENT REVIEW PENDING.**
+The user supplied an independent CHANGES REQUIRED acceptance-control review
+and reported no production guard bypass. Reviewer identity and raw review
+artifact were not supplied and are not invented. The preceding implementation
+entry remains historical author-reported evidence, not independently verified
+raw execution for the earlier candidate; missing earlier outputs are not
+reconstructed.
+
+Starting candidate was verified directly at
+`7d52477ce0eecff9f3fc80692eccbdee771cc81a`, tree
+`057430ef7167a5d08ddb8807b36f86fe25540e66`, parent
+`e584738c81814e70cbd58f80c921bea93983758c`, on
+`copilot/a17-f1-catchup-containment` with a clean worktree and empty staging.
+Reviewed direct remote main separately matched
+`619a75fa8355692823802754f605e6c02bb57537`, tree
+`a7d18a4bb4d40037e49042cb30c69a56e85ecd75`. This correction is based only on
+the existing candidate; no integration or main update is authorized.
+
+The [correction-specific package](../security/evidence/a17-f1-test-controls/README.md)
+pins source blob `8aa890c63412c7048ea6bb5a790ebcb9831c2013`, full raw outputs,
+commands/exits, changed paths/hashes, and source-backed observation limits.
+The snapshot control uses real fixture coherence binding, admission and ticket
+confirmation; a supplied PV context alone is separately exercised and is not
+called an admitted snapshot. Every A17 real-dispatch call now uses the shared
+protected-state/outbound checker. Existing diagnostic representations expose
+actual vote/history/accumulator contents, QCs/lock, retained contents/queue/
+accounting and mode/peer observations. A recording facade observes actual
+outbound call entry. The same checker detects the test-only unguarded valid-
+suffix helper's engine/mode changes. This expected sensitivity detection is
+not a production-security pass. Allocation capacities, opaque recorder or
+installed isolated-context internals, populated verified-evidence resources,
+whole-node concurrency, release artifact and running-node behavior remain
+unestablished. No narrowly scoped production inspection API was needed.
+
+Corrected focused execution: 9 passed, 0 failed, 0 ignored, 0 measured,
+2,227 filtered. Directly affected restore-mode execution: 9 passed, 0 failed,
+0 ignored, 0 measured, 2,227 filtered. Full combined stdout/stderr and exit 0
+are retained for both, including the first successful corrected attempt.
+No Cargo attempt failed in this correction. Module rustfmt check exited 1 on
+existing outside-A17 formatting differences; default whitespace check exited
+2 on CRLF additions; pre-evidence CRLF-aware whitespace check exited 0.
+The subsequent full staged CRLF-aware check exited 2 on whitespace-only
+context lines in the complete raw rustfmt output, preventing that chained
+commit attempt from reaching the commit command. Raw output was not trimmed.
+The source/documentation/manifest-only staged check exited 0, explicitly
+excluding raw logs. These non-passes are retained rather than erased.
+No unchanged historical suite,
+release build, live node or production compilation was repeated.
+
+Production guard placement and refusal are unchanged. Non-empty honest
+network suffixes remain refused, with the existing liveness impact.
+Inactive empty-response behavior is added to the preserved active/exit,
+active/no-exit and self controls; none approves recovery or participation.
+Historical evidence and audit-register bytes remain unchanged. Later
+integration requires a separately prepared/reviewed candidate against
+then-current main. A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain **OPEN**;
+activation **DISABLED**; public DevNet **NO-GO**.

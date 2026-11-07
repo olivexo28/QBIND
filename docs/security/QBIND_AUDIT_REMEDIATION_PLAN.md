@@ -4644,3 +4644,45 @@ running-node behavior. It does not establish deserialization allocation
 bounds, inbound memory limits, durable quarantine, ownership, currentness,
 signer exclusivity, rollback, or authenticated recovery. The audit register
 and all historical evidence bytes remain unchanged.
+
+## 28. A17-F1 / RS1-F7 acceptance-test and evidence correction
+
+**TEST CONTROLS CORRECTED — INDEPENDENT REVIEW PENDING.**
+The user supplied an independent CHANGES REQUIRED acceptance-control report,
+which reported no production guard bypass. No reviewer identity or unavailable
+raw review artifact is asserted. Section 27 remains historical candidate
+evidence; its author-reported results are not independently verified here.
+
+Verified starting task tip `7d52477ce0eecff9f3fc80692eccbdee771cc81a`, tree
+`057430ef7167a5d08ddb8807b36f86fe25540e66`, parent
+`e584738c81814e70cbd58f80c921bea93983758c`; clean worktree/staging area.
+Direct remote reviewed main separately matched
+`619a75fa8355692823802754f605e6c02bb57537`, tree
+`a7d18a4bb4d40037e49042cb30c69a56e85ecd75`. The existing task branch remains
+`copilot/a17-f1-catchup-containment`. Its divergence from main is not integrated
+or authorized for integration; any later integration candidate needs separate
+preparation/review against then-current main.
+
+Only the A17 library test block changes: a coherent, locally admitted snapshot
+is supplied alongside matching Timeout/PV contexts; the real-dispatch fixture
+now checks actual vote/history/accumulator, QC/lock, retained block contents/
+queue/accounting, restore/peer observations and a supplied recording facade.
+A present PV context is distinguished from an admitted snapshot. The same
+checker detects non-vacuous unguarded-helper effects in test-only sensitivity
+controls. An initially inactive empty-response control complements the
+preserved active/exit, active/no-exit and self controls. Expected ingress
+counters are verified separately; no production rule, placement or activation
+path changes.
+
+The [correction package](evidence/a17-f1-test-controls/README.md) contains
+exact commands and complete raw stdout/stderr, exit codes, test counts,
+source/log hashes, all changed paths, diagnostic-observation limitations and
+formatting/whitespace non-passes. Final focused controls: 9 passed, 0 failed,
+0 ignored; directly affected restore regressions: 9 passed, 0 failed, 0 ignored.
+No historical workspace suite or release/runtime execution was repeated.
+Historical evidence bytes and audit-register bytes remain unchanged.
+
+A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain **OPEN**; activation
+**DISABLED**; public DevNet **NO-GO**. Earlier bounded acceptances retain their
+scope. All non-empty catch-up imports, including honest suffixes, remain
+refused; empty-response effects are characterized, not approved recovery.

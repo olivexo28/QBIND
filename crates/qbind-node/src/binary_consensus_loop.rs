@@ -10039,24 +10039,193 @@ mod tests {
         pv_authority: Option<&ProposalVoteAuthority>,
         policy: ConsensusVerificationPolicy,
     ) -> Arc<NodeMetrics> {
+        a17_dispatch_response_with_snapshot(
+            engine,
+            stats,
+            mode,
+            resp,
+            origin,
+            gate,
+            timeout_ctx,
+            pv_authority,
+            None,
+            policy,
+        )
+    }
+
+    #[derive(Default)]
+    struct A17RecordingFacade {
+        calls: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl ConsensusNetworkFacade for A17RecordingFacade {
+        fn broadcast_proposal(
+            &self,
+            proposal: &qbind_wire::consensus::BlockProposal,
+        ) -> Result<(), qbind_consensus::network::NetworkError> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("proposal:{proposal:?}"));
+            Ok(())
+        }
+
+        fn broadcast_vote(
+            &self,
+            vote: &qbind_wire::consensus::Vote,
+        ) -> Result<(), qbind_consensus::network::NetworkError> {
+            self.calls.lock().unwrap().push(format!("vote:{vote:?}"));
+            Ok(())
+        }
+
+        fn send_vote_to(
+            &self,
+            target: ValidatorId,
+            vote: &qbind_wire::consensus::Vote,
+        ) -> Result<(), qbind_consensus::network::NetworkError> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("directed_vote:{target:?}:{vote:?}"));
+            Ok(())
+        }
+
+        fn send_timeout_msg(
+            &self,
+            target: crate::peer::PeerId,
+            bytes: Vec<u8>,
+        ) -> Result<(), qbind_consensus::network::NetworkError> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("timeout:{target:?}:{bytes:?}"));
+            Ok(())
+        }
+
+        fn broadcast_consensus_msg(
+            &self,
+            msg: &ConsensusNetMsg,
+        ) -> Result<(), qbind_consensus::network::NetworkError> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("consensus:{msg:?}"));
+            Ok(())
+        }
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct A17ProtectedObservation {
+        engine: String,
+        restore_mode: String,
+        outbound_calls: Vec<String>,
+    }
+
+    fn a17_protected_observation(
+        engine: &BasicHotStuffEngine<[u8; 32]>,
+        mode: &RestoreCatchupModeState,
+        outbound: &A17RecordingFacade,
+    ) -> A17ProtectedObservation {
+        A17ProtectedObservation {
+            engine: a17_engine_observation(engine),
+            restore_mode: format!("{mode:?}"),
+            outbound_calls: outbound.calls.lock().unwrap().clone(),
+        }
+    }
+
+    fn a17_check_protected(
+        before: &A17ProtectedObservation,
+        after: &A17ProtectedObservation,
+    ) -> Result<(), Vec<&'static str>> {
+        let mut effects = Vec::new();
+        if before.engine != after.engine {
+            effects.push("engine");
+        }
+        if before.restore_mode != after.restore_mode {
+            effects.push("restore_mode");
+        }
+        if before.outbound_calls != after.outbound_calls {
+            effects.push("outbound");
+        }
+        if effects.is_empty() {
+            Ok(())
+        } else {
+            Err(effects)
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn a17_dispatch_response_with_snapshot(
+        engine: &mut BasicHotStuffEngine<[u8; 32]>,
+        stats: &mut BinaryConsensusLoopInboundStats,
+        mode: &mut RestoreCatchupModeState,
+        resp: RestoreCatchupResponse,
+        origin: Option<&AuthenticatedConsensusOrigin>,
+        gate: &PeerConsensusBindingGate,
+        timeout_ctx: Option<&TimeoutVerificationContext>,
+        pv_authority: Option<&ProposalVoteAuthority>,
+        snapshot: Option<&AuthorizedProposalVoteSnapshot>,
+        policy: ConsensusVerificationPolicy,
+    ) -> Arc<NodeMetrics> {
         let metrics = Arc::new(NodeMetrics::new());
+        let outbound = A17RecordingFacade::default();
+        let before = a17_protected_observation(engine, mode, &outbound);
+        let counters_before = (
+            stats.inbound_msgs_received,
+            stats.inbound_sender_binding_rejected_total,
+            stats.restore_catchup_responses_received,
+            stats.restore_catchup_responses_rejected,
+        );
+        let nonempty = !resp.blocks.is_empty();
+        let may_observe_empty_peer =
+            resp.blocks.is_empty() && resp.responder_validator_index != 0 && mode.is_active();
         handle_inbound_consensus_msg(
             engine,
             ConsensusNetMsg::RestoreCatchupResponse(resp),
             stats,
-            None,
+            Some(&outbound),
             &metrics,
             ValidatorId::new(0),
             mode,
             timeout_ctx,
             pv_authority,
-            None,
+            snapshot,
             &mut BinaryReconfigDetector::default(),
             origin,
             Some(gate),
             None,
             policy,
         );
+        let after = a17_protected_observation(engine, mode, &outbound);
+        let result = a17_check_protected(&before, &after);
+        if may_observe_empty_peer {
+            // Only the existing empty-response mode effect is allowed here;
+            // individual controls below assert its exact progress/exit state.
+            assert!(
+                result == Ok(()) || result == Err(vec!["restore_mode"]),
+                "{result:?}"
+            );
+        } else {
+            assert_eq!(result, Ok(()), "protected dispatch observations changed");
+        }
+        // Ingress counters are deliberately outside the protected-state oracle.
+        let binding_rejected = stats.inbound_sender_binding_rejected_total != counters_before.1;
+        assert_eq!(stats.inbound_msgs_received, counters_before.0 + 1);
+        assert_eq!(
+            stats.inbound_sender_binding_rejected_total,
+            counters_before.1 + u64::from(binding_rejected),
+        );
+        assert_eq!(
+            stats.restore_catchup_responses_received,
+            counters_before.2 + u64::from(!binding_rejected),
+        );
+        assert_eq!(
+            stats.restore_catchup_responses_rejected,
+            counters_before.3 + u64::from(!binding_rejected && nonempty),
+        );
+        assert!(metrics
+            .format_metrics()
+            .contains("consensus_net_inbound_total{kind=\"other\"} 1"));
         metrics
     }
 
@@ -10089,15 +10258,13 @@ mod tests {
         ))
     }
 
-    fn a17_engine_observation(
-        engine: &BasicHotStuffEngine<[u8; 32]>,
-    ) -> (u64, Option<u64>, Option<[u8; 32]>, Vec<[u8; 32]>) {
-        (
-            engine.current_view(),
-            engine.committed_height(),
-            engine.committed_block().copied(),
-            engine.state().blocks_iter().map(|block| block.id).collect(),
-        )
+    fn a17_engine_observation(engine: &BasicHotStuffEngine<[u8; 32]>) -> String {
+        // Existing Debug implementations expose the real vote accumulator,
+        // vote-history maps, block contents/QCs, pending eviction order, lock,
+        // commit log, retained accounting and the per-view voting latch.
+        // Compare the SAME engine before/after, not independently seeded maps.
+        // Allocation capacities and opaque recorder internals are not observed.
+        format!("{engine:?}")
     }
 
     fn a17_coherent_authorities() -> (TimeoutVerificationContext, ProposalVoteAuthority) {
@@ -10114,6 +10281,160 @@ mod tests {
             signing_domain,
         };
         (timeout, pv)
+    }
+
+    fn a17_admitted_snapshot(pv: &ProposalVoteAuthority) -> AuthorizedProposalVoteSnapshot {
+        use crate::genesis_consensus_authority::GenesisConsensusAuthority;
+        let candidate = Arc::new(
+            GenesisConsensusAuthority::for_verification_snapshot_fixture(
+                snapshot_chain_identity_label(pv.signing_domain.runtime_chain_id()),
+                *pv.signing_domain.genesis_identity(),
+                *pv.signing_domain.authority_commitment(),
+                pv.signing_domain.expected_wire_chain_id(),
+                Arc::clone(&pv.validators),
+                Arc::clone(&pv.key_provider),
+            ),
+        );
+        let observed = candidate.config_identity();
+        let owner = CurrentAuthorizationOwner::establish_for_fixture(candidate, observed);
+        let snapshot = AuthorizedProposalVoteSnapshot::try_bind(owner, Arc::new(pv.clone()))
+            .expect("test snapshot is coherent with the PV verifier");
+        let ticket = snapshot
+            .owner()
+            .admit()
+            .expect("fixture authority is admitted");
+        snapshot
+            .owner()
+            .confirm(&ticket)
+            .expect("fixture ticket is current");
+        snapshot
+    }
+
+    #[test]
+    fn a17_nonempty_dispatch_refuses_with_admitted_snapshot_and_populated_vote_state() {
+        let anchor = [0x68; 32];
+        let (timeout, pv) = a17_coherent_authorities();
+        let snapshot = a17_admitted_snapshot(&pv);
+        assert!(Arc::ptr_eq(
+            &timeout.validators,
+            &snapshot.verifier().validators
+        ));
+        assert!(Arc::ptr_eq(
+            &timeout.key_provider,
+            &snapshot.verifier().key_provider
+        ));
+        assert!(Arc::ptr_eq(
+            &timeout.backend_registry,
+            &snapshot.verifier().backend_registry
+        ));
+        assert_eq!(timeout.chain_id, snapshot.verifier().chain_id);
+        assert_eq!(snapshot.authorized_epoch(), 0);
+        let gate = a17_binding_gate(4);
+        let origin = a17_origin(1);
+
+        // A supplied PV context alone is NOT a supplied admitted snapshot.
+        // Both inputs retain the same catch-up refusal under Required policy.
+        for (current_auth, snapshot_present) in [(None, false), (Some(&snapshot), true)] {
+            assert_eq!(current_auth.is_some(), snapshot_present);
+            if let Some(admitted) = current_auth {
+                let ticket = admitted.owner().admit().unwrap();
+                admitted.owner().confirm(&ticket).unwrap();
+            }
+            let mut engine = a17_engine(Some((5, anchor)));
+            for voter in 0..3 {
+                engine
+                    .state_mut()
+                    .on_vote(ValidatorId::new(voter), 5, &anchor)
+                    .unwrap();
+            }
+            assert_eq!(engine.state().vote_count(5, &anchor), 3);
+            assert!(engine.locked_qc().is_some(), "non-empty lock/QC control");
+            let blocks = a17_suffix(&engine, 5, anchor, 3);
+            let mut mode = a17_mode(Some((5, anchor)));
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            a17_dispatch_response_with_snapshot(
+                &mut engine,
+                &mut stats,
+                &mut mode,
+                a17_response(1, 5, anchor, Some(9), blocks),
+                Some(&origin),
+                &gate,
+                Some(&timeout),
+                Some(&pv),
+                current_auth,
+                ConsensusVerificationPolicy::Required,
+            );
+            assert_eq!(stats.inbound_msgs_received, 1);
+            assert_eq!(stats.inbound_sender_binding_rejected_total, 0);
+            assert_eq!(stats.restore_catchup_responses_received, 1);
+            assert_eq!(stats.restore_catchup_responses_rejected, 1);
+            assert_eq!(stats.restore_catchup_blocks_applied, 0);
+            assert_eq!(stats.restore_catchup_requests_sent, 0);
+            let ticket = snapshot.owner().admit().unwrap();
+            snapshot.owner().confirm(&ticket).unwrap();
+        }
+    }
+
+    #[test]
+    fn a17_protected_checker_detects_vote_qc_and_outbound_effects() {
+        let anchor = [0x69; 32];
+        let mut engine = a17_engine(Some((5, anchor)));
+        let mode = a17_mode(Some((5, anchor)));
+        let outbound = A17RecordingFacade::default();
+        for voter in 0..3 {
+            let before = a17_protected_observation(&engine, &mode, &outbound);
+            engine
+                .state_mut()
+                .on_vote(ValidatorId::new(voter), 5, &anchor)
+                .unwrap();
+            let after = a17_protected_observation(&engine, &mode, &outbound);
+            assert_eq!(a17_check_protected(&before, &after), Err(vec!["engine"]));
+            assert_eq!(engine.state().vote_count(5, &anchor), voter as usize + 1);
+            assert_eq!(engine.locked_qc().is_some(), voter == 2);
+        }
+        let before = a17_protected_observation(&engine, &mode, &outbound);
+        outbound
+            .broadcast_consensus_msg(&ConsensusNetMsg::RestoreCatchupResponse(a17_response(
+                1,
+                5,
+                anchor,
+                Some(5),
+                Vec::new(),
+            )))
+            .unwrap();
+        let after = a17_protected_observation(&engine, &mode, &outbound);
+        assert_eq!(a17_check_protected(&before, &after), Err(vec!["outbound"]));
+    }
+
+    #[test]
+    fn a17_empty_response_inactive_mode_has_no_protected_or_outbound_effect() {
+        let mut engine = a17_engine(None);
+        let mut mode = a17_mode(None);
+        let mut stats = BinaryConsensusLoopInboundStats::default();
+        let gate = a17_binding_gate(4);
+        let origin = a17_origin(1);
+        assert!(!mode.is_active());
+        a17_dispatch_response(
+            &mut engine,
+            &mut stats,
+            &mut mode,
+            a17_response(1, 5, [0x6A; 32], Some(100), Vec::new()),
+            Some(&origin),
+            &gate,
+            None,
+            None,
+            ConsensusVerificationPolicy::Required,
+        );
+        assert!(!mode.is_active());
+        assert_eq!(mode.peer_max_observed_committed_height, None);
+        assert_eq!(mode.exited_at_height, None);
+        assert_eq!(stats.inbound_msgs_received, 1);
+        assert_eq!(stats.inbound_sender_binding_rejected_total, 0);
+        assert_eq!(stats.restore_catchup_responses_received, 1);
+        assert_eq!(stats.restore_catchup_responses_rejected, 0);
+        assert_eq!(stats.restore_catchup_blocks_applied, 0);
+        assert_eq!(stats.restore_catchup_requests_sent, 0);
+        assert_eq!(stats.restore_catchup_mode_exited_at_height, 0);
     }
 
     #[test]
@@ -10187,6 +10508,8 @@ mod tests {
         let mut unguarded_engine = a17_engine(Some((5, anchor)));
         let mut unguarded_mode = a17_mode(Some((5, anchor)));
         let mut unguarded_stats = BinaryConsensusLoopInboundStats::default();
+        let outbound = A17RecordingFacade::default();
+        let before = a17_protected_observation(&unguarded_engine, &unguarded_mode, &outbound);
         handle_restore_catchup_response(
             &mut unguarded_engine,
             response,
@@ -10197,6 +10520,12 @@ mod tests {
         assert!(unguarded_engine.committed_height().unwrap() > 5);
         assert_eq!(unguarded_stats.restore_catchup_blocks_applied, 3);
         assert_eq!(unguarded_mode.peer_max_observed_committed_height, Some(9));
+        let after = a17_protected_observation(&unguarded_engine, &unguarded_mode, &outbound);
+        assert_eq!(
+            a17_check_protected(&before, &after),
+            Err(vec!["engine", "restore_mode"]),
+            "sensitivity: the same checker must detect the unguarded import"
+        );
     }
 
     #[test]
