@@ -736,3 +736,9 @@ unsuccessful source lookup and command/results are recorded under
 historical prefixes/unchanged code/evidence, pinned source ranges/navigation,
 FUTURE status and twelve producing-revision manifests separately from
 current `SHA256SUMS`. No unchanged Rust test/build was rerun.
+
+P1 provider-envelope specification is documentation-only:
+`p1-provider-model-specification/COMMANDS.txt` records the accepted contract
+read, source/documentation checks and outcomes. Its integrity script checks
+historical prefixes, audit bytes and thirteen producing-revision manifests
+separately from current delivery hashes. No tests/builds rerun.

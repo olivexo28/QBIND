@@ -138,3 +138,25 @@ docs/security/evidence/recovery-resume-inventory-20261107/authority-provenance-c
 docs/security/evidence/recovery-resume-inventory-20261107/authority-provenance-contract/SHA256SUMS
 Raw documentation check artifacts, each .stdout/.stderr/.exit:
 01-integrity
+02-final-integrity
+03-final-integrity
+04-final-integrity
+05-final-integrity
+06-final-integrity
+
+Documentation-only P1 provider-envelope model specification:
+docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+docs/security/evidence/recovery-resume-inventory-20261107/README.md
+docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/commands.txt
+docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-specification/README.md
+docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-specification/COMMANDS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-specification/check_artifacts.py
+docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-specification/SHA256SUMS
+Raw documentation-check artifacts, each .stdout/.stderr/.exit:
+01-integrity
+02-final-integrity
+03-final-integrity
+04-final-integrity
+05-final-integrity
+06-final-integrity

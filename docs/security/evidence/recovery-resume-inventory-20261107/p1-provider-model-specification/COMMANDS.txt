@@ -1,0 +1,95 @@
+P1 PROVIDER MODEL SPECIFICATION — DOCUMENTATION-ONLY COMMANDS
+
+Working directory: /workspaces/QBIND/olivexo28/QBIND
+Evidence directory P (notation only):
+docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-specification
+
+Initial exact identity check:
+$ git remote get-url origin && git branch --show-current && git rev-parse HEAD 'HEAD^{tree}' '9bf0eb43e4e3c601d02d3886d220b0abeb3a103e^{tree}' && git ls-remote --heads origin refs/heads/docs/authenticated-recovery-resume-inventory refs/heads/main && git merge-base --is-ancestor 9bf0eb43e4e3c601d02d3886d220b0abeb3a103e HEAD && git status --porcelain=v1 && git diff --cached --name-only
+Exit0. Output:
+https://github.com/olivexo28/QBIND
+docs/authenticated-recovery-resume-inventory
+5d328c9ad5c15177960b5b5da50f8b181169b723
+8f095c72c77599d0ffd62451bef373c71ae68168
+56509b20084ee1cbe2c42fda9d73d87e4c82c33f
+5d328c9ad5c15177960b5b5da50f8b181169b723 refs/heads/docs/authenticated-recovery-resume-inventory
+9bf0eb43e4e3c601d02d3886d220b0abeb3a103e refs/heads/main
+No status/staging output. Exact repository/branch/refs/trees/ancestry match.
+
+Read accepted contract before design:
+view docs/security/evidence/recovery-resume-inventory-20261107/authority-provenance-contract/README.md lines1-410
+Read founder decision:
+view docs/devnet/QBIND_RUN_422_DEVNET_BOOTSTRAP_AUTHORITY_DECISION.md lines1-220
+Read current plan/index/commands EOF:
+tail -18 docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+tail -12 docs/security/evidence/recovery-resume-inventory-20261107/README.md
+tail -25 docs/security/evidence/recovery-resume-inventory-20261107/commands.txt
+Read-only calls; outputs in session, no files changed.
+
+Source verification was against protected source main, direct `view` ranges
+and exact pinned links in the accepted contract. This task does not repeat
+source lookups already verified there. The cited accepted-source boundary
+links are pinned main; founder decision/authority-context acceptance links
+are pinned to their named task revisions, not represented as main source.
+No accepted suite was rerun.
+
+Documentation validation:
+$ python3 docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-specification/check_artifacts.py
+Capture convention:
+  python3 <P>/check_artifacts.py > <P>/<N>.stdout 2> <P>/<N>.stderr
+  result=$?
+  printf '%s\n' "$result" > <P>/<N>.exit
+  cat <P>/<N>.stdout <P>/<N>.stderr
+  exit "$result"
+All numbered artifacts contain complete stdout/stderr/exit. Retained attempts:
+* `01-integrity`: exit1; status-wording assertion failed after historical
+  prefix, preserved-file, register, and all 13 producer-manifest checks passed.
+* `02-final-integrity`: exit1; stale combined capability-wording assertion.
+* `03-final-integrity` and `04-final-integrity`: exit1; successive capability
+  wording assertions still did not match the table.
+* `05-final-integrity`: exit1; link allowlist omitted the correctly pinned
+  founder decision revision (`1d5d12e85f7ad939b731e56bf929d20403d00d11`).
+* `06-final-integrity`: exit0; corrected assertions and revision allowlist.
+* Final uncaptured rerun after command/path inventory edits:
+  `python3 docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-specification/check_artifacts.py && git diff --check && git diff --cached --check`
+  exit0; all checks passed again.
+
+The successful check verifies four exact historical append prefixes, 98
+prior evidence/Audit files and the audit-register hash, thirteen historical
+producer manifests /221 entries, seven pinned source/decision ranges,
+discoverability, documentation-only scope, 17 FUTURE rows and whitespace.
+No Rust test/build/formatter command or dependency operation was run.
+
+Current hash manifest generation, after the above checks:
+$ python3 - <<'PY'
+import hashlib
+from pathlib import Path
+root = Path('docs/security/evidence/recovery-resume-inventory-20261107')
+here = root / 'p1-provider-model-specification'
+out = here / 'SHA256SUMS'
+paths = [Path('docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md'),
+         Path('Audit/QBIND_SECURITY_FINDINGS_REGISTER.md')]
+paths += [root / name for name in ['README.md', 'CHANGED_PATHS.txt', 'commands.txt']]
+paths += list(root.glob('*SHA256SUMS'))
+paths += [root / name / 'SHA256SUMS' for name in [
+    'binding-sensitivity-execution', 'content-binding-experiment',
+    'authority-context-experiment', 'authority-provenance-contract']]
+paths += [p for p in here.iterdir() if p.is_file() and p != out]
+out.write_text(''.join(f'{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.as_posix()}\n' for p in sorted(set(paths))))
+print(f'current entries={len(set(paths))}; excludes itself')
+PY
+$ sha256sum -c docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-specification/SHA256SUMS
+Exit0; all 39 current manifest entries verified. Manifest excludes itself;
+its SHA-256 is reported in the final delivery record.
+Old manifest entries are independently checked at producer revisions and
+are not presented as hashes of currently appended files. Manifest's own
+hash and final commit identifiers are reported externally to avoid cycles.
+
+Publication commands (only exact authorized paths; after ref revalidation):
+$ git add -- docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md docs/security/evidence/recovery-resume-inventory-20261107/README.md docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt docs/security/evidence/recovery-resume-inventory-20261107/commands.txt docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-specification
+$ git diff --cached --check && git diff --cached --stat && git diff --cached --name-only
+$ git commit -m "docs: specify P1 test provider model" -m "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+$ git push origin HEAD:refs/heads/docs/authenticated-recovery-resume-inventory
+$ git show -s --format='commit=%H%ntree=%T%nparent=%P' HEAD && git ls-remote --heads origin refs/heads/docs/authenticated-recovery-resume-inventory refs/heads/main && git status --porcelain=v1 && git diff --cached --name-only && sha256sum docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-model-specification/SHA256SUMS
+No reset/rebase/force, test/source/config change, PR, merge, main push,
+operational signing, live protocol network or activation.

@@ -529,3 +529,12 @@ FUTURE / NOT EXECUTED. Nine accepted authority-context controls, seven
 content-binding controls and R/D/S/M remain preserved within reviewed scope.
 Authenticity does not prove currentness or grant application/signing/resume.
 Documentation checks and producer/current integrity are recorded separately.
+
+## 19. P1 provider-envelope test-model specification
+
+The [P1 specification](p1-provider-model-specification/README.md) defines
+the proposed test-only catalog/candidate/currentness boundary, concrete
+fixture bounds, typed refusals, use-time checks and sensitivity matrix.
+Every new case is FUTURE / NOT EXECUTED; no implementation or Rust execution
+occurred. Prior PASS WITH LIMITATIONS and bounded acceptances remain preserved.
+Current hashes and producing-revision integrity are recorded separately.

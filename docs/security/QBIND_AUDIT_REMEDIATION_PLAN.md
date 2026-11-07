@@ -5122,3 +5122,21 @@ activation mechanism exists by virtue of this contract. B/C remain unselected;
 owner/root/currentness/quorum/resource and separate resume decisions remain.
 A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
 Activation remains DISABLED; public DevNet remains NO-GO.
+
+## 47. P1 provider-envelope test model — independent review pending
+
+The [decision-ready P1 model specification](evidence/recovery-resume-inventory-20261107/p1-provider-model-specification/README.md)
+defines a test-only future interface with a separately constructed immutable
+expected catalog, explicit provenance-source attribution, untrusted candidate
+claims, and separately simulated Available/Unavailable/Stale/Conflict/Unknown
+currentness. It specifies failure classes, use-time revalidation, fixture
+bounds/accounting and sensitivity oracles without implementation.
+
+All cases remain FUTURE / NOT EXECUTED. The user-supplied PASS WITH LIMITATIONS
+for the accepted provenance contract and nine authority-context controls is
+preserved; earlier bounded acceptances remain unchanged. No source/test/build
+changes occurred. P1/P2 and B/C remain unselected for production; independent
+review and owner decisions precede any test implementation. Context admission
+does not authorize finality, application, signing, fencing, clearance or
+resume. A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
+Activation DISABLED; public DevNet NO-GO.
