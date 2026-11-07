@@ -304,3 +304,17 @@ docs/security/evidence/recovery-resume-inventory-20261107/catch-up-ingress-resou
 docs/security/evidence/recovery-resume-inventory-20261107/catch-up-ingress-resource-boundary/integrity.txt
 docs/security/evidence/recovery-resume-inventory-20261107/catch-up-ingress-resource-boundary/SHA256SUMS
 No production/test source changed; audit register bytes remain unchanged.
+
+Catch-up ingress inventory clarification (documentation/evidence only):
+docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+docs/security/evidence/recovery-resume-inventory-20261107/README.md
+docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/commands.txt
+docs/security/evidence/recovery-resume-inventory-20261107/catch-up-ingress-resource-boundary/COMMANDS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/catch-up-ingress-resource-boundary/README.md
+docs/security/evidence/recovery-resume-inventory-20261107/catch-up-ingress-resource-boundary/CLARIFICATION.md
+docs/security/evidence/recovery-resume-inventory-20261107/catch-up-ingress-resource-boundary/clarification_check.py
+docs/security/evidence/recovery-resume-inventory-20261107/catch-up-ingress-resource-boundary/CLARIFICATION_COMMANDS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/catch-up-ingress-resource-boundary/CLARIFICATION_INTEGRITY.txt
+docs/security/evidence/recovery-resume-inventory-20261107/catch-up-ingress-resource-boundary/CLARIFICATION_SHA256SUMS
+No production/test code changed; prior raw evidence and audit register preserved.

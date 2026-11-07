@@ -5286,3 +5286,22 @@ and do not establish ingress allocation protection.
 
 A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
 Activation DISABLED; public DevNet NO-GO.
+
+## 56. Catch-up ingress inventory arithmetic and copy clarifications
+
+The [append-only clarification](evidence/recovery-resume-inventory-20261107/catch-up-ingress-resource-boundary/CLARIFICATION.md)
+preserves the user-supplied PASS WITH LIMITATIONS on the central ingress
+ordering/proposed review boundary and addresses only the documentation
+clarifications: unchecked inner application and raw transport `5 + len`
+endpoints, the distinction between capped socket receive and direct/raw
+decode callers, conditional 32-bit overflow behavior with deployed targets
+and settings UNKNOWN, the additional transport decode/ciphertext copy before
+AEAD opening, and the non-exhaustive list of metrics/log effects. It also
+supersedes “seven ingress source paths” with nine while preserving the
+original command record. The previous source/hash/preservation evidence is
+historical author execution and was not independently rerun. No code,
+threshold, gate, or activation behavior changed; proposed ingress controls
+remain FUTURE / NOT EXECUTED.
+
+A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
+Activation DISABLED; public DevNet NO-GO.

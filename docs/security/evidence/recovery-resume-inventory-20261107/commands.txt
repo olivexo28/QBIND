@@ -796,3 +796,10 @@ Catch-up ingress resource-boundary investigation: see
 identity, direct remote refs, source reads, and documentation-only checks.
 No Rust tests/builds or live network activity were run. All proposed
 acceptance controls remain FUTURE / NOT EXECUTED.
+
+Catch-up ingress inventory clarification: see
+`catch-up-ingress-resource-boundary/CLARIFICATION_COMMANDS.txt` for new
+append-only preservation, formatting, and digest checks. The original
+source/hash/preservation check remains historical author evidence, not a
+re-run independent source audit. The original “seven ingress source paths”
+note is superseded: the checker enumerates nine inspected source paths.

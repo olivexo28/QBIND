@@ -653,3 +653,20 @@ controls are FUTURE / NOT EXECUTED.
 
 A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
 Activation DISABLED; public DevNet NO-GO.
+
+## 28. Catch-up ingress inventory clarification
+
+The [append-only clarification](catch-up-ingress-resource-boundary/CLARIFICATION.md)
+supersedes the original inventory only for the unchecked application/raw
+transport `5 + len` endpoint arithmetic, the source-visible ciphertext-copy
+sequence, non-exhaustive response-effect wording, and the command source-file
+count. It distinguishes outer-ciphertext admission from the inner plaintext
+length, marks 32-bit targets and deployed overflow settings UNKNOWN, and
+requires any future guard to validate the actual borrowed application frame
+before the existing endpoint expressions or replace that parser. The earlier
+review and preservation checks remain historical author evidence, not newly
+rerun independent checks. No Rust tests or builds were run; all ingress
+controls remain FUTURE / NOT EXECUTED.
+
+A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
+Activation DISABLED; public DevNet NO-GO.

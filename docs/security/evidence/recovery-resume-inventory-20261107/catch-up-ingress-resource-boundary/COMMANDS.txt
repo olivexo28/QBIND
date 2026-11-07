@@ -48,3 +48,12 @@ intermediate test/build attempt exists for this documentation-only task.
 
 Final documentation checks and exact outputs are recorded in
 `integrity.txt`; file digests are recorded in `SHA256SUMS`.
+
+Superseding clarification:
+
+`CLARIFICATION.md` addresses endpoint arithmetic, transport copies,
+non-exhaustive effects, and source-count wording without changing this
+historical command record. The original source/hash/preservation commands and
+results above are retained as author evidence; they were not independently
+rerun for the clarification. See `CLARIFICATION_COMMANDS.txt` and
+`CLARIFICATION_INTEGRITY.txt` for checks performed for the addendum.

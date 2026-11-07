@@ -1,0 +1,80 @@
+# Catch-up ingress inventory clarification commands
+
+Expected base verification, before edits:
+
+```text
+git remote -v
+origin https://github.com/olivexo28/QBIND (fetch)
+origin https://github.com/olivexo28/QBIND (push)
+git status --short --branch
+## docs/authenticated-recovery-resume-inventory
+git rev-parse HEAD HEAD^{tree} HEAD^
+2cafa1b21365e99d95aa0c759dd2dd90fa1e43af
+cfd10f254f1205070deb2c377336670ea660e305
+ad72aae3b0be5c3c5279463e5ceaf5e0e23d4702
+git ls-remote origin refs/heads/docs/authenticated-recovery-resume-inventory refs/heads/main
+2cafa1b21365e99d95aa0c759dd2dd90fa1e43af refs/heads/docs/authenticated-recovery-resume-inventory
+9bf0eb43e4e3c601d02d3886d220b0abeb3a103e refs/heads/main
+git merge-base --is-ancestor 9bf0eb43e4e3c601d02d3886d220b0abeb3a103e HEAD
+exit 0
+git status --porcelain=v1
+(empty)
+git diff --cached --quiet
+exit 0
+```
+
+Documentation checks:
+
+```text
+python3 docs/security/evidence/recovery-resume-inventory-20261107/catch-up-ingress-resource-boundary/clarification_check.py
+PASS: nine historical documentation/evidence prefixes preserved; audit register unchanged; clarification markers present
+exit 0
+
+git diff --check
+(no output)
+exit 0
+```
+
+The following source/test and audit-register scope command also returned
+exit 0 (no output):
+
+```text
+git diff --quiet HEAD -- crates/qbind-net/src/framed_io.rs crates/qbind-net/src/transport.rs crates/qbind-net/src/connection.rs crates/qbind-node/src/secure_channel.rs crates/qbind-node/src/p2p_tcp.rs crates/qbind-node/src/p2p.rs crates/qbind-node/src/p2p_inbound.rs crates/qbind-node/src/p2p_node_builder.rs crates/qbind-node/src/peer_rate_limiter.rs crates/qbind-node/src/binary_consensus_loop.rs Audit/QBIND_SECURITY_FINDINGS_REGISTER.md
+```
+
+One initial run of `clarification_check.py` failed because the new inventory
+and plan sections had been inserted before historical sections rather than
+at EOF. Output:
+
+```text
+historical prefix changed: docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+historical prefix changed: docs/security/evidence/recovery-resume-inventory-20261107/README.md
+exit 1
+```
+
+The misplaced sections were removed and appended after the prior final
+sections. The checker then passed as recorded above; `git diff --check` also
+passed. This correction preserved the pinned-base prefixes.
+
+The original source/hash/preservation check in `COMMANDS.txt`, its
+`integrity.txt`, and its manifest were **not rerun**; their results remain
+historical author evidence. The clarification reviewed the cited source
+expressions and call sequence at the already-pinned main revision, without
+claiming a new full source/hash audit. The original source-count phrase
+“seven ingress source paths” is superseded by **nine inspected source
+paths**, matching the historical checker list. Historical raw outputs and
+the audit register were preserved.
+
+No Rust tests, builds, live node/network, or operational signing were run.
+All proposed ingress controls remain FUTURE / NOT EXECUTED.
+
+Digests and the clarification-integrity result are recorded in
+`CLARIFICATION_SHA256SUMS` and `CLARIFICATION_INTEGRITY.txt`.
+
+Digest verification:
+
+```text
+sha256sum -c docs/security/evidence/recovery-resume-inventory-20261107/catch-up-ingress-resource-boundary/CLARIFICATION_SHA256SUMS
+<all nine listed changed files>: OK
+exit 0
+```

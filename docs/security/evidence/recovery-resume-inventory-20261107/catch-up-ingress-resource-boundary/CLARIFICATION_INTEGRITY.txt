@@ -1,0 +1,55 @@
+Clarification integrity evidence
+================================
+
+Reviewed base:
+  commit 2cafa1b21365e99d95aa0c759dd2dd90fa1e43af
+  tree   cfd10f254f1205070deb2c377336670ea660e305
+  parent ad72aae3b0be5c3c5279463e5ceaf5e0e23d4702
+
+Pinned source revision/tree cited by the clarification:
+  9bf0eb43e4e3c601d02d3886d220b0abeb3a103e
+  56509b20084ee1cbe2c42fda9d73d87e4c82c33f
+
+The source/hash/preservation review captured in the original ingress
+inventory is historical author evidence. It was not independently rerun for
+this clarification. No Rust tests/builds or live network activity were run.
+
+Clarification-specific preservation command:
+  python3 docs/security/evidence/recovery-resume-inventory-20261107/catch-up-ingress-resource-boundary/clarification_check.py
+
+Result:
+  PASS: nine historical documentation/evidence prefixes preserved; audit register unchanged; clarification markers present
+Exit:
+  0
+
+Whitespace command:
+  git diff --check
+Result:
+  no output
+Exit:
+  0
+
+Digest verification:
+  sha256sum -c docs/security/evidence/recovery-resume-inventory-20261107/catch-up-ingress-resource-boundary/CLARIFICATION_SHA256SUMS
+Result:
+  all nine listed changed files: OK
+Exit:
+  0
+
+Source/test and audit-register scope:
+  git diff --quiet HEAD -- <ten inspected production source paths> Audit/QBIND_SECURITY_FINDINGS_REGISTER.md
+Result:
+  no source, test, or audit-register changes
+Exit:
+  0
+
+The changed-path review lists documentation and evidence records only.
+Previously retained raw execution logs and other prior evidence paths were
+not modified.
+
+An initial checker attempt returned exit 1 because two new sections were not
+yet appended at EOF. They were moved after the historical endings, and the
+checker passed on the corrected append-only layout. Full details are in
+`CLARIFICATION_COMMANDS.txt`.
+
+All proposed ingress controls remain FUTURE / NOT EXECUTED.
