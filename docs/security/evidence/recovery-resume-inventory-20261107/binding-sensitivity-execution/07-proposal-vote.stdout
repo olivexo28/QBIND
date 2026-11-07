@@ -1,0 +1,25 @@
+
+running 20 tests
+test proposal_vote_verify::tests::empty_signature_never_panics_and_fails_closed ... ok
+test proposal_vote_verify::tests::no_classical_or_cross_suite_fallback ... ok
+test proposal_vote_verify::tests::proposal_bitflip_signature ... ok
+test proposal_vote_verify::tests::proposal_changed_payload_after_signing ... ok
+test proposal_vote_verify::tests::proposal_missing_signature ... ok
+test proposal_vote_verify::tests::proposal_signature_relabeled_as_vote_rejected ... ok
+test proposal_vote_verify::tests::proposal_suite_altered_after_signing ... ok
+test proposal_vote_verify::tests::proposal_survives_encode_decode ... ok
+test proposal_vote_verify::tests::proposal_truncated_signature ... ok
+test proposal_vote_verify::tests::proposal_unknown_validator ... ok
+test proposal_vote_verify::tests::proposal_valid_accepted ... ok
+test proposal_vote_verify::tests::signer_mismatch_claimed_vs_message ... ok
+test proposal_vote_verify::tests::vote_changed_block_after_signing ... ok
+test proposal_vote_verify::tests::vote_for_another_chain_rejected ... ok
+test proposal_vote_verify::tests::vote_missing_key ... ok
+test proposal_vote_verify::tests::vote_missing_signature ... ok
+test proposal_vote_verify::tests::vote_unsupported_suite_no_backend ... ok
+test proposal_vote_verify::tests::vote_valid_accepted ... ok
+test proposal_vote_verify::tests::vote_wrong_validator_signature ... ok
+test proposal_vote_verify::tests::wrong_consensus_key_with_correct_binding_rejected ... ok
+
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 292 filtered out; finished in 0.64s
+

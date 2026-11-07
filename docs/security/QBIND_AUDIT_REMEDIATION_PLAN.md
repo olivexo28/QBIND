@@ -5039,3 +5039,23 @@ remains in force. Current correction records are in
 `evidence/recovery-resume-inventory-20261107/STRUCTURAL-CONTROL-CHECKS.txt`
 and `STRUCTURAL-CONTROL-SHA256SUMS`. A17-F1 / RS1-F7, RS1 and A33-F1 / E27
 remain OPEN; activation remains DISABLED; public DevNet remains NO-GO.
+
+## 43. Executed test-only binding sensitivity — independent review pending
+
+The [isolated R/D/S/M execution evidence](evidence/recovery-resume-inventory-20261107/binding-sensitivity-execution/README.md)
+records 21 new tests plus 46 existing QC and 20 existing Proposal/Vote
+controls: 87 distinct final tests passed, zero failed/ignored; the unit subset
+filtered 292 unrelated unit cases. Raw discovery and execution logs preserve
+the failed first compile attempt and all successful commands/outputs/exits.
+Production source, dependencies/configuration, wire and safety policies are
+unchanged. No protected caller or effect is added.
+
+The user supplied PASS WITH LIMITATIONS; prior budget, entrypoint/oracle and
+structural-document findings remain PASSED / CLOSED within scope. Earlier
+bounded acceptances remain preserved without invented reviewer metadata.
+The executed synthetic crypto, test-only admission/scanner and M oracle
+model do not establish authenticated quorum-to-content binding, production
+recovery, full-prefix finality or resume authority. Total working-memory and
+operational bounds remain unselected. B/C remain unselected and current
+refusal stays in force; A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
+Activation remains DISABLED; public DevNet remains NO-GO.

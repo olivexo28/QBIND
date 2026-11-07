@@ -513,3 +513,28 @@ remains separate from durable application, ownership, currentness,
 signing-history continuity, signer exclusivity, clearance and resume.
 A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN. Activation remains
 DISABLED; public DevNet remains NO-GO.
+
+## 8. Executed isolated sensitivity slice
+
+The [execution record](binding-sensitivity-execution/README.md) attributes
+21 discovered/executed new integration tests, 46 existing domain-QC controls
+and 20 existing Proposal/Vote unit controls to actual author executions.
+Complete command/stdout/stderr/exit artifacts include the initial compile
+failure. The user supplied PASS WITH LIMITATIONS; prior budget, entrypoint/
+oracle and structural-document findings remain PASSED / CLOSED within scope.
+No reviewer identity or unavailable report is asserted.
+
+R uses synthetic real ML-DSA-44 signatures and existing decoded verifiers;
+D observes post-input-allocation pre-crypto refusal; S is isolated test-only
+admission/scanning; M is an explicit graph/oracle model, not the engine
+commit method. Fixed G=10/10 reaches the monotonic predicate for baselines
+9/9, 10/10 and 11/11, with restored positive and whole-predicate bypass
+sensitivity. Actual encoded fixture total is 32,674 bytes, below the reviewed
+32,690 example and 65,536 encoded cap. No full working-memory, runtime,
+cancellation or production admission bound is established.
+
+This append does not relabel historical proposals as executed production
+mechanisms. No recovery application, currentness, durable ownership, signer
+history/fencing, clearance or resume authority is established. B/C remain
+unselected; current refusal remains in force. Activation stays DISABLED and
+public DevNet remains NO-GO; the listed audit findings remain OPEN.

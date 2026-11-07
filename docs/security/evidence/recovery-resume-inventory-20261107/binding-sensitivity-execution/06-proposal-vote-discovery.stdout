@@ -1,0 +1,22 @@
+proposal_vote_verify::tests::empty_signature_never_panics_and_fails_closed: test
+proposal_vote_verify::tests::no_classical_or_cross_suite_fallback: test
+proposal_vote_verify::tests::proposal_bitflip_signature: test
+proposal_vote_verify::tests::proposal_changed_payload_after_signing: test
+proposal_vote_verify::tests::proposal_missing_signature: test
+proposal_vote_verify::tests::proposal_signature_relabeled_as_vote_rejected: test
+proposal_vote_verify::tests::proposal_suite_altered_after_signing: test
+proposal_vote_verify::tests::proposal_survives_encode_decode: test
+proposal_vote_verify::tests::proposal_truncated_signature: test
+proposal_vote_verify::tests::proposal_unknown_validator: test
+proposal_vote_verify::tests::proposal_valid_accepted: test
+proposal_vote_verify::tests::signer_mismatch_claimed_vs_message: test
+proposal_vote_verify::tests::vote_changed_block_after_signing: test
+proposal_vote_verify::tests::vote_for_another_chain_rejected: test
+proposal_vote_verify::tests::vote_missing_key: test
+proposal_vote_verify::tests::vote_missing_signature: test
+proposal_vote_verify::tests::vote_unsupported_suite_no_backend: test
+proposal_vote_verify::tests::vote_valid_accepted: test
+proposal_vote_verify::tests::vote_wrong_validator_signature: test
+proposal_vote_verify::tests::wrong_consensus_key_with_correct_binding_rejected: test
+
+20 tests, 0 benchmarks

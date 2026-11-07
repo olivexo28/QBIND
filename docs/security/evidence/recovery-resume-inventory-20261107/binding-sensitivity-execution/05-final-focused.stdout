@@ -1,0 +1,112 @@
+
+running 21 tests
+test d_allocated_late_oversize_signature_refuses_before_any_backend_call ... SETUP synthetic_pk_lengths=5248 synthetic_sk_lengths=10240 pk_capacity=5248 sk_capacity=10240 keygen/backend/allocator/stack working memory=UNMEASURED; no total-memory bound
+D already allocated byte lengths=70377 signature_capacity=70376 outer_vector_storage=72 offending_index=0: MalformedSignature with zero backend calls; NOT pre-input-allocation
+D already allocated byte lengths=70377 signature_capacity=70376 outer_vector_storage=72 offending_index=2: MalformedSignature with zero backend calls; NOT pre-input-allocation
+ok
+test d_duplicate_entry_and_invalid_extra_signature_are_not_quorum_passes ... SETUP synthetic_pk_lengths=5248 synthetic_sk_lengths=10240 pk_capacity=5248 sk_capacity=10240 keygen/backend/allocator/stack working memory=UNMEASURED; no total-memory bound
+ok
+test isolation_sentinel_oracles_and_test_only_support_have_no_protected_caller ... ISOLATION sentinel-only effect oracle: application/store/network/signing-authority/clear/resume=0; each attempted-effect sentinel detected; no real effect API connected
+ok
+test m_fixed_g_coherent_baselines_reach_same_monotonic_predicate ... SETUP synthetic_pk_lengths=5248 synthetic_sk_lengths=10240 pk_capacity=5248 sk_capacity=10240 keygen/backend/allocator/stack working memory=UNMEASURED; no total-memory bound
+M fixed G=(10,10) coherent baseline=(9,9) outcome=Ok([0, 0, 0, 0, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 0, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9]) earlier_passed=true monotonic_reached=1
+M fixed G=(10,10) coherent baseline=(10,10) outcome=Err(NonMonotonicEndpoint) earlier_passed=true monotonic_reached=1
+M fixed G=(10,10) coherent baseline=(11,11) outcome=Err(NonMonotonicEndpoint) earlier_passed=true monotonic_reached=1
+M fixed G=(10,10) coherent baseline=(9,9) outcome=Ok([0, 0, 0, 0, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 0, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9]) earlier_passed=true monotonic_reached=1
+M whole-predicate bypass deliberately accepts both negatives: refusal assertion would fail; no engine invoked
+ok
+test m_missing_qcs_parent_views_endpoint_and_epoch_controls ... SETUP synthetic_pk_lengths=5248 synthetic_sk_lengths=10240 pk_capacity=5248 sk_capacity=10240 keygen/backend/allocator/stack working memory=UNMEASURED; no total-memory bound
+ok
+test r_each_qc_verifies_three_distinct_real_signatures ... SETUP synthetic_pk_lengths=5248 synthetic_sk_lengths=10240 pk_capacity=5248 sk_capacity=10240 keygen/backend/allocator/stack working memory=UNMEASURED; no total-memory bound
+R decoded QCs: 3 owning results, 9 real verify_vote calls, weight=3 threshold=3 each
+ok
+test r_encoded_accounting_and_retained_duplicates_are_separate ... SETUP synthetic_pk_lengths=5248 synthetic_sk_lengths=10240 pk_capacity=5248 sk_capacity=10240 keygen/backend/allocator/stack working memory=UNMEASURED; no total-memory bound
+RETAINED measured_vector_storage qcs=22071 embedded_qc=7333 proposal_sig=2420 tx_outer=24 tx_bytes=256 public_keys=5248 fourth_D_signature=2420 inline_fixture=1272 provider_key_clones_so_far=9; backend stack/heap, allocator overhead, temporary preimages=UNMEASURED; total-memory/runtime/cancellation/network guarantee=NONE
+R ACCOUNTING encoded_segments_plus_framing=32674 reviewed_max=32690 cap=65536 segment_capacities=47816 simultaneously_retained_result_signature_lengths=21780; encoded+decoded+results coexist, NO total-memory bound
+ok
+test r_genesis_authority_runtime_domains_fail_signature_verification ... SETUP synthetic_pk_lengths=5248 synthetic_sk_lengths=10240 pk_capacity=5248 sk_capacity=10240 keygen/backend/allocator/stack working memory=UNMEASURED; no total-memory bound
+ok
+test r_insufficient_weight_restored_third_signer ... SETUP synthetic_pk_lengths=5248 synthetic_sk_lengths=10240 pk_capacity=5248 sk_capacity=10240 keygen/backend/allocator/stack working memory=UNMEASURED; no total-memory bound
+ok
+test r_m_qc_does_not_authenticate_external_parent_or_content_oracle ... SETUP synthetic_pk_lengths=5248 synthetic_sk_lengths=10240 pk_capacity=5248 sk_capacity=10240 keygen/backend/allocator/stack working memory=UNMEASURED; no total-memory bound
+R/M QC remained valid for unchanged signed bytes; explicit unauthenticated test oracle rejected substitutions
+ok
+test r_message_purpose_and_signing_format_bytes_are_authenticated ... SETUP synthetic_pk_lengths=5248 synthetic_sk_lengths=10240 pk_capacity=5248 sk_capacity=10240 keygen/backend/allocator/stack working memory=UNMEASURED; no total-memory bound
+R direct real backend: purpose/format byte mutations refuse, originals restore; not a future B/C parser or signer
+ok
+test r_outbound_helpers_and_inbound_message_recomputation_are_distinct ... SETUP synthetic_pk_lengths=5248 synthetic_sk_lengths=10240 pk_capacity=5248 sk_capacity=10240 keygen/backend/allocator/stack working memory=UNMEASURED; no total-memory bound
+ok
+test r_proposal_own_signature_excluded_embedded_signatures_included ... SETUP synthetic_pk_lengths=5248 synthetic_sk_lengths=10240 pk_capacity=5248 sk_capacity=10240 keygen/backend/allocator/stack working memory=UNMEASURED; no total-memory bound
+R Proposal already allocated: original/restored Ok, mutations InvalidSignature; backend proposal_calls=4
+ok
+test r_proposal_parent_and_content_mutations_use_same_checker ... SETUP synthetic_pk_lengths=5248 synthetic_sk_lengths=10240 pk_capacity=5248 sk_capacity=10240 keygen/backend/allocator/stack working memory=UNMEASURED; no total-memory bound
+ok
+test r_signed_vote_fields_fail_and_restore ... SETUP synthetic_pk_lengths=5248 synthetic_sk_lengths=10240 pk_capacity=5248 sk_capacity=10240 keygen/backend/allocator/stack working memory=UNMEASURED; no total-memory bound
+ok
+test r_unauthorized_sparse_member_and_swapped_signature_refuse ... SETUP synthetic_pk_lengths=5248 synthetic_sk_lengths=10240 pk_capacity=5248 sk_capacity=10240 keygen/backend/allocator/stack working memory=UNMEASURED; no total-memory bound
+ok
+test r_wire_chain_and_authorized_epoch_fail_before_crypto ... SETUP synthetic_pk_lengths=5248 synthetic_sk_lengths=10240 pk_capacity=5248 sk_capacity=10240 keygen/backend/allocator/stack working memory=UNMEASURED; no total-memory bound
+ok
+test s_announced_oversize_overflow_and_whole_gate_bypass_sensitivity ... S lengths-only boundary: rejects before callback; exact length cap only passes length gate; bypass defect observed
+ok
+test s_borrowed_nested_malformed_truncated_and_padding_prevent_decoding ... SETUP synthetic_pk_lengths=5248 synthetic_sk_lengths=10240 pk_capacity=5248 sk_capacity=10240 keygen/backend/allocator/stack working memory=UNMEASURED; no total-memory bound
+ok
+test s_borrowed_valid_segments_scan_before_real_qc_decoding ... SETUP synthetic_pk_lengths=5248 synthetic_sk_lengths=10240 pk_capacity=5248 sk_capacity=10240 keygen/backend/allocator/stack working memory=UNMEASURED; no total-memory bound
+ok
+test s_whole_scanner_bypass_is_detected_not_production_security_evidence ... SETUP synthetic_pk_lengths=5248 synthetic_sk_lengths=10240 pk_capacity=5248 sk_capacity=10240 keygen/backend/allocator/stack working memory=UNMEASURED; no total-memory bound
+S deliberately defective scanner bypass invoked decoder=1; defect detected, not a production security pass
+ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.12s
+
+
+running 46 tests
+test c3d_10_threshold_above_u64_half_no_wraparound ... ok
+test c3d_10_threshold_near_u64_limit_no_wraparound ... ok
+test c3d_10_total_power_overflow_rejected ... ok
+test c3d_10_zero_total_power_rejected ... ok
+test c3d_11_bounded_backend_error_diagnostics ... ok
+test c3d_11_debug_does_not_dump_signatures_on_success ... ok
+test c3d_11_no_partial_result_on_failure ... ok
+test c3d_12_signature_count_65536_rejected_before_crypto ... ok
+test c3d_13_valid_sigs_then_oversized_signature_zero_backend_calls ... ok
+test c3d_14_aggregate_bound_constants ... ok
+test c3d_14_checked_aggregate_signature_bytes_boundaries ... ok
+test c3d_15_independent_d6_vote_to_qc_positive_control ... ok
+test c3d_16_legacy_d6_signed_input_incompatibility_three_way ... ok
+test c3d_1_exact_quorum_all_signers ... ok
+test c3d_1_valid_quorum_returns_associated_evidence ... ok
+test c3d_2_nonuniform_accept_at_threshold_reject_below ... ok
+test c3d_3_sparse_reordered_membership_lookup_by_validator_id ... ok
+test c3d_4_wrong_domain_authority_commitment_rejected_with_control ... ok
+test c3d_4_wrong_domain_genesis_identity_rejected_with_control ... ok
+test c3d_4_wrong_domain_runtime_id_rejected_with_control ... ok
+test c3d_5_wire_chain_mismatch_rejected_before_crypto ... ok
+test c3d_5_wrong_epoch_rejected_before_crypto_with_control ... ok
+test c3d_6_legacy_vote_digest_signatures_rejected_by_d6 ... ok
+test c3d_7_bitmap_exact_membership_span_all_zero_within_bounds ... ok
+test c3d_7_bitmap_set_bit_beyond_membership_span_rejected_before_crypto ... ok
+test c3d_7_bitmap_zero_padding_beyond_membership_span_rejected ... ok
+test c3d_7_empty_bitmap_no_signers_insufficient_power ... ok
+test c3d_7_highest_index_real_signature_positive ... ok
+test c3d_7_incorrect_association_wrong_signer_signature ... ok
+test c3d_7_membership_id_not_representable_rejected ... ok
+test c3d_7_overlong_bitmap_rejected ... ok
+test c3d_7_popcount_mismatch_more_bits_than_sigs ... ok
+test c3d_7_popcount_mismatch_more_sigs_than_bits ... ok
+test c3d_7_signature_reordering_rejected_with_control ... ok
+test c3d_7_sparse_membership_shorter_bitmap_positive_control ... ok
+test c3d_7_unknown_set_bit_within_membership_span_rejected ... ok
+test c3d_7_unknown_signer_id_rejected ... ok
+test c3d_8_empty_signature_for_set_bit_missing ... ok
+test c3d_8_header_field_tampering_rejected_with_control ... ok
+test c3d_8_overlong_signature_rejected ... ok
+test c3d_8_truncated_signature_rejected ... ok
+test c3d_8_valid_quorum_plus_invalid_extra_signature_rejects ... ok
+test c3d_9_faulting_backend_rejected_as_backend_error ... ok
+test c3d_9_governed_suite_mismatch_rejected ... ok
+test c3d_9_missing_key_rejected ... ok
+test c3d_9_unsupported_backend_rejected ... ok
+
+test result: ok. 46 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.30s
+

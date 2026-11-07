@@ -1,0 +1,20 @@
+PASS: all five historical documents remain exact byte prefixes
+PASS: 18 prior evidence/Audit files remain byte-identical
+PASS: SHA256SUMS: 8 entries at producing revision 61028eb6dbb91f0834a5235f20c935bb0ff5b549
+PASS: CORRECTION-SHA256SUMS: 8 entries at producing revision 8344e92412d37882ef059b6158ead1959b0fa165
+PASS: CONTRACT-SHA256SUMS: 8 entries at producing revision a4620f1e9363fbd30b23f06448e8f19174de8192
+PASS: AP1-CORRECTION-SHA256SUMS: 8 entries at producing revision c12b46497a404171ca41c640f614f0c308ae514b
+PASS: WITNESS-SHA256SUMS: 8 entries at producing revision e893d0bf7359deb87998ff67e63fbd92aabffd91
+PASS: BINDING-SHA256SUMS: 10 entries at producing revision 6ba38e9fa66f216e45906b3eb0575d67aa0cd071
+PASS: OPTIONS-SHA256SUMS: 13 entries at producing revision 0a405c6063d49d8b0d0a4211d091f5405d79b6a6
+PASS: TEST-PLAN-CORRECTION-SHA256SUMS: 8 entries at producing revision 3725ff080830df60e274fdaa080e390ccdbcc827
+PASS: STRUCTURAL-CONTROL-SHA256SUMS: 8 entries at producing revision 4ab46f22a66afdfae2363da7da3e493f56155451
+PASS: 21 new / 46 QC / 20 unit names discovered and executed; 87 distinct final passes
+PASS: final failed=0 ignored=0; integration filtered=0; unit filtered=292; initial compile exit=101 retained
+PASS: exact encoded/decoded-length accounting and monotonic/counter observations
+PASS: existing production/test/config/dependency bytes unchanged; only two isolated new test files
+PASS: three new execution links and 3 pinned source ranges
+PASS: scope, exact historical prefixes, producing-revision integrity and scoped whitespace
+RAW OUTPUT EXCEPTION: three cargo stdout files retain original trailing blank lines; not normalized
+NOT ESTABLISHED: production recovery/content binding/currentness/ownership/signing-history/fencing/clear/resume
+UNMEASURED/UNSELECTED: total memory/backend working set/runtime/cancellation/production network admission

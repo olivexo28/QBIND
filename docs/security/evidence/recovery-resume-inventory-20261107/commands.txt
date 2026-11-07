@@ -706,3 +706,11 @@ whitespace and revision-aware integrity commands and results are recorded in
 `STRUCTURAL-CONTROL-CHECKS.txt`; current hashes are in
 `STRUCTURAL-CONTROL-SHA256SUMS`. No Rust tests/builds were rerun; all proposed
 structural cases remain FUTURE / NOT EXECUTED.
+
+Isolated R/D/S/M implementation and author execution: complete cargo
+commands, stdout/stderr and exits are retained under
+`binding-sensitivity-execution/`. Its `COMMANDS.txt`, `CHECKS.txt` and
+`README.md` distinguish discovery, execution, failed attempts, synthetic
+signing setup, test-only model/helper sensitivity and production limitations.
+Historical prefixes and producing-revision manifests are checked separately;
+the execution `SHA256SUMS` covers current artifacts.

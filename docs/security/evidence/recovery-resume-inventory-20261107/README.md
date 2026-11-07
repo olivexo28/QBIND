@@ -488,3 +488,14 @@ accepted budgets or entrypoint/oracle distinctions. The proposed test-only
 checker compares fixed G at 10/10 to coherent baselines at 9/9, 10/10 and
 11/11. All cases remain FUTURE / NOT EXECUTED. See
 `STRUCTURAL-CONTROL-CHECKS.txt` and `STRUCTURAL-CONTROL-SHA256SUMS`.
+
+## 15. Executed isolated binding-sensitivity tests
+
+The [execution record](binding-sensitivity-execution/README.md) includes
+test-only source paths, entrypoint mapping, exact fixture accounting,
+discovered/executed counts and complete commands/raw logs. Twenty-one new
+tests and 66 directly related existing controls passed in the final runs.
+Prior bounded acceptances remain preserved; this author execution does not
+establish production recovery, content binding or any application/signing/
+clear/resume authority. B/C remain unselected and current refusal stays in
+force. See the execution directory's `SHA256SUMS` for current artifact hashes.

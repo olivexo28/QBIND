@@ -1,0 +1,151 @@
+TEST-ONLY BINDING SENSITIVITY — SOURCE/SCOPE/INTEGRITY CHECKS
+
+The following script is documentation/source/test-discovery validation, not
+another execution of Rust tests or a claim of production safety.
+Exact command (final stdout/stderr/exit preserved as 10-final-documentation-check.*):
+
+$ python3 - <<'PY'
+from pathlib import Path
+p = Path('docs/security/evidence/recovery-resume-inventory-20261107/binding-sensitivity-execution/CHECKS.txt')
+code = p.read_text().split('----- BEGIN VALIDATION -----\n', 1)[1].split('----- END VALIDATION -----', 1)[0]
+exec(compile(code, 'binding_slice_artifact_checks', 'exec'))
+PY
+
+----- BEGIN VALIDATION -----
+import hashlib
+import re
+import subprocess
+from pathlib import Path
+
+BASE = '4ab46f22a66afdfae2363da7da3e493f56155451'
+MAIN = '9bf0eb43e4e3c601d02d3886d220b0abeb3a103e'
+ROOT = 'docs/security/evidence/recovery-resume-inventory-20261107/'
+EXEC = ROOT + 'binding-sensitivity-execution/'
+TEST = 'crates/qbind-consensus/tests/binding_sensitivity_slice_tests.rs'
+SUPPORT = 'crates/qbind-consensus/tests/binding_sensitivity_support/mod.rs'
+appended = ['docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md'] + [
+    ROOT + name for name in ['BINDING_OPTIONS_COMPARISON.md', 'README.md', 'CHANGED_PATHS.txt', 'commands.txt']
+]
+def blob(rev, path):
+    return subprocess.check_output(['git', 'show', f'{rev}:{path}'])
+for path in appended:
+    assert Path(path).read_bytes().startswith(blob(BASE, path)), path
+print('PASS: all five historical documents remain exact byte prefixes')
+old = subprocess.check_output(['git', 'ls-tree', '-r', '--name-only', BASE, ROOT, 'Audit']).decode().splitlines()
+preserved = [path for path in old if path not in appended]
+for path in preserved:
+    assert Path(path).read_bytes() == blob(BASE, path), path
+print(f'PASS: {len(preserved)} prior evidence/Audit files remain byte-identical')
+producers = [
+    ('SHA256SUMS', '61028eb6dbb91f0834a5235f20c935bb0ff5b549'),
+    ('CORRECTION-SHA256SUMS', '8344e92412d37882ef059b6158ead1959b0fa165'),
+    ('CONTRACT-SHA256SUMS', 'a4620f1e9363fbd30b23f06448e8f19174de8192'),
+    ('AP1-CORRECTION-SHA256SUMS', 'c12b46497a404171ca41c640f614f0c308ae514b'),
+    ('WITNESS-SHA256SUMS', 'e893d0bf7359deb87998ff67e63fbd92aabffd91'),
+    ('BINDING-SHA256SUMS', '6ba38e9fa66f216e45906b3eb0575d67aa0cd071'),
+    ('OPTIONS-SHA256SUMS', '0a405c6063d49d8b0d0a4211d091f5405d79b6a6'),
+    ('TEST-PLAN-CORRECTION-SHA256SUMS', '3725ff080830df60e274fdaa080e390ccdbcc827'),
+    ('STRUCTURAL-CONTROL-SHA256SUMS', BASE),
+]
+for manifest, rev in producers:
+    entries = blob(rev, ROOT + manifest).decode().splitlines()
+    for entry in entries:
+        digest, path = entry.split('  ', 1)
+        assert hashlib.sha256(blob(rev, path)).hexdigest() == digest, (manifest, path)
+    print(f'PASS: {manifest}: {len(entries)} entries at producing revision {rev}')
+source = Path(TEST).read_text()
+names = set(re.findall(r'#\[test\]\s*fn (\w+)', source))
+assert len(names) == 21
+discovery = Path(EXEC + '04-final-discovery.stdout').read_text()
+listed = set(re.findall(r'^(\w+): test$', discovery, re.M))
+assert names <= listed
+assert '21 tests, 0 benchmarks' in discovery and '46 tests, 0 benchmarks' in discovery
+qc_names = listed - names
+assert len(qc_names) == 46
+execution = Path(EXEC + '05-final-focused.stdout').read_text()
+run_names = set(re.findall(r'^test (\w+) \.\.\.', execution, re.M))
+assert run_names == listed
+assert re.findall(r'test result: ok\. (\d+) passed; (\d+) failed; (\d+) ignored; (\d+) measured; (\d+) filtered out;', execution) == [
+    ('21', '0', '0', '0', '0'), ('46', '0', '0', '0', '0')
+]
+unit_list = set(re.findall(r'^([\w:]+): test$', Path(EXEC + '06-proposal-vote-discovery.stdout').read_text(), re.M))
+unit_run = Path(EXEC + '07-proposal-vote.stdout').read_text()
+assert len(unit_list) == 20
+assert set(re.findall(r'^test ([\w:]+) \.\.\.', unit_run, re.M)) == unit_list
+assert '20 passed; 0 failed; 0 ignored; 0 measured; 292 filtered out' in unit_run
+assert len(names | qc_names | unit_list) == 87
+for name, expected in [
+    ('01-discovery', 101), ('02-discovery', 0), ('03-focused', 0),
+    ('04-final-discovery', 0), ('05-final-focused', 0),
+    ('06-proposal-vote-discovery', 0), ('07-proposal-vote', 0),
+]:
+    assert int(Path(EXEC + name + '.exit').read_text()) == expected, name
+    assert Path(EXEC + name + '.stdout').is_file() and Path(EXEC + name + '.stderr').is_file()
+print('PASS: 21 new / 46 QC / 20 unit names discovered and executed; 87 distinct final passes')
+print('PASS: final failed=0 ignored=0; integration filtered=0; unit filtered=292; initial compile exit=101 retained')
+for token in ['earlier_passed=true monotonic_reached=1', 'whole-predicate bypass', 'signature_capacity=70376',
+              'encoded_segments_plus_framing=32674', 'NOT pre-input-allocation']:
+    assert token in execution, token
+assert sum([3 * 7336, 7750, 2420, 448, 48]) == 32674 <= 32690 < 65536
+assert 9 * 2420 == 21780 and 65536 + 2 * 2420 + 1 == 70377 < 131072
+print('PASS: exact encoded/decoded-length accounting and monotonic/counter observations')
+support = Path(SUPPORT).read_text()
+assert 'MlDsa44Backend.verify_vote' in support and 'MlDsa44Backend.verify_proposal' in support
+assert 'WireQc::decode' in support and 'AdmissionError::DecoderFailure' in support
+assert 'trace.monotonic_reached += 1' in support
+assert 'bypass_whole_monotonic_predicate' in support
+assert 'bypass_length_gate' in support and 'bypass_scanner' in support
+assert 'mod binding_sensitivity_support;' in source
+for text in [source, support]:
+    for forbidden in ['qbind_node::', 'BasicHotStuffEngine', 'HotStuffStateEngine', 'std::fs::',
+                      'std::net::', 'std::process::', 'unsafe {', 'include_bytes!']:
+        assert forbidden not in text, forbidden
+changed = set(subprocess.check_output(['git', 'diff', '--name-only', BASE]).decode().splitlines())
+untracked = set(subprocess.check_output(['git', 'ls-files', '--others', '--exclude-standard']).decode().splitlines())
+for path in changed | untracked:
+    assert path in set(appended + [TEST, SUPPORT]) or path.startswith(EXEC), path
+for path in subprocess.check_output(['git', 'ls-tree', '-r', '--name-only', BASE, 'crates', 'Cargo.toml', 'Cargo.lock', '.cargo']).decode().splitlines():
+    assert Path(path).read_bytes() == blob(BASE, path), path
+print('PASS: existing production/test/config/dependency bytes unchanged; only two isolated new test files')
+for path in ['docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md', ROOT + 'README.md', ROOT + 'BINDING_OPTIONS_COMPARISON.md']:
+    addition = Path(path).read_text()[len(blob(BASE, path).decode()):]
+    target = re.search(r'\]\(([^)]+binding-sensitivity-execution/README.md)\)', addition)
+    if target is None:
+        target = re.search(r'\]\((binding-sensitivity-execution/README.md)\)', addition)
+    assert target and (Path(path).parent / target.group(1)).is_file(), path
+links = re.findall(r'https://github\.com/olivexo28/QBIND/blob/([0-9a-f]{40})/([^\s)#]+)#L(\d+)-L(\d+)', Path(EXEC + 'README.md').read_text())
+for rev, path, first, last in links:
+    assert rev == MAIN and 1 <= int(first) <= int(last) <= len(blob(rev, path).decode().splitlines())
+print(f'PASS: three new execution links and {len(links)} pinned source ranges')
+subprocess.run(['git', 'diff', '--check'], check=True)
+raw_eof = [EXEC + name + '.stdout' for name in ['03-focused', '05-final-focused', '07-proposal-vote']]
+subprocess.run(['git', 'diff', '--cached', '--check', '--', '.'] + [':!' + path for path in raw_eof], check=True)
+print('PASS: scope, exact historical prefixes, producing-revision integrity and scoped whitespace')
+print('RAW OUTPUT EXCEPTION: three cargo stdout files retain original trailing blank lines; not normalized')
+print('NOT ESTABLISHED: production recovery/content binding/currentness/ownership/signing-history/fencing/clear/resume')
+print('UNMEASURED/UNSELECTED: total memory/backend working set/runtime/cancellation/production network admission')
+----- END VALIDATION -----
+
+Scope checking compares every existing crate/Cargo/config path with the
+task base. This is evidence of unchanged production/test/configuration bytes,
+not a full compiler call-graph proof or assertion that the library itself
+has no mutation-capable APIs. The new files call only explicitly identified
+pure verifiers/encoders/decoders and isolated test helpers. The effect oracle
+is intentionally sentinel-only, not a fake counter attached to live stores.
+
+Format validation command (08-format-check.stdout/.stderr/.exit):
+$ rustfmt --edition 2021 --check crates/qbind-consensus/tests/binding_sensitivity_slice_tests.rs crates/qbind-consensus/tests/binding_sensitivity_support/mod.rs
+
+The current execution SHA256SUMS lists current changed paths and every
+generated raw log, plus selected preserved register/manifests. It excludes
+itself; its final hash is reported separately. Old manifest entries are
+verified at producer commits, never relabeled as current appended hashes.
+
+The earlier 09-documentation-check execution used this same script except
+its final staged check was `subprocess.run(['git', 'diff', '--cached',
+'--check'], check=True)` and its final PASS string ended "and whitespace".
+The index was empty then. The first subsequent staged check exited 2 on
+original cargo stdout EOF blank lines in 03, 05 and 07. These raw outputs
+are preserved unchanged, not trimmed to make a check pass. The final script
+checks all staged paths except exactly those three immutable raw stdout
+files and reports the exception explicitly.

@@ -68,3 +68,27 @@ docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt
 docs/security/evidence/recovery-resume-inventory-20261107/commands.txt
 docs/security/evidence/recovery-resume-inventory-20261107/STRUCTURAL-CONTROL-CHECKS.txt
 docs/security/evidence/recovery-resume-inventory-20261107/STRUCTURAL-CONTROL-SHA256SUMS
+
+Executed isolated binding sensitivity slice:
+crates/qbind-consensus/tests/binding_sensitivity_slice_tests.rs
+crates/qbind-consensus/tests/binding_sensitivity_support/mod.rs
+docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+docs/security/evidence/recovery-resume-inventory-20261107/BINDING_OPTIONS_COMPARISON.md
+docs/security/evidence/recovery-resume-inventory-20261107/README.md
+docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/commands.txt
+docs/security/evidence/recovery-resume-inventory-20261107/binding-sensitivity-execution/README.md
+docs/security/evidence/recovery-resume-inventory-20261107/binding-sensitivity-execution/COMMANDS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/binding-sensitivity-execution/CHECKS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/binding-sensitivity-execution/SHA256SUMS
+Raw execution directory artifacts (each has .stdout, .stderr, .exit):
+01-discovery
+02-discovery
+03-focused
+04-final-discovery
+05-final-focused
+06-proposal-vote-discovery
+07-proposal-vote
+08-format-check
+09-documentation-check
+10-final-documentation-check

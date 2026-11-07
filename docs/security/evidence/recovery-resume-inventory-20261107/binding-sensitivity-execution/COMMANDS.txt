@@ -1,0 +1,165 @@
+TEST-ONLY BINDING SENSITIVITY — AUTHOR COMMANDS
+
+Working directory: /workspaces/QBIND/olivexo28/QBIND
+P=docs/security/evidence/recovery-resume-inventory-20261107/binding-sensitivity-execution
+P below is notation for that exact path, not an environment variable required
+by the commands. Cargo stdout/stderr were redirected completely, separately;
+the console tail/grep previews were never used in place of the raw files.
+No raw log records key/signature secret material.
+
+Before changes:
+$ git remote get-url origin && git branch --show-current && git rev-parse HEAD 'HEAD^{tree}' '9bf0eb43e4e3c601d02d3886d220b0abeb3a103e^{tree}' && git ls-remote --heads origin refs/heads/docs/authenticated-recovery-resume-inventory refs/heads/main && git merge-base --is-ancestor 9bf0eb43e4e3c601d02d3886d220b0abeb3a103e HEAD && git status --porcelain=v1 && git diff --cached --name-only
+Output:
+https://github.com/olivexo28/QBIND
+docs/authenticated-recovery-resume-inventory
+4ab46f22a66afdfae2363da7da3e493f56155451
+1adbf89d1e6221b0b89c8d5866f9e0ef656a741c
+56509b20084ee1cbe2c42fda9d73d87e4c82c33f
+4ab46f22a66afdfae2363da7da3e493f56155451	refs/heads/docs/authenticated-recovery-resume-inventory
+9bf0eb43e4e3c601d02d3886d220b0abeb3a103e	refs/heads/main
+Exit 0. No worktree/staging output; identity/ref/tree/ancestry match.
+
+Formatting:
+$ rustfmt --edition 2021 crates/qbind-consensus/tests/binding_sensitivity_slice_tests.rs crates/qbind-consensus/tests/binding_sensitivity_support/mod.rs
+Exit 0, stdout/stderr empty. Repeated after test-only edits. No production
+file or Cargo/dependency/configuration file was formatted or changed.
+
+Directory for raw generated logs:
+$ mkdir -p docs/security/evidence/recovery-resume-inventory-20261107/binding-sensitivity-execution
+Exit 0, stdout/stderr empty.
+
+For each cargo invocation below, the executed shell capture is:
+  <cargo command> > <P>/<N>.stdout 2> <P>/<N>.stderr
+  result=$?
+  printf '%s\n' "$result" > <P>/<N>.exit
+  <console-only preview>
+  exit "$result"
+The .exit file is the cargo/capture result, not the status of a pipe or grep.
+
+01-discovery:
+$ cargo test -p qbind-consensus --test binding_sensitivity_slice_tests -- --list
+Exit 101. Complete stdout/stderr in 01-discovery.stdout/.stderr. Compile
+errors: Keys lacked the key-provider trait's Debug bound; the validator
+iterator collect required an explicit Vec type. Both were fixed solely in
+the new test support. No source/config/policy was changed to make it pass.
+Preview: cat stdout; tail -70 stderr.
+
+02-discovery:
+$ cargo test -p qbind-consensus --test binding_sensitivity_slice_tests -- --list
+Exit 0. 20 tests, 0 benchmarks, complete .stdout/.stderr. This was development
+discovery before adding the final purpose/format test.
+Preview: cat stdout; tail -8 stderr.
+
+03-focused:
+$ cargo test -p qbind-consensus --test binding_sensitivity_slice_tests -- --nocapture --test-threads=1
+Exit 0. 20 passed; 0 failed/ignored/measured/filtered, 3.20s. Retained as an
+earlier run, not added to final distinct counts. D's earlier capacity print
+was made after restoration; this attribution was corrected to capture the
+oversized vectors' capacities before the verifier in final source/run.
+Preview: tail -65 stdout; tail -18 stderr.
+
+04-final-discovery:
+$ cargo test -p qbind-consensus --test binding_sensitivity_slice_tests --test run_422_d7c3d_qc_domain_verification_tests -- --list
+Exit 0. New target: 21 tests, 0 benchmarks. Existing QC target: 46 tests,
+0 benchmarks. Exact names are in .stdout; build warnings in .stderr.
+Preview: tail -70 stdout; tail -8 stderr.
+
+05-final-focused:
+$ cargo test -p qbind-consensus --test binding_sensitivity_slice_tests --test run_422_d7c3d_qc_domain_verification_tests -- --nocapture --test-threads=1
+Exit 0. New target 21 passed, 0 failed/ignored/measured/filtered, 3.12s.
+Existing QC target 46 passed, 0 failed/ignored/measured/filtered, 2.30s.
+Full stdout/stderr retained. The repeated development 20 are not counted
+again; 67 distinct tests in these two final targets.
+Preview: grep -E 'running .* tests|test result:|D already|R ACCOUNTING|M fixed|whole-predicate' stdout; tail -8 stderr.
+
+06-proposal-vote-discovery:
+$ cargo test -p qbind-consensus --lib proposal_vote_verify::tests -- --list
+Exit 0. 20 tests, 0 benchmarks; exact selected names retained. Discovery
+does not report a run-pass or assert the filtered-out tests were run.
+Preview: cat stdout; tail -10 stderr.
+
+07-proposal-vote:
+$ cargo test -p qbind-consensus --lib proposal_vote_verify::tests -- --nocapture --test-threads=1
+Exit 0. 20 passed; 0 failed/ignored/measured; 292 filtered out; 0.64s.
+Existing unchanged Proposal/Vote cases (including legacy-domain behaviors)
+are directly related controls, not new v2 production/recovery evidence.
+Preview: cat stdout; tail -8 stderr.
+
+Other unsuccessful attempts retained in this narrative:
+- An exploratory sed requested nonexistent
+  crates/qbind-consensus/src/consensus_sig.rs. It printed "No such file or
+  directory"; the batched read's final command exited 0. The correct interface
+  was then read from crates/qbind-crypto/src/consensus_sig.rs.
+- A manual apply_patch refining decoder error attribution/D reporting
+  partially applied the support-file hunk and failed to match formatted
+  test-file context. Files were inspected and only remaining hunks applied.
+  This was an edit-context failure, not a test pass or production change.
+
+Raw log files preserve every cargo attempt's stdout, stderr and exit.
+Deliberately defective M/S controls are test-only branches with observed
+assertion/counter sensitivity; they are not production security approvals.
+
+Final documentation/source validation:
+- 08-format-check: exact rustfmt --check command in CHECKS.txt; exit 0;
+  stdout/stderr empty.
+- 09-documentation-check: exact embedded Python script/capture in CHECKS.txt;
+  exit 0, stderr empty. Five exact historical byte prefixes, 18 unchanged
+  prior evidence/Audit files, nine producing-revision manifests (79 entries),
+  87 distinct discovered/executed final tests, budgets/counters/source ranges,
+  isolated source scope and whitespace all passed. Complete stdout retained.
+- A final COMMANDS.txt append initially used "assertions/counter" rather than
+  the actual "assertion/counter" EOF context. apply_patch refused with
+  "Failed to find expected lines"; no files changed. Correct EOF context
+  was then used. This unsuccessful documentation edit is not hidden.
+
+Current manifest generation command:
+$ python3 - <<'PY'
+import hashlib
+from pathlib import Path
+root = Path('docs/security/evidence/recovery-resume-inventory-20261107')
+out = root / 'binding-sensitivity-execution/SHA256SUMS'
+paths = [
+    Path('crates/qbind-consensus/tests/binding_sensitivity_slice_tests.rs'),
+    Path('crates/qbind-consensus/tests/binding_sensitivity_support/mod.rs'),
+    Path('docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md'),
+    Path('Audit/QBIND_SECURITY_FINDINGS_REGISTER.md'),
+]
+paths += [root / name for name in ['BINDING_OPTIONS_COMPARISON.md', 'README.md', 'CHANGED_PATHS.txt', 'commands.txt']]
+paths += list(root.glob('*SHA256SUMS'))
+paths += [p for p in out.parent.iterdir() if p.is_file() and p != out]
+out.write_text(''.join(f'{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.as_posix()}\n' for p in sorted(set(paths))))
+print(f'current entries={len(set(paths))}; manifest excludes itself')
+PY
+Initial result: 47 entries; final result: 50 after adding the three final
+validation artifacts. This is generated integrity evidence,
+not a manually edited source file; manifest validation uses sha256sum -c.
+
+Publication commands, restricted to the existing task branch:
+$ git remote get-url origin && git branch --show-current && git rev-parse HEAD 'HEAD^{tree}' '9bf0eb43e4e3c601d02d3886d220b0abeb3a103e^{tree}' && git ls-remote --heads origin refs/heads/docs/authenticated-recovery-resume-inventory refs/heads/main && git merge-base --is-ancestor 9bf0eb43e4e3c601d02d3886d220b0abeb3a103e HEAD
+Recheck must match the before-changes refs above; stop on mismatch.
+$ sha256sum -c docs/security/evidence/recovery-resume-inventory-20261107/binding-sensitivity-execution/SHA256SUMS
+$ git add -- crates/qbind-consensus/tests/binding_sensitivity_slice_tests.rs crates/qbind-consensus/tests/binding_sensitivity_support/mod.rs docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md docs/security/evidence/recovery-resume-inventory-20261107/BINDING_OPTIONS_COMPARISON.md docs/security/evidence/recovery-resume-inventory-20261107/README.md docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt docs/security/evidence/recovery-resume-inventory-20261107/commands.txt docs/security/evidence/recovery-resume-inventory-20261107/binding-sensitivity-execution
+$ git diff --cached --check && git diff --cached --stat && git diff --cached --name-only
+$ git commit -m "test: execute isolated binding sensitivity slice" -m "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+$ git push origin HEAD:refs/heads/docs/authenticated-recovery-resume-inventory
+$ git show -s --format='commit=%H%ntree=%T%nparent=%P' HEAD && git ls-remote --heads origin refs/heads/docs/authenticated-recovery-resume-inventory refs/heads/main && git status --porcelain=v1 && git diff --cached --name-only && sha256sum docs/security/evidence/recovery-resume-inventory-20261107/binding-sensitivity-execution/SHA256SUMS
+Exact commit/tree/parent/direct refs and final clean state are reported after
+execution, outside this self-hashed commit to avoid circular identifiers.
+
+First staging command's `git diff --cached --check` exited 2:
+03-focused.stdout:58, 05-final-focused.stdout:112 and
+07-proposal-vote.stdout:25 have new blank lines at EOF. They are unmodified
+complete cargo stdout; preserving raw evidence takes precedence over
+normalization. No source whitespace issue was reported. The chained
+stat/name-list steps did not run after that failure.
+
+Final scoped whitespace command (exact raw stdout exceptions only):
+$ git diff --cached --check -- . ':!docs/security/evidence/recovery-resume-inventory-20261107/binding-sensitivity-execution/03-focused.stdout' ':!docs/security/evidence/recovery-resume-inventory-20261107/binding-sensitivity-execution/05-final-focused.stdout' ':!docs/security/evidence/recovery-resume-inventory-20261107/binding-sensitivity-execution/07-proposal-vote.stdout'
+The amended embedded CHECKS.txt script is executed using the same Python
+capture command, into 10-final-documentation-check.stdout/.stderr/.exit.
+It reports the original-stdout exception separately; no raw file is edited.
+The first 09 run checked an empty index and tracked documentation; its
+complete output is retained and not presented as a full staged-file check.
+Final staged scope: 41 paths (38 plus final stdout/stderr/exit), and staged
+bytes must equal the current validated files. Final result: exit 0 for the
+scoped whitespace/documentation checks; raw EOF exception remains recorded.
