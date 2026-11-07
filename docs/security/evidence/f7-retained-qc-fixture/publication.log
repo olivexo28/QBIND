@@ -1,0 +1,74 @@
+UTC_START=2026-11-07T07:53:46Z
+CWD=/workspaces/QBIND/olivexo28/QBIND
+COMMAND=bash -c set\ -e\;\ git\ branch\ --show-current\;\ git\ log\ -1\ --format=\"commit=%H%ntree=%T%nparents=%P%n%B\"\;\ git\ ls-remote\ origin\ refs/heads/main\ refs/heads/copilot/investigate-retained-qc-tc-eviction\;\ git\ status\ --porcelain=v1\;\ test\ -z\ \"\$\(git\ status\ --porcelain=v1\)\"\;\ git\ diff\ --name-only\ 01e5731617a1ca2a9894bad4e7c5d54466587c39\ HEAD\;\ git\ worktree\ list\ --porcelain\;\ python\ docs/security/evidence/f7-retained-qc-fixture/scope-check.py 
+REVISION (HEAD, tree, parent):
+076df9e90563a6a817e13464bd3abab1347d9c13
+3c00b7882180294cf012ae8fbb466349246c403e
+01e5731617a1ca2a9894bad4e7c5d54466587c39
+WORKTREE_STATUS:
+SOURCE_DIFF_SHA256:
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  -
+TOOLCHAIN:
+rustc 1.99.1 (58cf8f9c3 2026-10-13)
+binary: rustc
+commit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67
+commit-date: 2026-10-13
+host: x86_64-unknown-linux-gnu
+release: 1.99.1
+LLVM version: 23.1.1
+cargo 1.99.1 (5f94df478 2026-08-27)
+stable-x86_64-unknown-linux-gnu (default)
+RELEVANT_ENVIRONMENT:
+CARGO_HOME=/usr/local/cargo
+HOSTNAME=adc-sandbox
+PATH=/usr/local/rubies/current/bin:/usr/local/cargo/bin:/usr/local/share/rbenv/shims:/usr/local/share/rbenv/bin:/usr/local/python/current/bin:/usr/local/py-utils/bin:/usr/local/jupyter:/usr/local/php/current/bin:/usr/local/sdkman/bin:/usr/local/sdkman/candidates/java/current/bin:/usr/local/sdkman/candidates/gradle/current/bin:/usr/local/sdkman/candidates/maven/current/bin:/usr/local/sdkman/candidates/ant/current/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/share/dotnet:/root/.dotnet/tools:/root/.cache/copilot/pkg/linux-x64/1.0.104-4/ripgrep/bin/linux-x64
+RUSTUP_HOME=/usr/local/rustup
+OUTPUT:
+copilot/investigate-retained-qc-tc-eviction
+commit=076df9e90563a6a817e13464bd3abab1347d9c13
+tree=3c00b7882180294cf012ae8fbb466349246c403e
+parents=01e5731617a1ca2a9894bad4e7c5d54466587c39
+test(node): retain complete lock ancestry in F7 eviction fixture
+
+Reproduce the assertion on verified main and attribute the fixture assumption change to conservative eviction. Preserve selected-proof refusal and recovery; add a missing-lock no-eviction control and retain exact investigation evidence. Production behavior is unchanged; independent review remains pending.
+
+Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
+
+076df9e90563a6a817e13464bd3abab1347d9c13	refs/heads/copilot/investigate-retained-qc-tc-eviction
+01e5731617a1ca2a9894bad4e7c5d54466587c39	refs/heads/main
+crates/qbind-node/src/binary_consensus_loop.rs
+docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+docs/security/evidence/f7-retained-qc-fixture/README.md
+docs/security/evidence/f7-retained-qc-fixture/base-isolated-restored.log
+docs/security/evidence/f7-retained-qc-fixture/base-isolated.log
+docs/security/evidence/f7-retained-qc-fixture/consensus-ancestry-unit-controls.log
+docs/security/evidence/f7-retained-qc-fixture/consensus-regressions.log
+docs/security/evidence/f7-retained-qc-fixture/corrected-c3f.log
+docs/security/evidence/f7-retained-qc-fixture/corrected-focused-restored.log
+docs/security/evidence/f7-retained-qc-fixture/corrected-focused.log
+docs/security/evidence/f7-retained-qc-fixture/corrected-timeout-handlers.log
+docs/security/evidence/f7-retained-qc-fixture/crlf-whitespace-check.log
+docs/security/evidence/f7-retained-qc-fixture/default-whitespace-check.log
+docs/security/evidence/f7-retained-qc-fixture/dependencies.log
+docs/security/evidence/f7-retained-qc-fixture/inventory.log
+docs/security/evidence/f7-retained-qc-fixture/post-eviction-isolated.log
+docs/security/evidence/f7-retained-qc-fixture/pre-eviction-isolated.log
+docs/security/evidence/f7-retained-qc-fixture/run-control.sh
+docs/security/evidence/f7-retained-qc-fixture/scope-check-staged.log
+docs/security/evidence/f7-retained-qc-fixture/scope-check.log
+docs/security/evidence/f7-retained-qc-fixture/scope-check.py
+docs/security/evidence/f7-retained-qc-fixture/staged-raw-whitespace-check.log
+worktree /workspaces/QBIND/olivexo28/QBIND
+HEAD 076df9e90563a6a817e13464bd3abab1347d9c13
+branch refs/heads/copilot/investigate-retained-qc-tc-eviction
+
+PASS: only the focused cfg(test) region changed; source CRLF preserved
+PASS: all 363763 historical plan bytes remain a prefix
+PASS: no other accepted tracked path changed
+SHA256 c14ec2ee813ea4e318659206f96f647199f1794f394cfda1bd42d0db819aa83d crates/qbind-node/src/binary_consensus_loop.rs (1658168 bytes)
+SHA256 9ce8d7cb4adb6bd6e65d1e11932c971d450c902b7fed6e3602c8b081396ed44a docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md (366103 bytes)
+SHA256 70aec07f6e1eb8ea3e98634acefdd92bf9f9ea03929d2821e3cc04c75bb1baaf Cargo.lock (89868 bytes)
+PASS: CRLF-aware source/documentation whitespace check; verbatim logs excluded
+
+EXIT_CODE=0
+UTC_END=2026-11-07T07:53:46Z

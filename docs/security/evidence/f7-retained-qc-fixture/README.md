@@ -191,3 +191,28 @@ and every other previously tracked path are unchanged. Full main has not been
 tested or declared green. Only the new task branch is committed/pushed:
 no PR, merge, main push, force-push, operational keys, live node/network,
 deployment, signing activation or operational activation.
+
+## Publication seal (append-only)
+
+Correction commit: `076df9e90563a6a817e13464bd3abab1347d9c13`.
+Correction tree: `3c00b7882180294cf012ae8fbb466349246c403e`.
+Correction parent: `01e5731617a1ca2a9894bad4e7c5d54466587c39`.
+The correction was committed on the task branch and published with
+`git push -u origin copilot/investigate-retained-qc-tc-eviction` (exit 0).
+`publication.log` independently confirms the direct remote task tip equals
+that commit, direct main remains the expected base, the worktree is clean,
+the comparison worktree has been removed, and the accepted-byte/scope checks
+pass. It lists every changed path at that correction revision.
+
+This trailing seal and `publication.log` are the only additions after that
+tested correction commit. The seal commit is documentation/output-only,
+parented directly by the correction commit; the final response and delivery
+tool output report its resulting hash/tree and direct remote tip. Publication
+uses a normal `git push origin copilot/investigate-retained-qc-tc-eviction`,
+not a force-push. Source SHA-256 remains
+`c14ec2ee813ea4e318659206f96f647199f1794f394cfda1bd42d0db819aa83d`;
+no further test repetition or broader suite is needed for this seal.
+
+**CORRECTION — INDEPENDENT REVIEW PENDING.** Original-run provenance remains
+unknown. A33-F1 / E27 and other unresolved obligations remain **OPEN**;
+activation **DISABLED**, public DevNet **NO-GO**.
