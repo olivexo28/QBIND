@@ -1,0 +1,93 @@
+EMPTY-RESPONSE CONTAINMENT CONTRACT — DOCUMENTATION CHECKS
+No production/test code, tests, build, config, keys, node or network experiment.
+User supplied prior investigation PASS WITH LIMITATIONS is carried within scope.
+Existing proposed acceptance cases remain FUTURE / NOT EXECUTED.
+
+Accepted branch and clean-start verification
+Command:
+  git remote -v
+  git ls-remote origin refs/heads/main refs/heads/investigation/empty-restore-response-20261107
+  git branch --show-current
+  git rev-parse HEAD HEAD^{tree}
+  git show -s --format='%H %T %P %s' HEAD
+  git merge-base --is-ancestor 541d9a6c9a43fe10410260d9c2494a5fc4416c7a HEAD
+  git status --porcelain=v1 -uall
+  git diff --cached --stat
+  git diff --stat
+Result (all commands successful):
+  origin fetch/push: https://github.com/olivexo28/QBIND
+  refs/heads/main: 541d9a6c9a43fe10410260d9c2494a5fc4416c7a
+  refs/heads/investigation/empty-restore-response-20261107: fb29cef67ba4d7c918f4299a9b60de79cd6f41ef
+  current branch: investigation/empty-restore-response-20261107
+  HEAD: fb29cef67ba4d7c918f4299a9b60de79cd6f41ef
+  HEAD tree: 480add6d29d7b538834f499136838ba07c5f9909
+  HEAD parent: 541d9a6c9a43fe10410260d9c2494a5fc4416c7a
+  frozen main is ancestor: exit 0
+  worktree and staging clean; no reset/rebase/force/clean/discard.
+
+Historical accepted bytes and producing-revision manifest
+Command:
+  python3 - <<'PY'
+  # Read each path with git show <accepted-commit>:<path>, hash the returned
+  # bytes with hashlib.sha256, and verify every line of that commit's prior
+  # SHA256SUMS against blobs from the same commit.
+  PY
+Result at accepted commit fb29cef67ba4d7c918f4299a9b60de79cd6f41ef (exit 0):
+  2c49e394c7bbd235dbcf9fda3e36e6bd0d7a5f2041f32fdabcc7b959988edd05  docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+  2d5f2bbbbfde48758afb6bb4bcb049142655388400ee271bd74ebd75d1f980ec  docs/security/evidence/empty-restore-response/CHANGED_PATHS.txt
+  34a57fe8aecce451f9d4e72fdd823dcddcdd130ee62369f8b9d351a43b489258  docs/security/evidence/empty-restore-response/README.md
+  f2cb27267f33a5378a8957038bfe01d24be1298b774be3013ea581e337f44e4a  docs/security/evidence/empty-restore-response/SHA256SUMS
+  aec28823bb8d4f279c8ca1825f05bbe24237b75b8b2dce74791fc21daefe2595  docs/security/evidence/empty-restore-response/documentation-checks.log
+The above identities were independently recomputed from `git show <accepted-commit>:<path>` and all matched. The prior `SHA256SUMS` was read from its producing commit fb29cef67ba4d7c918f4299a9b60de79cd6f41ef; all 4 entries were recomputed from blobs at that same revision and matched. Prior accepted README, prior changed-path list, prior manifest and prior diagnostics are not modified by this addendum. Earlier plan bytes remain the exact prefix before this new plan section; the prior plan blob's producing-revision hash is preserved above.
+Additional command:
+  python3 - <<'PY'
+  # Compare git show <accepted-commit>:<plan> as a byte prefix of the current
+  # plan; verify prior manifest entries at the producing revision; check all
+  # current documentation files for UTF-8, LF, final newline and whitespace.
+  PY
+Result (exit 0):
+  PASS: prior plan is unchanged byte-for-byte prefix (374717 bytes)
+  PASS: all 4 prior manifest entries verify at producing revision fb29cef67ba4d7c918f4299a9b60de79cd6f41ef
+  PASS: all current documentation files are UTF-8, LF, final-newline, no trailing whitespace
+
+Pinned source/link and candidate scope validation
+Command:
+  python3 - <<'PY'  # inline validator; see command output below
+  # Resolve all 16 Markdown source links against git show at frozen commit.
+  # Check every referenced line interval exists, changed-path allowlist,
+  # UTF-8/LF/EOF/trailing-whitespace, historical accepted file hashes and
+  # all four prior manifest entries at the accepted producing revision.
+  PY
+Result: exit 0.
+  PASS: 16 pinned source URLs resolve at frozen commit and ranges are valid
+  PASS: changed-path allowlist, UTF-8/LF/EOF/trailing-whitespace checks
+  PASS historical SHA256 2c49e394c7bbd235dbcf9fda3e36e6bd0d7a5f2041f32fdabcc7b959988edd05 docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+  PASS historical SHA256 2d5f2bbbbfde48758afb6bb4bcb049142655388400ee271bd74ebd75d1f980ec docs/security/evidence/empty-restore-response/CHANGED_PATHS.txt
+  PASS historical SHA256 34a57fe8aecce451f9d4e72fdd823dcddcdd130ee62369f8b9d351a43b489258 docs/security/evidence/empty-restore-response/README.md
+  PASS historical SHA256 f2cb27267f33a5378a8957038bfe01d24be1298b774be3013ea581e337f44e4a docs/security/evidence/empty-restore-response/SHA256SUMS
+  PASS historical SHA256 aec28823bb8d4f279c8ca1825f05bbe24237b75b8b2dce74791fc21daefe2595 docs/security/evidence/empty-restore-response/documentation-checks.log
+  PASS prior accepted manifest: 4 entries verified against fb29cef67ba4d7c918f4299a9b60de79cd6f41ef
+
+Whitespace and scope
+Command:
+  git diff --check
+  git -c core.whitespace=cr-at-eol diff --check
+Result: both exit 0. No Rust tests were run; current contract acceptance matrix remains FUTURE / NOT EXECUTED.
+
+Integrity layout
+`CHANGED_PATHS.txt` is the five-path allowlist (plan plus four new package files). `SHA256SUMS` covers the four changed files other than itself and the four unchanged accepted investigation artifacts (prior changed-path file, prior README, prior checksum manifest, prior diagnostics log). The original accepted manifest is preserved and was verified at its producing commit. This new manifest is separate and does not rewrite, replace, or retroactively alter historical evidence.
+
+Final pre-publication integrity and remote-state check
+Command:
+  sha256sum -c docs/security/evidence/empty-restore-response/containment-contract-20261107/SHA256SUMS
+Result: exit 0; all 8 listed changed/preserved paths reported `OK`.
+Command:
+  git diff --check
+  git -c core.whitespace=cr-at-eol diff --check
+Result: both exit 0; no output.
+Command:
+  git ls-remote origin refs/heads/main refs/heads/investigation/empty-restore-response-20261107
+Result: exit 0:
+  fb29cef67ba4d7c918f4299a9b60de79cd6f41ef refs/heads/investigation/empty-restore-response-20261107
+  541d9a6c9a43fe10410260d9c2494a5fc4416c7a refs/heads/main
+The contract matrix remains FUTURE / NOT EXECUTED. These checks do not constitute independent review, runtime, network, or exploit evidence.

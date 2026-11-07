@@ -4743,3 +4743,44 @@ the initial diagnostics hash were verified against the stopped-task report
 before continuation edits; subsequent log entries preserve earlier bytes and
 record unsuccessful attempts accurately. Final hashes, manifest and checks
 are in the investigation package.
+
+## 30. Empty RestoreCatchupResponse containment contract
+
+**EMPTY-RESPONSE CONTAINMENT CONTRACT — INDEPENDENT REVIEW PENDING.**
+A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain **OPEN**.
+Activation remains **DISABLED**; public DevNet remains **NO-GO**.
+
+The accepted empty-response investigation remains unchanged. This
+documentation-only addendum carries forward its user-supplied PASS WITH
+LIMITATIONS within the reviewed source-analysis/publication/integrity
+scope; it does not invent a reviewer identity or raw review artifact.
+Existing proposed tests remain FUTURE / NOT EXECUTED.
+
+The [pinned candidate contract](evidence/empty-restore-response/containment-contract-20261107/README.md)
+recommends reviewing a refusal immediately after successful sender binding,
+response receipt accounting and the existing non-empty-response guard, but
+before the empty helper. Its proposed bounded
+`restore_catchup_empty_responses_ignored_total` counts only successfully
+bound empty responses once; binding failures remain binding-only, and the
+accepted non-empty guard is preserved. The candidate leaves peer maximum
+and mode unchanged, does not rearm or grant clear/resume authority, and
+causes no handler-originated action.
+
+The tradeoff is explicit: mode may remain active indefinitely, preserving
+request attempts, selected proposal deferral and local-timeout suppression.
+This is not complete engine/signer quarantine; leader-local engine mutation
+and eligible inbound Timeout/NewView paths remain separate. Pinned source
+shows the honest request handler sends no response when export is empty;
+external behavior is unverified. Request matching or identity binding alone
+would not authenticate reported height or grant recovery authority.
+
+The addendum provides future actual-handler, counter, height/state, anchor,
+old-behavior sensitivity, non-empty-guard and downstream request/proposal/
+timeout acceptance controls. A single-validator local-progress fixture is
+kept separate from an admissible bound non-self responder fixture. Positive
+recovery/currentness, signer exclusivity, durable quarantine and
+clear/resume are separate obligations. No code/tests, operational keys,
+configuration, node, network experiment, activation, PR or merge is changed
+or authorized. New changed paths, documentation checks and historical
+artifact hashes are isolated in the addendum's own append-only integrity
+package; all accepted investigation and audit-register bytes remain intact.
