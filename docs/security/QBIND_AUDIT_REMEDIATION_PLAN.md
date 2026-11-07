@@ -4829,3 +4829,32 @@ authentication, authenticated recovery or safe participation. Positive
 recovery/currentness, signer exclusivity, durable quarantine and separately
 authorized clear/resume remain distinct, open obligations. No operational
 keys, live network, node activation, PR, merge or main push is authorized.
+
+## 33. Recovery/resume inventory delivery and integrity
+
+The section 32 inventory link now resolves to the append-only, source-backed
+delivery at `evidence/recovery-resume-inventory-20261107/README.md`. The
+inventory is pinned to protected main
+`9bf0eb43e4e3c601d02d3886d220b0abeb3a103e` /
+`56509b20084ee1cbe2c42fda9d73d87e4c82c33f`. It is a proposed design for
+independent review only: no wire format, recovery gate, procedure, or
+clear/resume authority is implemented. A17-F1 / RS1-F7, RS1 and A33-F1 / E27
+remain **OPEN**; activation remains **DISABLED** and public DevNet remains
+**NO-GO**.
+
+The inventory distinguishes authenticated transport identity from validator
+endorsements, local integrity from rollback-resistant currentness, recovered
+data from participation authority, and local ownership from external signer
+fencing. Its acceptance matrix is **FUTURE / NOT EXECUTED**, except that it
+attributes the prior 44 selected tests and compilation checks to their exact
+historical implementation-task source manifest; those are not reruns, deployed
+recovery, or release-binary acceptance. Historical A33-F1 / E27 work is cited
+at its own producer revision, without elevating its test models to production
+evidence or repeating its accepted review.
+
+`evidence/recovery-resume-inventory-20261107/commands.txt` records the
+documentation-only identity, prefix, byte-integrity, path, and whitespace
+checks. `SHA256SUMS` covers the new inventory files and the appended plan;
+the audit register and all earlier evidence remain byte-identical. No code,
+test, build, network, operational signing, activation, merge, or PR action is
+part of this delivery.

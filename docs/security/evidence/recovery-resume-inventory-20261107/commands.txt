@@ -1,0 +1,74 @@
+Documentation-only validation record
+====================================
+
+Source identity pinned for this task:
+  commit 9bf0eb43e4e3c601d02d3886d220b0abeb3a103e
+  tree   56509b20084ee1cbe2c42fda9d73d87e4c82c33f
+  branch docs/authenticated-recovery-resume-inventory
+
+No unchanged Rust tests, cargo check/build, release build, network operation,
+node startup, signer operation, or activation was run for this documentation
+task. The 44 selected tests and compilation checks referenced in README.md
+are retained author executions from the prior implementation evidence package,
+not new executions here.
+
+Documentation-only commands and results
+========================================
+
+The task branch was created at the exact protected-main commit; this final
+identity check re-confirmed local source and the direct remote main ref before
+publication. The baseline commit object records parent
+30a79a21996c11f97f1c496082551dba4cbd3a45 (the working clone does not have the
+parent object available through `HEAD^`).
+
+  git cat-file -p HEAD | sed -n '1,12p'
+    PASS: tree 56509b20084ee1cbe2c42fda9d73d87e4c82c33f;
+    parent 30a79a21996c11f97f1c496082551dba4cbd3a45.
+
+  git branch --show-current
+    PASS: docs/authenticated-recovery-resume-inventory
+
+  git rev-parse HEAD HEAD^{tree}
+    PASS: 9bf0eb43e4e3c601d02d3886d220b0abeb3a103e;
+    56509b20084ee1cbe2c42fda9d73d87e4c82c33f.
+
+  git ls-remote origin refs/heads/main
+    PASS: 9bf0eb43e4e3c601d02d3886d220b0abeb3a103e refs/heads/main.
+
+  git ls-remote origin refs/heads/main \
+    refs/heads/docs/authenticated-recovery-resume-inventory
+    PASS before publication: direct main was
+    9bf0eb43e4e3c601d02d3886d220b0abeb3a103e; no remote task ref existed.
+
+  git diff --check
+    PASS, exit 0; no whitespace errors in tracked changes.
+
+  git show HEAD:docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md |
+    cmp - <(head -c "$(git cat-file -s HEAD:docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md)" \
+      docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md)
+    PASS, exit 0; the entire protected plan is an exact byte prefix of the
+    appended plan. An earlier check caught an appendix placed mid-file; it
+    was moved to EOF and this final prefix check passed.
+
+  cmp <(git show HEAD:Audit/QBIND_SECURITY_FINDINGS_REGISTER.md) \
+    Audit/QBIND_SECURITY_FINDINGS_REGISTER.md
+    PASS, exit 0; audit-register bytes are unchanged.
+
+  sha256sum -c docs/security/evidence/recovery-resume-inventory-20261107/SHA256SUMS
+    PASS; all listed inventory, plan and preserved-evidence hashes match.
+
+  git diff --quiet HEAD -- docs/security/evidence/empty-restore-response \
+    docs/security/evidence/voting_ancestry
+    PASS, exit 0; prior evidence packages remain unchanged.
+
+  python3 -c 'import pathlib,re; p=pathlib.Path("docs/security/evidence/recovery-resume-inventory-20261107/README.md"); links=re.findall(r"(?<!!)\[[^]]+\]\(([^)]+)\)",p.read_text()); assert all((p.parent/x.split("#",1)[0]).exists() for x in links if not x.startswith(("https://","http://","#","mailto:"))); files=[p,p.parent/"commands.txt",p.parent/"CHANGED_PATHS.txt"]; assert all(not line.endswith((" ","\t")) for f in files for line in f.read_text().splitlines())'
+    PASS; all relative inventory links resolve and newly written inventory
+    text files contain no trailing whitespace.
+
+  python3 -c 'import pathlib,re; s=pathlib.Path("docs/security/evidence/recovery-resume-inventory-20261107/README.md").read_text(); refs=re.findall(r"https://github\.com/olivexo28/QBIND/blob/([0-9a-f]{40})/",s); assert refs and set(refs)=={"9bf0eb43e4e3c601d02d3886d220b0abeb3a103e"}'
+    PASS; 31 production source links are pinned to protected main.
+
+No Rust tests, compilation, release build, live node/network operation,
+operational signing, or activation were run for this documentation-only task.
+The historical 44 selected tests and compilation checks remain prior author
+executions, not new runs.
