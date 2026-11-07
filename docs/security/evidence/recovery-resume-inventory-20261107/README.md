@@ -670,3 +670,21 @@ controls remain FUTURE / NOT EXECUTED.
 
 A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
 Activation DISABLED; public DevNet NO-GO.
+
+## 29. Application-frame checked endpoint correction
+
+The [narrow decoder correction](application-frame-checked-endpoint/README.md)
+records the checked payload-end calculation in the real
+`qbind-node::p2p_tcp::decode_frame` path, focused debug/release controls, and
+the precise limits of the result. It does not change nested decoding budgets,
+the separate raw `TransportFrame::decode` helper, catch-up refusal/ignore
+behavior, or any recovery, fencing, or resume authority. The earlier ingress
+inventory README is inspected/preserved unchanged; the actual earlier
+documentation diff remains ten paths. See the linked command and integrity
+records for exact executions, attempted checks, and hashes.
+
+**APPLICATION-FRAME CHECKED ENDPOINT — INDEPENDENT REVIEW PENDING.**
+The separate raw transport helper, nested decoding/resource limits,
+production currentness, durable application, fencing, and resume remain
+unresolved. A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
+Activation DISABLED; public DevNet NO-GO.

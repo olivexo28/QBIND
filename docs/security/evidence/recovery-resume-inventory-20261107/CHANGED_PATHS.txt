@@ -318,3 +318,19 @@ docs/security/evidence/recovery-resume-inventory-20261107/catch-up-ingress-resou
 docs/security/evidence/recovery-resume-inventory-20261107/catch-up-ingress-resource-boundary/CLARIFICATION_INTEGRITY.txt
 docs/security/evidence/recovery-resume-inventory-20261107/catch-up-ingress-resource-boundary/CLARIFICATION_SHA256SUMS
 No production/test code changed; prior raw evidence and audit register preserved.
+
+Application-frame checked endpoint correction (existing production decoder,
+focused unit controls, and append-only documentation/evidence):
+crates/qbind-node/src/p2p_tcp.rs
+docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+docs/security/evidence/recovery-resume-inventory-20261107/README.md
+docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/commands.txt
+docs/security/evidence/recovery-resume-inventory-20261107/application-frame-checked-endpoint/README.md
+docs/security/evidence/recovery-resume-inventory-20261107/application-frame-checked-endpoint/COMMANDS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/application-frame-checked-endpoint/CHECKS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/application-frame-checked-endpoint/SHA256SUMS
+Earlier catch-up-ingress-resource-boundary/README.md:
+inspected/preserved unchanged in this correction. The actual ingress
+investigation's earlier diff remains ten paths; inspection here is not a
+change to that historical path count.

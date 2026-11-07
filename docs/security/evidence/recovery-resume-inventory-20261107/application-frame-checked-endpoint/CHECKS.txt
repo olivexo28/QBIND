@@ -1,0 +1,61 @@
+# Application-frame checked endpoint — scope and integrity checks
+
+- `rustfmt --check --edition 2021 crates/qbind-node/src/p2p_tcp.rs`:
+  PASS, exit 0.
+- `cargo fmt --all -- --check`: NOT PASS, exit 1. Workspace formatting
+  reported unrelated differences, first at
+  `crates/qbind-consensus/src/basic_hotstuff_engine.rs:685`. The changed
+  Rust file passes the targeted rustfmt check above; unrelated formatting
+  was not modified.
+- `git diff --check`: PASS, exit 0.
+- Append-only prefixes of the delivery README, changed-path log, command log,
+  and remediation plan compared byte-for-byte with the starting commit:
+  PASS, exit 0. Exact command:
+
+  ```sh
+  python3 - <<'PY'
+  from pathlib import Path
+  import subprocess
+  for path in [
+      'docs/security/evidence/recovery-resume-inventory-20261107/README.md',
+      'docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt',
+      'docs/security/evidence/recovery-resume-inventory-20261107/commands.txt',
+      'docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md',
+  ]:
+      prior = subprocess.run(
+          ['git', 'show', f'HEAD:{path}'], check=True, stdout=subprocess.PIPE
+      ).stdout
+      current = Path(path).read_bytes()
+      assert current.startswith(prior), path
+      print(f'PASS append-only prefix: {path} ({len(prior)} bytes)')
+  PY
+  ```
+
+  Output:
+  `PASS append-only prefix: docs/security/evidence/recovery-resume-inventory-20261107/README.md (48122 bytes)`
+  `PASS append-only prefix: docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt (20674 bytes)`
+  `PASS append-only prefix: docs/security/evidence/recovery-resume-inventory-20261107/commands.txt (42601 bytes)`
+  `PASS append-only prefix: docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md (409189 bytes)`.
+- Earlier `catch-up-ingress-resource-boundary/README.md` hash at the starting
+  commit and in the final tree: identical; inspected/preserved unchanged.
+  The earlier source investigation's actual changed-path count remains ten.
+- All tracked files under the prior catch-up ingress evidence directory and
+  all prior raw outputs remain unchanged. The audit register
+  `Audit/QBIND_SECURITY_FINDINGS_REGISTER.md` remains byte-identical.
+- `rustup target list --installed`: only `x86_64-unknown-linux-gnu`;
+  production 32-bit decoder execution NOT RUN. The helper-level
+  `usize::MAX` test is not a simulated production decoder run.
+- Scope: only `crates/qbind-node/src/p2p_tcp.rs` and append-only
+  documentation/evidence changed. No test behavior for catch-up refusal or
+  empty-response ignore was edited.
+
+Command `git diff --quiet HEAD -- Audit/QBIND_SECURITY_FINDINGS_REGISTER.md
+docs/security/evidence/recovery-resume-inventory-20261107/catch-up-ingress-resource-boundary`
+exited 0 and printed `PASS prior evidence directory and audit register
+unchanged`. The audit register's baseline/current SHA-256 was
+`6e68d3d05964f9a6dc0384ffda2bb53d81d7da97ffb786ce84f4bd5a4360c0d9`.
+The earlier ingress README's baseline/current SHA-256 was
+`f92521c24ffd02225abb98a96458ecd94d0b3819044fd6d85a17e0668df759d3`.
+The source and documentation SHA-256 digests are recorded in `SHA256SUMS`;
+`sha256sum -c docs/security/evidence/recovery-resume-inventory-20261107/application-frame-checked-endpoint/SHA256SUMS`
+passed (all eight listed files reported `OK`, exit 0).

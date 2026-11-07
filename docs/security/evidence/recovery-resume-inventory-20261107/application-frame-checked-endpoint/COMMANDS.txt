@@ -1,0 +1,65 @@
+# Application-frame checked endpoint — execution record
+
+Repository: `olivexo28/QBIND`
+Task branch: `docs/authenticated-recovery-resume-inventory`
+Starting commit/tree/parent:
+`97c8b4d3b7e8f72f86544fe544a0b8b871c6ee63` /
+`02944b19faadbefa5951e1316c6808243f123db0` /
+`2cafa1b21365e99d95aa0c759dd2dd90fa1e43af`
+
+Toolchain observed:
+`rustc 1.99.1 (58cf8f9c3 2026-10-13)`,
+host `x86_64-unknown-linux-gnu`; `rustup target list --installed`
+reported only `x86_64-unknown-linux-gnu`. No 32-bit target or runner was
+available. Production decoder execution on 32-bit: NOT RUN.
+
+## Commands and outcomes
+
+- `cargo test -p qbind-node --lib decode_frame_tests` — initial attempt
+  failed (exit 101) because `zstd-sys` bindgen could not find `libclang.so`.
+  The missing native build dependency was installed in the environment;
+  `apt-get update -qq` warned that `dl.google.com` was unreachable, while
+  continuing with available package indexes. The subsequent package
+  installation succeeded.
+- `cargo test -p qbind-node --lib --release decode_frame_tests` — initial
+  attempt also failed (exit 101) for the same missing `libclang.so` build
+  dependency; the retry below passed after the environment dependency was
+  installed.
+- `apt-get update -qq && apt-get install -y -qq libclang-18-dev` — exit 0.
+  Update warned that `dl.google.com` could not be resolved; package
+  installation completed using available package indexes.
+- `cargo test -p qbind-node --lib decode_frame_tests` — PASS, exit 0:
+  `running 5 tests`; `5 passed; 0 failed; 0 ignored; 2246 filtered out`.
+- `cargo test -p qbind-node --lib --release decode_frame_tests` — PASS,
+  exit 0: `running 5 tests`; `5 passed; 0 failed; 0 ignored; 2247 filtered out`.
+- `cargo test -p qbind-node --lib p2p_tcp::` — PASS, exit 0:
+  `running 39 tests`; `39 passed; 0 failed; 0 ignored; 2212 filtered out`.
+- `rustfmt --check --edition 2021 crates/qbind-node/src/p2p_tcp.rs` —
+  PASS, exit 0.
+- `cargo fmt --all -- --check` — NOT PASS, exit 1 due to pre-existing
+  formatting differences across unrelated workspace files (first reported
+  `crates/qbind-consensus/src/basic_hotstuff_engine.rs`). The changed Rust
+  file was separately checked with the passing direct `rustfmt` command.
+- `git diff --check` — PASS; exact final result recorded in `CHECKS.txt`.
+
+The five focused tests discovered and executed in both profiles were:
+`checked_frame_payload_endpoint_rejects_usize_overflow`,
+`decode_frame_preserves_discriminator_and_trailing_frame_behavior`,
+`decode_frame_rejects_maximum_declared_length_without_panicking`,
+`decode_frame_rejects_short_header_and_truncated_payload`, and
+`decode_frame_round_trips_representative_messages`.
+Both focused runs reported all five test names above and ended with
+`test result: ok. 5 passed; 0 failed; 0 ignored`, with their respective
+filtered counts recorded above. The direct P2P regression reported
+`test result: ok. 39 passed; 0 failed; 0 ignored; 2212 filtered out`.
+
+The debug test output included pre-existing warnings (37 from
+`qbind-consensus` and 5 from `qbind-node`); no warning was introduced by
+these tests. Test names and exact exit summaries are retained above; no
+unrelated Rust tests or builds were run. Check hashes, audit-register byte
+preservation, documentation-prefix checks, and final revision integrity are
+recorded in `CHECKS.txt` and `SHA256SUMS`.
+
+No node, network, operational signing, catch-up application, decoder
+threshold, raw transport-helper correction, or recovery/resume behavior was
+run or authorized.

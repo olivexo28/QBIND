@@ -803,3 +803,14 @@ append-only preservation, formatting, and digest checks. The original
 source/hash/preservation check remains historical author evidence, not a
 re-run independent source audit. The original “seven ingress source paths”
 note is superseded: the checker enumerates nine inspected source paths.
+
+Application-frame checked endpoint correction: see
+`application-frame-checked-endpoint/COMMANDS.txt` for exact toolchain,
+debug/release focused test commands and results, directly affected P2P
+regressions, formatting and preservation checks, unsuccessful attempts, and
+integrity hashes. The earlier ingress
+`catch-up-ingress-resource-boundary/README.md` was inspected and preserved
+unchanged; its actual prior diff remains ten paths. No 32-bit target is
+installed, so production decoder execution on 32-bit was NOT RUN. The
+`usize::MAX` endpoint check is a helper-level arithmetic control on the
+available x86_64 target, not 32-bit execution.

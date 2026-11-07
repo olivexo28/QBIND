@@ -5305,3 +5305,30 @@ remain FUTURE / NOT EXECUTED.
 
 A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
 Activation DISABLED; public DevNet NO-GO.
+
+## 57. Application-frame checked endpoint correction
+
+The [narrow application decoder correction](evidence/recovery-resume-inventory-20261107/application-frame-checked-endpoint/README.md)
+replaces the unchecked `5 + len` use in
+`crates/qbind-node/src/p2p_tcp.rs::decode_frame` with a checked payload-end
+calculation before the truncation comparison and slice. Overflow and
+truncation return the existing `P2pTransportError::Encoding` category.
+Focused real-decoder controls cover short headers, truncated data, a tiny
+frame declaring `u32::MAX`, representative message variants, discriminator
+mismatch, ignored trailing frame bytes, and the checked helper's `usize`
+overflow boundary. The last is a helper-level arithmetic control on the
+available x86_64 host, not execution of the production decoder on 32-bit.
+
+The separate raw `qbind-net::transport::TransportFrame::decode` endpoint
+remains unchecked and out of scope. No nested bincode/count budget,
+pre-ingress or aggregate memory bound, recovery authority, application
+procedure, signer fencing, or resume permission is established. Existing
+catch-up non-empty refusal and empty-response ignore behavior is unchanged.
+The earlier ingress README was inspected/preserved unchanged; its actual
+earlier documentation diff remains ten paths. Exact commands, toolchain,
+results, unsuccessful attempts and hashes are in the linked evidence.
+
+**APPLICATION-FRAME CHECKED ENDPOINT — INDEPENDENT REVIEW PENDING.**
+The raw helper and all broader recovery/resume prerequisites remain
+unresolved. A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
+Activation DISABLED; public DevNet NO-GO.

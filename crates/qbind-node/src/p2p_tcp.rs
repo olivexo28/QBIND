@@ -185,12 +185,13 @@ fn decode_frame(frame: &[u8]) -> Result<P2pMessage, P2pTransportError> {
 
     let discriminator = frame[0];
     let len = u32::from_be_bytes([frame[1], frame[2], frame[3], frame[4]]) as usize;
+    let payload_end = checked_frame_payload_end(len)?;
 
-    if frame.len() < 5 + len {
+    if frame.len() < payload_end {
         return Err(P2pTransportError::Encoding("frame truncated".to_string()));
     }
 
-    let payload = &frame[5..5 + len];
+    let payload = &frame[5..payload_end];
     let msg: P2pMessage =
         bincode::deserialize(payload).map_err(|e| P2pTransportError::Encoding(e.to_string()))?;
 
@@ -203,6 +204,12 @@ fn decode_frame(frame: &[u8]) -> Result<P2pMessage, P2pTransportError> {
             "discriminator mismatch".to_string(),
         )),
     }
+}
+
+fn checked_frame_payload_end(payload_len: usize) -> Result<usize, P2pTransportError> {
+    5usize
+        .checked_add(payload_len)
+        .ok_or_else(|| P2pTransportError::Encoding("frame payload length overflow".to_string()))
 }
 
 // ============================================================================
@@ -3014,6 +3021,101 @@ impl P2pService for TcpKemTlsP2pService {
 
     fn connected_peers(&self) -> Vec<NodeId> {
         self.peers.read().active.keys().copied().collect()
+    }
+}
+
+#[cfg(test)]
+mod decode_frame_tests {
+    use super::*;
+    use crate::p2p::{ConsensusNetMsg, ControlMsg, DagNetMsg};
+
+    fn messages() -> [P2pMessage; 3] {
+        [
+            P2pMessage::Consensus(ConsensusNetMsg::Vote(vec![1, 2, 3])),
+            P2pMessage::Dag(DagNetMsg::Batch {
+                data: vec![4, 5, 6],
+            }),
+            P2pMessage::Control(ControlMsg::Heartbeat {
+                view: 7,
+                timestamp_ms: 11,
+            }),
+        ]
+    }
+
+    #[test]
+    fn decode_frame_rejects_short_header_and_truncated_payload() {
+        assert!(matches!(
+            decode_frame(&[DISCRIMINATOR_CONTROL, 0, 0, 0]),
+            Err(P2pTransportError::Encoding(message)) if message == "frame too short"
+        ));
+
+        assert!(matches!(
+            decode_frame(&[DISCRIMINATOR_CONTROL, 0, 0, 0, 2, 0]),
+            Err(P2pTransportError::Encoding(message)) if message == "frame truncated"
+        ));
+    }
+
+    #[test]
+    fn decode_frame_rejects_maximum_declared_length_without_panicking() {
+        let frame = [DISCRIMINATOR_CONTROL, 0xff, 0xff, 0xff, 0xff];
+        assert!(matches!(
+            decode_frame(&frame),
+            Err(P2pTransportError::Encoding(message)) if message == "frame truncated"
+        ));
+    }
+
+    #[test]
+    fn decode_frame_round_trips_representative_messages() {
+        for message in messages() {
+            let frame = encode_frame(&message).expect("encode representative message");
+            let decoded = decode_frame(&frame).expect("decode representative message");
+            match (message, decoded) {
+                (
+                    P2pMessage::Consensus(ConsensusNetMsg::Vote(expected)),
+                    P2pMessage::Consensus(ConsensusNetMsg::Vote(actual)),
+                ) => assert_eq!(actual, expected),
+                (
+                    P2pMessage::Dag(DagNetMsg::Batch { data: expected }),
+                    P2pMessage::Dag(DagNetMsg::Batch { data: actual }),
+                ) => assert_eq!(actual, expected),
+                (
+                    P2pMessage::Control(ControlMsg::Heartbeat {
+                        view: expected_view,
+                        timestamp_ms: expected_timestamp,
+                    }),
+                    P2pMessage::Control(ControlMsg::Heartbeat {
+                        view: actual_view,
+                        timestamp_ms: actual_timestamp,
+                    }),
+                ) => {
+                    assert_eq!(actual_view, expected_view);
+                    assert_eq!(actual_timestamp, expected_timestamp);
+                }
+                _ => panic!("decoded representative message changed variant"),
+            }
+        }
+    }
+
+    #[test]
+    fn decode_frame_preserves_discriminator_and_trailing_frame_behavior() {
+        let mut frame = encode_frame(&messages()[2]).expect("encode heartbeat");
+        frame[0] = DISCRIMINATOR_DAG;
+        assert!(matches!(
+            decode_frame(&frame),
+            Err(P2pTransportError::Encoding(message)) if message == "discriminator mismatch"
+        ));
+
+        let mut frame = encode_frame(&messages()[2]).expect("encode heartbeat");
+        frame.extend_from_slice(&[0xaa, 0xbb]);
+        assert!(matches!(decode_frame(&frame), Ok(P2pMessage::Control(_))));
+    }
+
+    #[test]
+    fn checked_frame_payload_endpoint_rejects_usize_overflow() {
+        assert!(matches!(
+            checked_frame_payload_end(usize::MAX),
+            Err(P2pTransportError::Encoding(message)) if message == "frame payload length overflow"
+        ));
     }
 }
 
