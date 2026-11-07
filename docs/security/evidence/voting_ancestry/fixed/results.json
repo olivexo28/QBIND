@@ -1,0 +1,73 @@
+{
+  "producer": "e57a337fd5afc5f1bd2f49ea43a50c0a866c86aa",
+  "binary": "/workspaces/QBIND/olivexo28/QBIND/target/debug/deps/a33_f1_voting_ancestry_tests-7fc5a16951aaca9c",
+  "binary_sha256": "803b1066321a99c551b382d25670e27d192cfd49b80c4619487730fecdc88de1",
+  "outer_timeout_seconds": 3,
+  "cases": [
+    {
+      "argv": [
+        "/workspaces/QBIND/olivexo28/QBIND/target/debug/deps/a33_f1_voting_ancestry_tests-7fc5a16951aaca9c",
+        "--exact",
+        "state_self_cycle_outside_candidate",
+        "--nocapture"
+      ],
+      "case": "state_self_cycle_outside_candidate",
+      "observation": "RETURNED",
+      "elapsed_seconds": 0.002,
+      "returncode": 0,
+      "child_reaped": true
+    },
+    {
+      "argv": [
+        "/workspaces/QBIND/olivexo28/QBIND/target/debug/deps/a33_f1_voting_ancestry_tests-7fc5a16951aaca9c",
+        "--exact",
+        "state_multi_cycle_outside_candidate",
+        "--nocapture"
+      ],
+      "case": "state_multi_cycle_outside_candidate",
+      "observation": "RETURNED",
+      "elapsed_seconds": 0.002,
+      "returncode": 0,
+      "child_reaped": true
+    },
+    {
+      "argv": [
+        "/workspaces/QBIND/olivexo28/QBIND/target/debug/deps/a33_f1_voting_ancestry_tests-7fc5a16951aaca9c",
+        "--exact",
+        "proposal_self_cycle_outside_candidate",
+        "--nocapture"
+      ],
+      "case": "proposal_self_cycle_outside_candidate",
+      "observation": "RETURNED",
+      "elapsed_seconds": 0.002,
+      "returncode": 0,
+      "child_reaped": true
+    },
+    {
+      "argv": [
+        "/workspaces/QBIND/olivexo28/QBIND/target/debug/deps/a33_f1_voting_ancestry_tests-7fc5a16951aaca9c",
+        "--exact",
+        "proposal_multi_cycle_outside_candidate",
+        "--nocapture"
+      ],
+      "case": "proposal_multi_cycle_outside_candidate",
+      "observation": "RETURNED",
+      "elapsed_seconds": 0.002,
+      "returncode": 0,
+      "child_reaped": true
+    },
+    {
+      "argv": [
+        "/workspaces/QBIND/olivexo28/QBIND/target/debug/deps/a33_f1_voting_ancestry_tests-7fc5a16951aaca9c",
+        "--exact",
+        "verified_refusal_retains_exact_evidence_and_earlier_effects",
+        "--nocapture"
+      ],
+      "case": "verified_refusal_retains_exact_evidence_and_earlier_effects",
+      "observation": "RETURNED",
+      "elapsed_seconds": 0.073,
+      "returncode": 0,
+      "child_reaped": true
+    }
+  ]
+}

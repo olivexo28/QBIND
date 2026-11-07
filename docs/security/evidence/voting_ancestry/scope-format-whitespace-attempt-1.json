@@ -1,0 +1,12 @@
+{
+  "argv": [
+    "python",
+    "docs/security/evidence/voting_ancestry/check_scope.py"
+  ],
+  "head": "e57a337fd5afc5f1bd2f49ea43a50c0a866c86aa",
+  "tree": "09a196c6b85a396c4d8d6b762ed0cbb5a38dad89",
+  "status": " M docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md\n?? docs/security/evidence/voting_ancestry/README.md\n?? docs/security/evidence/voting_ancestry/check_scope.py\n?? docs/security/evidence/voting_ancestry/consensus-regressions.json\n?? docs/security/evidence/voting_ancestry/consensus-regressions.log\n?? docs/security/evidence/voting_ancestry/dependency-install.json\n?? docs/security/evidence/voting_ancestry/dependency-install.log\n?? docs/security/evidence/voting_ancestry/fixed-cycles.json\n?? docs/security/evidence/voting_ancestry/fixed-cycles.log\n?? docs/security/evidence/voting_ancestry/fixed/\n?? docs/security/evidence/voting_ancestry/focused-tests.json\n?? docs/security/evidence/voting_ancestry/focused-tests.log\n?? docs/security/evidence/voting_ancestry/production-compile-attempt-1.json\n?? docs/security/evidence/voting_ancestry/production-compile-attempt-1.log\n?? docs/security/evidence/voting_ancestry/production-compile-attempt-2.log\n",
+  "start_utc": "2026-11-07T07:06:21.046593+00:00",
+  "end_utc": "2026-11-07T07:06:42.194391+00:00",
+  "exit_code": 0
+}

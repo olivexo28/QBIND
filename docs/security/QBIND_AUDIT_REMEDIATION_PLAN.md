@@ -4526,3 +4526,40 @@ unresolved obligations remain **OPEN**. No authentication, signing,
 cryptography settings, operational gates, RUN 422 production interfaces,
 audit-register bytes or previous evidence were altered. No live network,
 node activation, deployment, PR, merge or main/force push was performed.
+
+## 25. A33-F1 / E27 remaining voting-ancestry correction
+
+**VOTING-ANCESTRY CORRECTION — INDEPENDENT REVIEW PENDING.**
+A33-F1 / E27 and all other unresolved obligations remain **OPEN**;
+activation **DISABLED**; public DevNet **NO-GO**. The completed consensus/reset
+integration, previous bounded acceptances and all historical evidence retain
+their existing scope. Section 24's unbounded voting-walk statement describes
+its own producer; this append records a later, independently reviewable change.
+
+Required base/main: `644a3c69dce095458c6e9e2208c200b29fc9fe0f`, tree
+`c708a1dfb7362b8dcc8165970b7519b0a9194146`; verified against direct remote main
+and a clean worktree before creating `copilot/a33-f1-e27-voting-ancestry`.
+Test-only baseline: `e4876fc2bef1217035d484568cd791fca1f88d69`, tree
+`0a1df93882027fe5a3dfc1dd3532725b91ed1614`. Corrected source/test producer:
+`e57a337fd5afc5f1bd2f49ea43a50c0a866c86aa`, tree
+`09a196c6b85a396c4d8d6b762ed0cbb5a38dad89`.
+
+The actual `safety_decision` voting ancestry branch visits at most the actual
+retained block count, then returns the existing `Unsafe` on exhaustion.
+No-lock and sufficient-justification-view short-circuits, complete acyclic
+results, missing-link refusal, local voting rules and other policy remain
+unchanged. Refusal produces no self-vote/action or vote-derived lock/commit;
+earlier view/registration/evidence effects are not rolled back. Missing or
+exhausted ancestry is never treated as proof. This is a per-traversal finite
+graph bound, not a whole-node memory, latency or hard-cap guarantee.
+
+The revision-pinned [evidence record](evidence/voting_ancestry/README.md)
+contains exact-base entrypoints/callers, conditional cycle construction,
+decision/effect contract, producer/source/test identities, exact commands,
+separately retained killed/reaped baseline timeouts, corrected controls,
+failed attempts and limitations. Five baseline timeouts are observations,
+not passing tests; corrected focused tests pass 9/9 and selected consensus
+regressions pass 485/485. Production compile and scope/format checks are
+recorded in that package. No authenticated-network reachability, exploit,
+unsafe production vote, signing-authority change or operational activation
+is established. Only the new task branch is published, without PR or merge.

@@ -1,0 +1,1011 @@
+warning: enum `VerifiedVoteInvocationRefusal` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1456:17
+     |
+1456 | pub(crate) enum VerifiedVoteInvocationRefusal {
+     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: enum `ReceivedVoteEvidenceDisposition` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1469:17
+     |
+1469 | pub(crate) enum ReceivedVoteEvidenceDisposition {
+     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `VerifiedVoteInvocation` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1479:17
+     |
+1479 | pub(crate) enum VerifiedVoteInvocation {
+     |                 ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `ReceivedVoteQcRefusalReason` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1492:17
+     |
+1492 | pub(crate) enum ReceivedVoteQcRefusalReason {
+     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedVoteQcRefusal` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1498:19
+     |
+1498 | pub(crate) struct ReceivedVoteQcRefusal {
+     |                   ^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `ReceivedVoteQcIncomplete` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1504:17
+     |
+1504 | pub(crate) enum ReceivedVoteQcIncomplete {
+     |                 ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedVoteQcEventSummary` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1518:19
+     |
+1518 | pub(crate) struct ReceivedVoteQcEventSummary {
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `ReceivedQcGateRefusal` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1528:17
+     |
+1528 | pub(crate) enum ReceivedQcGateRefusal {
+     |                 ^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `ReceivedQcGateDecision` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1534:17
+     |
+1534 | pub(crate) enum ReceivedQcGateDecision {
+     |                 ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `ReceivedQcApplication` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1540:17
+     |
+1540 | pub(crate) enum ReceivedQcApplication {
+     |                 ^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedQcEffectView` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1549:19
+     |
+1549 | pub(crate) struct ReceivedQcEffectView<'a> {
+     |                   ^^^^^^^^^^^^^^^^^^^^
+
+warning: multiple methods are never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1561:19
+     |
+1560 | impl ReceivedQcEffectView<'_> {
+     | ----------------------------- methods in this implementation
+1561 |     pub(crate) fn logical(&self) -> &QuorumCertificate<[u8; 32]> { self.logical }
+     |                   ^^^^^^^
+1562 |     pub(crate) fn wire(&self) -> &qbind_wire::consensus::QuorumCertificate { self.wire }
+     |                   ^^^^
+1563 |     pub(crate) fn locked(&self) -> Option<ReceivedVoteQcSummary> { self.locked }
+     |                   ^^^^^^
+1564 |     pub(crate) fn target_own_qc(&self) -> Option<&QuorumCertificate<[u8; 32]>> {
+     |                   ^^^^^^^^^^^^^
+...
+1567 |     pub(crate) fn committed_block(&self) -> Option<&[u8; 32]> { self.committed_block }
+     |                   ^^^^^^^^^^^^^^^
+1568 |     pub(crate) fn committed_height(&self) -> Option<u64> { self.committed_height }
+     |                   ^^^^^^^^^^^^^^^^
+1569 |     pub(crate) fn commit_log(&self) -> &[CommittedEntry<[u8; 32]>] { self.commit_log }
+     |                   ^^^^^^^^^^
+1570 |     pub(crate) fn current_view(&self) -> u64 { self.current_view }
+     |                   ^^^^^^^^^^^^
+
+warning: trait `ReceivedQcEffectGate` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1573:18
+     |
+1573 | pub(crate) trait ReceivedQcEffectGate {
+     |                  ^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedQcGateAdapter` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1577:8
+     |
+1577 | struct ReceivedQcGateAdapter<'a> {
+     |        ^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedVoteQcSummary` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1639:19
+     |
+1639 | pub(crate) struct ReceivedVoteQcSummary {
+     |                   ^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `ReceivedVoteQcOutcome` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1645:17
+     |
+1645 | pub(crate) enum ReceivedVoteQcOutcome {
+     |                 ^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedVoteQcCandidateSeal` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1689:8
+     |
+1689 | struct ReceivedVoteQcCandidateSeal {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedVoteQcRouteControlFrame` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1697:8
+     |
+1697 | struct ReceivedVoteQcRouteControlFrame {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedQcGateControlFrame` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1735:8
+     |
+1735 | struct ReceivedQcGateControlFrame {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `VerifiedVotePreflight` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1755:8
+     |
+1755 | struct VerifiedVotePreflight {
+     |        ^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `same_vote_signed_fields` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:2803:4
+     |
+2803 | fn same_vote_signed_fields(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `map_received_vote_qc_incomplete` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:2818:4
+     |
+2818 | fn map_received_vote_qc_incomplete(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `received_vote_qc_control_charge` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:2844:4
+     |
+2844 | fn received_vote_qc_control_charge() -> Result<u64, ReceivedVoteQcStageError> {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `qc_matches_projected_membership` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:2859:4
+     |
+2859 | fn qc_matches_projected_membership(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `compare_actual_qc_failure` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:2889:4
+     |
+2889 | fn compare_actual_qc_failure(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: multiple methods are never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:2938:19
+     |
+2937 | impl BasicHotStuffEngine<[u8; 32]> {
+     | ---------------------------------- methods in this implementation
+2938 |     pub(crate) fn invoke_verified_received_vote_qc(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+2945 |     pub(crate) fn invoke_verified_received_vote_qc_effect_gated(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+2953 |     fn invoke_received_vote_qc_inner(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3264 |     pub(crate) fn install_received_vote_context(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3376 |     pub(crate) fn admit_verified_received_vote(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3398 |     pub(crate) fn invoke_verified_received_vote(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3496 |     fn preflight_verified_received_vote(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedVoteQcReport` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1657:23
+     |
+1657 |     pub(crate) struct ReceivedVoteQcReport {
+     |                       ^^^^^^^^^^^^^^^^^^^^
+
+warning: associated items `new`, `actual`, and `outcome` are never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1664:23
+     |
+1663 |     impl ReceivedVoteQcReport {
+     |     ------------------------- associated items in this implementation
+1664 |         pub(super) fn new(
+     |                       ^^^
+...
+1672 |         pub(crate) fn actual(&self) -> &ReceivedVoteQcEventSummary {
+     |                       ^^^^^^
+...
+1676 |         pub(crate) fn outcome(&self) -> &ReceivedVoteQcOutcome {
+     |                       ^^^^^^^
+
+warning: field `accumulator` is never read
+   --> crates/qbind-consensus/src/hotstuff_state_engine.rs:193:16
+    |
+191 | pub(crate) struct VoteMutationReport<BlockIdT> {
+    |                   ------------------ field in this struct
+192 |     pub(crate) history: VoteHistoryOutcome<BlockIdT>,
+193 |     pub(crate) accumulator:
+    |                ^^^^^^^^^^^
+
+warning: trait `VoteQcEffectGate` is never used
+   --> crates/qbind-consensus/src/hotstuff_state_engine.rs:198:18
+    |
+198 | pub(crate) trait VoteQcEffectGate<BlockIdT: Eq + std::hash::Hash + Clone> {
+    |                  ^^^^^^^^^^^^^^^^
+
+warning: method `is_equivocation` is never used
+   --> crates/qbind-consensus/src/hotstuff_state_engine.rs:212:19
+    |
+211 | impl<BlockIdT> VoteMutationReport<BlockIdT> {
+    | ------------------------------------------- method in this implementation
+212 |     pub(crate) fn is_equivocation(&self) -> bool {
+    |                   ^^^^^^^^^^^^^^^
+
+warning: enum `VoteEvidencePreflightError` is never used
+   --> crates/qbind-consensus/src/hotstuff_state_engine.rs:218:17
+    |
+218 | pub(crate) enum VoteEvidencePreflightError {
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `VoteEvidencePlan` is never used
+   --> crates/qbind-consensus/src/hotstuff_state_engine.rs:225:17
+    |
+225 | pub(crate) enum VoteEvidencePlan {
+    |                 ^^^^^^^^^^^^^^^^
+
+warning: multiple methods are never used
+    --> crates/qbind-consensus/src/hotstuff_state_engine.rs:567:19
+     |
+ 361 | / impl<BlockIdT> HotStuffStateEngine<BlockIdT>
+ 362 | | where
+ 363 | |     BlockIdT: Eq + std::hash::Hash + Clone,
+     | |___________________________________________- methods in this implementation
+...
+ 567 |       pub(crate) fn received_vote_budget(&self) -> Option<&EvidenceBudget> {
+     |                     ^^^^^^^^^^^^^^^^^^^^
+...
+ 571 |       pub(crate) fn received_vote_evidence_table(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 577 |       pub(crate) fn install_received_vote_evidence_table(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 598 |       pub(crate) fn prepare_received_vote_evidence(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 641 |       pub(crate) fn project_received_vote_accumulator<'a>(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 651 |       pub(crate) fn has_conflicting_vote_history(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 662 |       pub(crate) fn has_vote_memberships(
+     |                     ^^^^^^^^^^^^^^^^^^^^
+...
+ 700 |       pub(crate) fn retain_received_vote_token(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 729 |       pub(crate) fn map_qc_charge_checked(&self) -> Result<u64, EvidenceRetentionError> {
+     |                     ^^^^^^^^^^^^^^^^^^^^^
+...
+ 737 |       pub(crate) fn install_received_vote_budget(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+1719 |       pub(crate) fn on_vote_detailed_effect_gated(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `VoteAccumulatorProjection` is never constructed
+   --> crates/qbind-consensus/src/vote_accumulator.rs:223:19
+    |
+223 | pub(crate) struct VoteAccumulatorProjection<'a, BlockIdT> {
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `disposition`, `projected_count`, and `next_signer` are never used
+   --> crates/qbind-consensus/src/vote_accumulator.rs:236:19
+    |
+232 | / impl<BlockIdT> VoteAccumulatorProjection<'_, BlockIdT>
+233 | | where
+234 | |     BlockIdT: Eq + std::hash::Hash + Clone,
+    | |___________________________________________- methods in this implementation
+235 |   {
+236 |       pub(crate) fn disposition(&self) -> VoteAccumulatorDisposition {
+    |                     ^^^^^^^^^^^
+...
+240 |       pub(crate) fn projected_count(&self) -> usize {
+    |                     ^^^^^^^^^^^^^^^
+...
+244 |       pub(crate) fn next_signer(&self, after: Option<ValidatorId>) -> Option<ValidatorId> {
+    |                     ^^^^^^^^^^^
+
+warning: methods `project_vote` and `will_contain_after_on_vote` are never used
+   --> crates/qbind-consensus/src/vote_accumulator.rs:438:19
+    |
+282 | / impl<BlockIdT> VoteAccumulator<BlockIdT>
+283 | | where
+284 | |     BlockIdT: Eq + std::hash::Hash + Clone,
+    | |___________________________________________- methods in this implementation
+...
+438 |       pub(crate) fn project_vote<'a>(
+    |                     ^^^^^^^^^^^^
+...
+489 |       pub(crate) fn will_contain_after_on_vote(
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+   Compiling qbind-consensus v0.1.0 (/workspaces/QBIND/olivexo28/QBIND/crates/qbind-consensus)
+warning: `qbind-consensus` (lib) generated 37 warnings
+warning: multiple fields are never read
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1698:5
+     |
+1697 | struct ReceivedVoteQcRouteControlFrame {
+     |        ------------------------------- fields in this struct
+1698 |     token: Option<VerifiedVoteToken>,
+     |     ^^^^^
+1699 |     preflight: Option<VerifiedVotePreflight>,
+     |     ^^^^^^^^^
+1700 |     report_owner: Option<ReceivedVoteQcReportOwner>,
+     |     ^^^^^^^^^^^^
+1701 |     projection: Option<crate::vote_accumulator::VoteAccumulatorProjection<'static, [u8; 32]>>,
+     |     ^^^^^^^^^^
+1702 |     candidate: Option<ReceivedVoteQcCandidateSeal>,
+     |     ^^^^^^^^^
+1703 |     control_charge: Option<Result<u64, ReceivedVoteQcStageError>>,
+     |     ^^^^^^^^^^^^^^
+1704 |     wire_preparation: Option<Result<ReceivedVoteQcWirePreparation, ReceivedVoteQcStageError>>,
+     |     ^^^^^^^^^^^^^^^^
+1705 |     wire: Option<ReceivedVoteQcWire>,
+     |     ^^^^
+1706 |     mutation: Option<VoteMutationReport<[u8; 32]>>,
+     |     ^^^^^^^^
+1707 |     actual: Option<ReceivedVoteQcEventSummary>,
+     |     ^^^^^^
+1708 |     outcome: Option<ReceivedVoteQcOutcome>,
+     |     ^^^^^^^
+1709 |     report: Option<ReceivedVoteQcReport>,
+     |     ^^^^^^
+1710 |     refusal: Option<ReceivedVoteQcRefusal>,
+     |     ^^^^^^^
+1711 |     return_carrier: Option<Result<ReceivedVoteQcReport, ReceivedVoteQcRefusal>>,
+     |     ^^^^^^^^^^^^^^
+1712 |     staged_incomplete: Option<ReceivedVoteQcIncomplete>,
+     |     ^^^^^^^^^^^^^^^^^
+1713 |     mapped_incomplete: Option<ReceivedVoteQcIncomplete>,
+     |     ^^^^^^^^^^^^^^^^^
+1714 |     logical_qc: Option<QuorumCertificate<[u8; 32]>>,
+     |     ^^^^^^^^^^
+1715 |     qc_summary: Option<ReceivedVoteQcSummary>,
+     |     ^^^^^^^^^^
+1716 |     voter: ValidatorId,
+     |     ^^^^^
+1717 |     view: u64,
+     |     ^^^^
+1718 |     block_id: [u8; 32],
+     |     ^^^^^^^^
+1719 |     control_bytes: u64,
+     |     ^^^^^^^^^^^^^
+1720 |     is_equivocation: bool,
+     |     ^^^^^^^^^^^^^^^
+1721 |     projected_disposition: VoteAccumulatorDisposition,
+     |     ^^^^^^^^^^^^^^^^^^^^^
+1722 |     cursor: Option<ValidatorId>,
+     |     ^^^^^^
+1723 |     signer: Option<ValidatorId>,
+     |     ^^^^^^
+1724 |     raw: usize,
+     |     ^^^
+1725 |     roster_len: usize,
+     |     ^^^^^^^^^^
+1726 |     word: usize,
+     |     ^^^^
+1727 |     incoming_index: usize,
+     |     ^^^^^^^^^^^^^^
+1728 |     incoming_present: bool,
+     |     ^^^^^^^^^^^^^^^^
+1729 |     evidence: ReceivedVoteEvidenceDisposition,
+     |     ^^^^^^^^
+1730 |     still_retained: bool,
+     |     ^^^^^^^^^^^^^^
+1731 |     view_advanced: bool,
+     |     ^^^^^^^^^^^^^
+1732 |     correspondence_matches: bool,
+     |     ^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: multiple fields are never read
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1736:5
+     |
+1735 | struct ReceivedQcGateControlFrame {
+     |        -------------------------- fields in this struct
+1736 |     borrowed_gate: Option<&'static mut dyn ReceivedQcEffectGate>,
+     |     ^^^^^^^^^^^^^
+1737 |     adapter: Option<ReceivedQcGateAdapter<'static>>,
+     |     ^^^^^^^
+1738 |     adapter_borrow: Option<&'static mut ReceivedQcGateAdapter<'static>>,
+     |     ^^^^^^^^^^^^^^
+1739 |     state_gate: Option<&'static mut dyn crate::hotstuff_state_engine::VoteQcEffectGate<[u8; 32]>>,
+     |     ^^^^^^^^^^
+1740 |     state_borrow: Option<&'static HotStuffStateEngine<[u8; 32]>>,
+     |     ^^^^^^^^^^^^
+1741 |     input: Option<ReceivedQcEffectView<'static>>,
+     |     ^^^^^
+1742 |     input_argument: Option<ReceivedQcEffectView<'static>>,
+     |     ^^^^^^^^^^^^^^
+1743 |     logical_borrow: Option<&'static QuorumCertificate<[u8; 32]>>,
+     |     ^^^^^^^^^^^^^^
+1744 |     application: ReceivedQcApplication,
+     |     ^^^^^^^^^^^
+1745 |     application_return: Option<Result<(), QcValidationError>>,
+     |     ^^^^^^^^^^^^^^^^^^
+1746 |     state_result: Option<(VoteMutationReport<[u8; 32]>, Option<Result<(), QcValidationError>>)>,
+     |     ^^^^^^^^^^^^
+1747 |     route_result: Option<(VoteMutationReport<[u8; 32]>, ReceivedQcApplication)>,
+     |     ^^^^^^^^^^^^
+1748 |     lock_summary: Option<ReceivedVoteQcSummary>,
+     |     ^^^^^^^^^^^^
+1749 |     incomplete: Option<ReceivedVoteQcIncomplete>,
+     |     ^^^^^^^^^^
+1750 |     decision: Option<ReceivedQcGateDecision>,
+     |     ^^^^^^^^
+1751 |     allow_result: bool,
+     |     ^^^^^^^^^^^^
+
+warning: `qbind-consensus` (lib test) generated 2 warnings
+    Finished `test` profile [unoptimized] target(s) in 3.48s
+     Running unittests src/lib.rs (target/debug/deps/qbind_consensus-d2e3d634563c201b)
+
+running 312 tests
+test adversarial_multi_sim::tests::partition_config_default_is_empty ... ok
+test basic_hotstuff_engine::tests::b5_initialize_from_snapshot_baseline_seeds_state ... ok
+test basic_hotstuff_engine::tests::b5_no_baseline_path_unchanged ... ok
+test adversarial_multi_sim::tests::partition_config_block_and_unblock ... ok
+test basic_hotstuff_engine::tests::basic_engine_advance_view ... ok
+test basic_hotstuff_engine::tests::b5_post_baseline_commits_advance_above_snapshot_height ... ok
+test basic_hotstuff_engine::tests::basic_engine_is_leader_for_current_view ... ok
+test basic_hotstuff_engine::tests::basic_engine_leader_for_view_round_robin ... ok
+test basic_hotstuff_engine::tests::basic_engine_non_leader_does_not_propose ... ok
+test basic_hotstuff_engine::tests::engine_initialize_from_restart_sets_timestamp ... ok
+test basic_hotstuff_engine::tests::basic_engine_on_leader_step_produces_proposal ... ok
+test basic_hotstuff_engine::tests::engine_set_view_records_duration_when_changing ... ok
+test basic_hotstuff_engine::tests::engine_set_recorder_after_construction ... ok
+test basic_hotstuff_engine::tests::engine_without_recorder_does_not_panic_on_advance_view ... ok
+test basic_hotstuff_engine::tests::fixture_candidate_is_lock_at_zero_hops ... ok
+test basic_hotstuff_engine::tests::engine_with_recorder_calls_on_advance_view ... ok
+test basic_hotstuff_engine::tests::fixture_multi_hop_exact_bound_and_one_short ... ok
+test basic_hotstuff_engine::tests::fixture_no_lock_reports_no_lock ... ok
+test basic_hotstuff_engine::tests::leader_post_capture_cleanup_returns_only_reason_and_effects ... ok
+test basic_hotstuff_engine::tests::leader_route_candidate_collision_does_not_replace_existing_node ... ok
+test basic_hotstuff_engine::tests::leader_signer_buffer_null_injection_and_abandonment_have_exact_ownership ... ok
+test basic_hotstuff_engine::tests::fixture_cyclic_parent_graph_terminates_bounded ... ok
+test basic_hotstuff_engine::tests::leader_signer_buffer_transfers_exact_values_and_length_for_both_bounds ... ok
+test basic_hotstuff_engine::tests::leader_vote_history_marks_nonmember_defensively ... ok
+test basic_hotstuff_engine::tests::noop_recorder_is_debug ... ok
+test basic_hotstuff_engine::tests::received_qc_effect_gate_defensive_correspondence_and_logical_error_controls ... ok
+test basic_hotstuff_engine::tests::received_qc_effect_gate_allow_observes_absent_lock_before_one_application ... ok
+test basic_hotstuff_engine::tests::received_qc_effect_gate_later_callback_panic_keeps_applied_effects_and_releases_stage ... ok
+test basic_hotstuff_engine::tests::received_qc_effect_gate_equal_and_lower_qcs_cannot_bypass_refusal ... ok
+test basic_hotstuff_engine::tests::received_qc_effect_gate_mixed_and_missing_evidence_suppress_application ... ok
+test basic_hotstuff_engine::tests::received_qc_effect_gate_no_qc_and_equivocation_never_call_gate ... ok
+test basic_hotstuff_engine::tests::received_qc_effect_gate_preparation_pressure_preserves_token_and_all_observations ... ok
+test basic_hotstuff_engine::tests::received_qc_effect_gate_panic_reconciles_evicted_history_and_drops_stage ... ok
+test basic_hotstuff_engine::tests::received_vote_budget_bootstrap_imports_existing_map_qc_once ... ok
+test basic_hotstuff_engine::tests::received_vote_capacity_dropped_outcome_destroys_token_without_retention ... ok
+test basic_hotstuff_engine::tests::received_vote_context_admission_verifies_borrowed_key_and_preserves_signature ... ok
+test basic_hotstuff_engine::tests::received_vote_context_bootstrap_refusals_leave_no_partial_ownership ... ok
+test basic_hotstuff_engine::tests::received_qc_effect_gate_refusal_retry_duplicate_preserves_three_chain ... ok
+test basic_hotstuff_engine::tests::received_vote_context_enforces_roster_capacity_profile ... ok
+test basic_hotstuff_engine::tests::received_vote_context_failure_after_staging_restores_existing_ledger ... ok
+test basic_hotstuff_engine::tests::received_vote_context_detached_token_survives_reinstall_and_engine_drop ... ok
+test basic_hotstuff_engine::tests::received_vote_context_refusal_keeps_input_and_does_not_publish_bootstrap ... ok
+test basic_hotstuff_engine::tests::received_vote_foreign_ledger_refusal_preserves_token_and_both_engines ... ok
+test basic_hotstuff_engine::tests::received_vote_context_quota_refuses_and_recovers_through_engine_installation ... ok
+test basic_hotstuff_engine::tests::received_vote_leader_self_vote_capacity_drop_skips_qc_and_reconciles ... ok
+test basic_hotstuff_engine::tests::received_vote_legacy_state_error_reconciles_and_skips_event_callbacks ... ok
+test basic_hotstuff_engine::tests::received_vote_missing_evidence_for_duplicate_is_retained ... ok
+test basic_hotstuff_engine::tests::received_vote_no_context_stale_and_terminal_refusals_preserve_token ... ok
+test basic_hotstuff_engine::tests::received_vote_qc_defensive_commit_refusal_drops_backing_before_pending ... ok
+test basic_hotstuff_engine::tests::received_vote_qc_destination_bytes_refusal_after_report_admission_retries ... ok
+test basic_hotstuff_engine::tests::received_vote_qc_detached_opaque_report_retains_all_owners_until_drop ... ok
+test basic_hotstuff_engine::tests::received_vote_qc_membership_comparison_rejects_malformed_actual_qcs ... ok
+test basic_hotstuff_engine::tests::received_vote_qc_nested_partial_transfer_allocation_refusal_retries ... ok
+test basic_hotstuff_engine::tests::received_vote_qc_stage_callback_unwind_keeps_engine_effects_and_releases_stage ... ok
+test basic_hotstuff_engine::tests::received_vote_qc_stage_keeps_precopied_evidence_after_history_eviction ... ok
+test basic_hotstuff_engine::tests::received_vote_qc_stage_preserves_capacity_drop_and_equivocation_outcomes ... ok
+test basic_hotstuff_engine::tests::received_vote_qc_stage_refusals_restore_ledger_and_preserve_token ... ok
+test basic_hotstuff_engine::tests::received_vote_qc_stage_report_quota_refuses_and_recovers ... ok
+test basic_hotstuff_engine::tests::received_vote_qc_stage_reports_mixed_fields_and_missing_legacy_evidence ... ok
+test basic_hotstuff_engine::tests::received_vote_qc_stage_returns_every_actual_signer_and_verifies_wire_qc ... ok
+test basic_hotstuff_engine::tests::received_vote_qc_stage_uses_first_retained_evidence_for_conflicting_duplicate ... ok
+test basic_hotstuff_engine::tests::received_vote_qc_stage_uses_minimal_bitmap_span_for_weighted_quorum ... ok
+test basic_hotstuff_engine::tests::received_vote_reconciliation_requires_both_logical_memberships ... ok
+test basic_hotstuff_engine::tests::received_vote_recorder_panic_follows_completed_evidence_transfer ... ok
+test basic_hotstuff_engine::tests::received_vote_refusals_preserve_owned_backing_and_leave_no_token_charge ... ok
+test basic_hotstuff_engine::tests::received_vote_state_mut_destroys_populated_table_with_exact_ledger_release ... ok
+test basic_hotstuff_engine::tests::received_vote_state_mut_invalidation_stays_terminal_after_state_replacement ... ok
+test basic_hotstuff_engine::tests::received_vote_table_staging_unwind_releases_only_staged_ownership ... ok
+test basic_hotstuff_engine::tests::received_vote_token_invocation_transfers_original_and_keeps_first_evidence ... ok
+test basic_hotstuff_engine::tests::restore_baseline_does_not_fabricate_post_snapshot_history ... ok
+test basic_hotstuff_engine::tests::restore_catchup_applies_valid_peer_learned_suffix_above_snapshot ... ok
+test basic_hotstuff_engine::tests::restore_catchup_rejects_malformed_parent_fail_closed ... ok
+test basic_hotstuff_engine::tests::run422_qc_view_exhaustion_checked_advance_and_terminal_refusal ... ok
+test basic_hotstuff_engine::tests::run422_qc_view_exhaustion_legacy_leader_preflight_preserves_intent ... ok
+test basic_hotstuff_engine::tests::run422_qc_view_exhaustion_legacy_logical_vote_keeps_terminal_qc_effect ... ok
+test basic_hotstuff_engine::tests::run422_qc_view_exhaustion_owning_leader_refusal_and_final_successor ... ok
+test basic_hotstuff_engine::tests::run422_qc_view_exhaustion_received_vote_invocation_reports_refusal_truthfully ... ok
+test basic_hotstuff_engine::tests::run422_qc_view_exhaustion_signed_qc_gate_refusal_and_retry_preserve_effects ... ok
+test basic_hotstuff_engine::tests::run422_tc_o4_gate_unwind_precedes_effects ... ok
+test basic_hotstuff_engine::tests::run422_tc_o4_legacy_and_opt_in_raise_have_identical_effects ... ok
+test basic_hotstuff_engine::tests::run422_tc_o4_refusal_preserves_all_effects_then_retry_applies_once ... ok
+test basic_hotstuff_engine::tests::run422_tc_o4_stale_none_equal_lower_and_legacy_compatibility ... ok
+test basic_hotstuff_engine::tests::run422_tc_o4_target_overflow_and_terminal_eligible_boundary ... ok
+test basic_hotstuff_engine::tests::run422_timeout_view_exhaustion_engine_search_boundaries ... ok
+test basic_hotstuff_engine::tests::run422_timeout_view_exhaustion_engine_terminal_and_stale_preserve_state ... ok
+test basic_hotstuff_engine::tests::run_096_armed_intent_emits_canonical_reconfig_proposal ... ok
+test basic_hotstuff_engine::tests::run_096_clear_pending_reconfig ... ok
+test basic_hotstuff_engine::tests::run_096_fresh_engine_has_no_pending_reconfig ... ok
+test basic_hotstuff_engine::tests::run_096_intent_error_display_mentions_fail_closed ... ok
+test basic_hotstuff_engine::tests::run_096_intent_is_one_shot ... ok
+test basic_hotstuff_engine::tests::run_096_no_intent_emits_normal_proposal_unchanged ... ok
+test basic_hotstuff_engine::tests::run_096_non_leader_does_not_consume_intent ... ok
+test basic_hotstuff_engine::tests::run_096_set_pending_reconfig_accepts_sequential_target ... ok
+test basic_hotstuff_engine::tests::run_096_set_pending_reconfig_rejects_equal_to_current ... ok
+test basic_hotstuff_engine::tests::run_096_set_pending_reconfig_rejects_regression ... ok
+test basic_hotstuff_engine::tests::run_096_set_pending_reconfig_rejects_zero ... ok
+test basic_hotstuff_engine::tests::run_096_stale_intent_emits_normal_proposal ... ok
+test basic_hotstuff_engine::tests::shared_ledger_releases_eviction_and_final_map_ownership ... ok
+test basic_hotstuff_engine::tests::shared_qc_accounting_enforces_verified_projection_and_allows_legacy_reclamation ... ok
+test basic_hotstuff_engine::tests::verified_proposal_callback_controlled_unwind_keeps_map_charge_committed ... ok
+test basic_hotstuff_engine::tests::verified_proposal_reservation_precedes_effects_and_cancels_on_ordinary_rejection ... ok
+test driver::tests::driver_engine_accessors_work ... ok
+test driver::tests::driver_handles_multiple_events_in_sequence ... ok
+test driver::tests::driver_new_creates_wrapper_with_zero_counters ... ok
+test driver::tests::driver_receives_proposal_event_increments_counter ... ok
+test driver::tests::driver_receives_vote_event_increments_counter ... ok
+test driver::tests::driver_step_with_no_event_returns_empty_actions ... ok
+test driver::tests::driver_with_validators_accepts_vote_from_member ... ok
+test driver::tests::driver_with_validators_rejects_proposal_from_non_member ... ok
+test driver::tests::driver_with_validators_rejects_vote_from_non_member ... ok
+test driver::tests::driver_without_validators_accepts_all_votes ... ok
+test driver::tests::validator_context_membership_checks ... ok
+test hotstuff_state_engine::received_vote_admission_tests::a33_f1_exact_retained_cardinality_reaches_root ... ok
+test hotstuff_state_engine::received_vote_admission_tests::a33_f1_leader_capacity_refusal_keeps_state_unchanged ... ok
+test hotstuff_state_engine::received_vote_admission_tests::private_scalar_admission_rejects_state_candidate_and_charge_mismatch ... ok
+test hotstuff_state_engine::received_vote_admission_tests::private_shared_admission_rejects_ledger_state_candidate_and_charge_mismatch ... ok
+test ids::tests::consensus_node_id_is_validator_id ... ok
+test ids::tests::validator_id_basic_operations ... ok
+test ids::tests::validator_id_hash_and_ord ... ok
+test key_rotation::tests::test_apply_key_rotation_event_helper ... ok
+test key_rotation::tests::test_emergency_rotation_same_mechanics ... ok
+test key_rotation::tests::test_grace_end_epoch_saturating ... ok
+test key_rotation::tests::test_grace_epochs_zero_immediate_switch ... ok
+test key_rotation::tests::test_key_rotation_event_creation ... ok
+test key_rotation::tests::test_pending_key_grace_period ... ok
+test key_rotation::tests::test_registry_advance_epoch ... ok
+test key_rotation::tests::test_registry_apply_rotation_event ... ok
+test key_rotation::tests::test_registry_basic_operations ... ok
+test key_rotation::tests::test_registry_is_key_valid ... ok
+test key_rotation::tests::test_registry_reject_empty_public_key ... ok
+test key_rotation::tests::test_registry_reject_missing_validator ... ok
+test key_rotation::tests::test_registry_reject_overlapping_rotation ... ok
+test key_rotation::tests::test_registry_reject_past_effective_epoch ... ok
+test key_rotation::tests::test_registry_validators_with_pending_rotations ... ok
+test key_rotation::tests::test_validator_key_state_commit_rotation ... ok
+test key_rotation::tests::test_validator_key_state_is_key_valid ... ok
+test network::tests::mock_network_records_broadcast_proposal ... ok
+test network::tests::mock_network_records_broadcast_vote_and_send_vote_to ... ok
+test network::tests::mock_network_recv_one_returns_error_when_empty ... ok
+test network::tests::mock_network_recv_one_yields_queued_events_in_order ... ok
+test network::tests::mock_network_try_recv_one_returns_none_when_empty ... ok
+test network::tests::mock_network_try_recv_one_returns_some_in_fifo_order ... ok
+test pacemaker::timeout_pacemaker_tests::timeout_pacemaker_backoff_capped_at_max ... ok
+test pacemaker::timeout_pacemaker_tests::timeout_pacemaker_consecutive_timeouts_increment ... ok
+test pacemaker::timeout_pacemaker_tests::timeout_pacemaker_exponential_backoff ... ok
+test pacemaker::timeout_pacemaker_tests::timeout_pacemaker_new_starts_at_view_zero ... ok
+test pacemaker::timeout_pacemaker_tests::timeout_pacemaker_on_progress_resets_backoff ... ok
+test pacemaker::timeout_pacemaker_tests::timeout_pacemaker_on_qc_advances_view ... ok
+test pacemaker::timeout_pacemaker_tests::timeout_pacemaker_syncs_with_engine_view ... ok
+test pacemaker::timeout_pacemaker_tests::timeout_pacemaker_tc_for_lower_view_ignored ... ok
+test pacemaker::timeout_pacemaker_tests::timeout_pacemaker_tc_triggers_new_view ... ok
+test pacemaker::timeout_pacemaker_tests::timeout_pacemaker_timeout_triggers_after_duration ... ok
+test proposal_vote_verify::tests::empty_signature_never_panics_and_fails_closed ... ok
+test proposal_vote_verify::tests::no_classical_or_cross_suite_fallback ... ok
+test proposal_vote_verify::tests::proposal_bitflip_signature ... ok
+test proposal_vote_verify::tests::proposal_changed_payload_after_signing ... ok
+test proposal_vote_verify::tests::proposal_missing_signature ... ok
+test proposal_vote_verify::tests::proposal_signature_relabeled_as_vote_rejected ... ok
+test proposal_vote_verify::tests::proposal_suite_altered_after_signing ... ok
+test proposal_vote_verify::tests::proposal_survives_encode_decode ... ok
+test proposal_vote_verify::tests::proposal_truncated_signature ... ok
+test proposal_vote_verify::tests::proposal_unknown_validator ... ok
+test proposal_vote_verify::tests::proposal_valid_accepted ... ok
+test proposal_vote_verify::tests::signer_mismatch_claimed_vs_message ... ok
+test proposal_vote_verify::tests::vote_changed_block_after_signing ... ok
+test proposal_vote_verify::tests::vote_for_another_chain_rejected ... ok
+test proposal_vote_verify::tests::vote_missing_key ... ok
+test proposal_vote_verify::tests::vote_missing_signature ... ok
+test proposal_vote_verify::tests::vote_unsupported_suite_no_backend ... ok
+test proposal_vote_verify::tests::vote_valid_accepted ... ok
+test proposal_vote_verify::tests::vote_wrong_validator_signature ... ok
+test proposal_vote_verify::tests::wrong_consensus_key_with_correct_binding_rejected ... ok
+test qc_verify_domain::c3f_expected_charge_tests::a33_f1_indeterminate_ancestry_refuses_retention_without_mutation ... ok
+test qc_verify_domain::c3f_expected_charge_tests::a33_f1_verified_proposal_preflight_refuses_before_view_or_vote_effects ... ok
+test qc_verify_domain::c3f_expected_charge_tests::a33_f1_verified_registration_reclaims_acyclic_evidence ... ok
+test qc_verify_domain::c3f_expected_charge_tests::c3f_b_expected_charge_sums_every_capacity_component ... ok
+test qc_verify_domain::c3f_expected_charge_tests::run422_f7_retained_qc_borrowed_revalidation_uses_genuine_signatures ... ok
+test qc_verify_domain::c3f_expected_charge_tests::run422_f7_retained_qc_lookup_projection_and_ambiguity_are_deterministic ... ok
+test qc_verify_domain::c3f_expected_charge_tests::run422_f7_retained_qc_lookup_refuses_over_limit_before_scan ... ok
+test received_vote_evidence::tests::context_adoption_preserves_allocations_and_refusal_restores_occupancy ... ok
+test received_vote_evidence::tests::context_owner_final_release_is_safe_on_another_thread ... ok
+test received_vote_evidence::tests::qc_growth_new_admission_and_reclamation_are_distinct ... ok
+test received_vote_evidence::tests::qc_replacement_projection_obeys_cap_for_equal_and_shrinking_changes ... ok
+test received_vote_evidence::tests::qc_replacement_reservation_cancels_during_controlled_unwind ... ok
+test received_vote_evidence::tests::received_vote_evidence_budget_and_backing_allocation_failures_release_coverage ... ok
+test received_vote_evidence::tests::received_vote_evidence_charged_buffer_drops_backing_before_lease ... ok
+test received_vote_evidence::tests::received_vote_evidence_charged_buffer_unwind_destroys_before_release ... ok
+test received_vote_evidence::tests::received_vote_evidence_compiler_layouts_and_accounting_equations ... ok
+test received_vote_evidence::tests::received_vote_evidence_concurrent_clone_reserve_and_release ... ok
+test received_vote_evidence::tests::received_vote_evidence_concurrent_context_cloning_and_final_release ... ok
+test received_vote_evidence::tests::received_vote_evidence_context_construction_stages_and_cleanup ... ok
+test received_vote_evidence::tests::received_vote_evidence_context_constructor_commits_exact_coverage ... ok
+test received_vote_evidence::tests::received_vote_evidence_context_constructor_refuses_bytes_reservation ... ok
+test received_vote_evidence::tests::received_vote_evidence_context_constructor_refuses_invalid_payload ... ok
+test received_vote_evidence::tests::received_vote_evidence_context_constructor_refuses_one_byte_short ... ok
+test received_vote_evidence::tests::received_vote_evidence_context_constructor_refuses_report_reservation ... ok
+test received_vote_evidence::tests::received_vote_evidence_context_constructor_refuses_zero_coverage ... ok
+test received_vote_evidence::tests::received_vote_evidence_context_handles_share_budget_across_invalidation ... ok
+test received_vote_evidence::tests::received_vote_evidence_context_limit_and_same_budget_reinstall ... ok
+test received_vote_evidence::tests::received_vote_evidence_context_refcount_overflow_does_not_mutate_count ... ok
+test received_vote_evidence::tests::received_vote_evidence_deallocation_guard_survives_destructor_unwind ... ok
+test received_vote_evidence::tests::received_vote_evidence_foundation_surviving_context_final_drop_on_worker ... ok
+test received_vote_evidence::tests::received_vote_evidence_layout_capacity_and_zst_policy ... ok
+test received_vote_evidence::tests::received_vote_evidence_null_allocation_and_push_refusal_are_lossless ... ok
+test received_vote_evidence::tests::received_vote_evidence_partial_initialization_and_exact_vec_transfer ... ok
+test received_vote_evidence::tests::received_vote_evidence_refcount_overflow_does_not_mutate_count ... ok
+test received_vote_evidence::tests::received_vote_evidence_report_quota_and_final_budget_observation ... ok
+test received_vote_evidence::tests::received_vote_evidence_report_quota_refuses_and_recovers ... ok
+test received_vote_evidence::tests::received_vote_evidence_reservation_cancel_commit_and_cap_lowering ... ok
+test received_vote_evidence::tests::received_vote_evidence_slot_and_signature_backing_accounting_fixture ... ok
+test received_vote_evidence::tests::received_vote_table_budget_refusal_precedes_allocation ... ok
+test received_vote_evidence::tests::received_vote_table_injected_null_allocation_refusal_restores_ledger ... ok
+test received_vote_evidence::tests::received_vote_table_partial_initialization_unwinds_before_commit ... ok
+test received_vote_evidence::tests::received_vote_table_reserves_full_charge_before_exact_allocation ... ok
+test received_vote_evidence::tests::received_vote_table_successful_stage_drop_releases_after_backing_drop ... ok
+test slashing::tests::test_evidence_validate_structure ... ok
+test slashing::tests::test_invalid_o1_signature_rejected ... ok
+test slashing::tests::test_invalid_o2_signature_actually_valid_rejected ... ok
+test slashing::tests::test_noop_engine_accepts_valid_evidence ... ok
+test slashing::tests::test_noop_engine_accepts_valid_o1_with_crypto ... ok
+test slashing::tests::test_noop_engine_accepts_valid_o2_with_crypto ... ok
+test slashing::tests::test_noop_engine_counts ... ok
+test slashing::tests::test_noop_engine_deduplicates ... ok
+test slashing::tests::test_noop_engine_rejects_o1_with_invalid_signature ... ok
+test slashing::tests::test_noop_engine_rejects_o2_with_valid_signature ... ok
+test slashing::tests::test_noop_engine_rejects_unknown_validator ... ok
+test slashing::tests::test_o1_height_view_mismatch_rejected ... ok
+test slashing::tests::test_o1_identical_blocks_rejected ... ok
+test slashing::tests::test_o1_not_scheduled_leader_rejected ... ok
+test slashing::tests::test_o2_not_scheduled_leader_rejected ... ok
+test slashing::tests::test_offense_kind_as_str ... ok
+test slashing::tests::test_signature_failure_metrics ... ok
+test slashing::tests::test_slashing_metrics ... ok
+test slashing::tests::test_slashing_store ... ok
+test slashing::tests::test_valid_o1_evidence_accepted ... ok
+test slashing::tests::test_valid_o2_evidence_accepted ... ok
+test timeout::tests::run422_tc_target_view_logical_validation_accepts_largest_successor ... ok
+test timeout::tests::run422_tc_target_view_logical_validation_requires_immediate_successor ... ok
+test timeout::tests::run422_timeout_view_exhaustion_accumulator_quorum_and_final_successor ... ok
+test timeout::tests::run422_timeout_view_exhaustion_accumulator_terminal_preserves_full_state ... ok
+test timeout::tests::select_max_high_qc_finds_highest_view ... ok
+test timeout::tests::select_max_high_qc_handles_all_none ... ok
+test timeout::tests::select_max_high_qc_handles_mixed_none_and_some ... ok
+test timeout::tests::timeout_accumulator_clears_view ... ok
+test timeout::tests::timeout_accumulator_collects_timeouts ... ok
+test timeout::tests::timeout_accumulator_evicts_old_views ... ok
+test timeout::tests::timeout_accumulator_forms_tc_at_quorum ... ok
+test timeout::tests::timeout_accumulator_rejects_duplicate ... ok
+test timeout::tests::timeout_accumulator_rejects_non_member ... ok
+test timeout::tests::timeout_accumulator_tc_carries_exact_signed_evidence ... ok
+test timeout::tests::timeout_accumulator_tc_includes_max_high_qc ... ok
+test timeout::tests::timeout_certificate_fails_with_duplicate_signer ... ok
+test timeout::tests::timeout_certificate_fails_with_non_member ... ok
+test timeout::tests::timeout_certificate_fails_without_quorum ... ok
+test timeout::tests::timeout_certificate_serializes_signed_timeouts ... ok
+test timeout::tests::timeout_certificate_target_view_is_next_view ... ok
+test timeout::tests::timeout_certificate_validates_with_quorum ... ok
+test timeout::tests::timeout_msg_new_creates_unsigned_message ... ok
+test timeout::tests::timeout_msg_set_signature_works ... ok
+test timeout::tests::timeout_msg_signing_bytes_are_deterministic ... ok
+test timeout::tests::timeout_msg_signing_bytes_differ_for_different_high_qc ... ok
+test timeout::tests::timeout_msg_signing_bytes_differ_for_different_validators ... ok
+test timeout::tests::timeout_msg_signing_bytes_differ_for_different_views ... ok
+test timeout::tests::timeout_msg_signing_bytes_with_none_high_qc ... ok
+test timeout_verify::tests::run422_tc_target_view_accepts_largest_representable_successor ... ok
+test timeout_verify::tests::run422_tc_target_view_rejects_before_signature_backend_calls ... ok
+test timeout_verify::tests::run422_tc_target_view_rejects_signed_evidence_with_substituted_target ... ok
+test timeout_verify::tests::run422_tc_target_view_valid_successor_is_accepted ... ok
+test timeout_verify::tests::verify_bad_signature_timeout_is_rejected ... ok
+test timeout_verify::tests::verify_duplicate_signer_tc_is_rejected ... ok
+test timeout_verify::tests::verify_insufficient_quorum_tc_is_rejected ... ok
+test timeout_verify::tests::verify_missing_governance_key_is_rejected_with_missing_key ... ok
+test timeout_verify::tests::verify_mixed_view_tc_is_rejected ... ok
+test timeout_verify::tests::verify_tc_high_qc_is_deterministic_max_view ... ok
+test timeout_verify::tests::verify_tc_high_qc_mismatch_is_rejected ... ok
+test timeout_verify::tests::verify_tc_with_empty_evidence_is_rejected ... ok
+test timeout_verify::tests::verify_tc_with_evidence_mismatch_is_rejected ... ok
+test timeout_verify::tests::verify_tc_with_one_bad_signature_is_rejected ... ok
+test timeout_verify::tests::verify_tc_with_unknown_signer_is_rejected ... ok
+test timeout_verify::tests::verify_tc_with_wrong_suite_signer_is_rejected ... ok
+test timeout_verify::tests::verify_timeout_outcome_classifier_matches_errors ... ok
+test timeout_verify::tests::verify_unknown_validator_timeout_is_rejected ... ok
+test timeout_verify::tests::verify_unsigned_timeout_is_rejected ... ok
+test timeout_verify::tests::verify_unsupported_governance_suite_is_rejected ... ok
+test timeout_verify::tests::verify_valid_2f_plus_1_tc_is_accepted ... ok
+test timeout_verify::tests::verify_valid_signed_timeout_is_accepted ... ok
+test timeout_verify::tests::verify_wrong_suite_timeout_is_rejected ... ok
+test validator_set::tests::epoch_id_basic_operations ... ok
+test validator_set::tests::epoch_id_display ... ok
+test validator_set::tests::epoch_state_basic_creation ... ok
+test validator_set::tests::epoch_state_genesis_constructor ... ok
+test validator_set::tests::epoch_state_get_and_contains ... ok
+test validator_set::tests::epoch_state_iterator_and_validator_ids ... ok
+test validator_set::tests::epoch_validation_error_display ... ok
+test validator_set::tests::validator_set_basic_creation ... ok
+test validator_set::tests::validator_set_f_calculation ... ok
+test validator_set::tests::validator_set_get_by_index ... ok
+test validator_set::tests::validator_set_has_quorum ... ok
+test validator_set::tests::validator_set_has_quorum_weighted ... ok
+test validator_set::tests::validator_set_quorum_size_calculation ... ok
+test validator_set::tests::validator_set_two_thirds_vp ... ok
+test verify_job::tests::test_consensus_msg_kind_display ... ok
+test verify_job::tests::test_new_proposal_job ... ok
+test verify_job::tests::test_new_timeout_job ... ok
+test verify_job::tests::test_new_vote_job ... ok
+test verify_job::tests::test_verify_result_failure ... ok
+test verify_job::tests::test_verify_result_success ... ok
+test vote_accumulator::run_422_detailed_insertion_tests::detailed_insertion_attributes_capacity_drop_and_boolean_wrapper ... ok
+test vote_accumulator::run_422_detailed_insertion_tests::detailed_insertion_distinguishes_duplicate_and_legacy_boolean_remains_false ... ok
+test vote_accumulator::run_422_detailed_insertion_tests::projection_binds_incoming_signer_and_shares_insertion_classification ... ok
+test vote_accumulator::run_422_detailed_insertion_tests::zero_vote_limit_still_inserts_first_vote_for_absent_entry ... ok
+test basic_hotstuff_engine::tests::received_vote_full_table_refuses_before_view_eviction_and_returns_token ... ok
+
+test result: ok. 312 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 26.40s
+
+     Running tests/a33_f1_eviction_ancestry_tests.rs (target/debug/deps/a33_f1_eviction_ancestry_tests-57741b928d56a895)
+
+running 10 tests
+test committed_height_protection_is_unchanged ... ok
+test complete_acyclic_protected_ancestors_and_unrelated_eviction ... ok
+test locked_multi_cycle_outside_candidate ... ok
+test locked_self_cycle_outside_candidate ... ok
+test missing_protected_parent_or_lock_is_indeterminate ... ok
+test own_qc_multi_cycle_outside_candidate ... ok
+test own_qc_self_cycle_outside_candidate ... ok
+test registration_before_vote_catchup_witness_scaled ... ok
+test unprotected_missing_parent_and_no_lock_keep_legacy_behavior ... ok
+test registration_before_vote_catchup_witness_default_capacity ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+     Running tests/consensus_memory_limits_tests.rs (target/debug/deps/consensus_memory_limits_tests-df6777bc50366637)
+
+running 19 tests
+test config_defaults_are_reasonable ... ok
+test hotstuff_engine_new_uses_defaults ... ok
+test hotstuff_engine_update_validators_preserves_limits ... ok
+test hotstuff_engine_tracks_limit_metrics ... ok
+test hotstuff_engine_with_custom_limits ... ok
+test non_member_votes_rejected_with_limits ... ok
+test safety_no_invalid_qc_under_pressure ... ok
+test vote_accumulator_adversarial_spam_restrictive_limits ... ok
+test vote_accumulator_bounded_views_evicts_oldest ... ok
+test vote_accumulator_bounded_votes_per_view ... ok
+test vote_accumulator_duplicate_not_dropped ... ok
+test vote_accumulator_entry_count ... ok
+test vote_accumulator_existing_view_no_eviction ... ok
+test vote_accumulator_independent_limits_per_entry ... ok
+test vote_accumulator_new_uses_defaults ... ok
+test vote_accumulator_no_qc_when_votes_dropped ... ok
+test vote_accumulator_qc_formation_after_eviction ... ok
+test vote_accumulator_remove_entry_updates_tracked_views ... ok
+test vote_accumulator_adversarial_spam_default_limits ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/consensus_state_memory_limits_tests.rs (target/debug/deps/consensus_state_memory_limits_tests-30bfd2b47fde1389)
+
+running 7 tests
+test blocks_with_own_qc_not_evicted ... ok
+test blocks_are_bounded_by_limit ... ok
+test committed_blocks_never_evicted ... ok
+test eviction_does_not_break_commit_safety ... ok
+test integration_with_default_limits ... ok
+test eviction_metrics_are_tracked ... ok
+test votes_by_view_are_bounded_by_limit ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/hotstuff_locked_block_safety_tests.rs (target/debug/deps/hotstuff_locked_block_safety_tests-14b2c8f2970d6381)
+
+running 9 tests
+test locked_block_allows_descendant_proposals ... ok
+test equivocation_detection_works_with_locked_block_safety ... ok
+test locked_block_itself_is_safe_to_vote_on ... ok
+test locked_block_allows_descendant_proposals_via_engine ... ok
+test locked_block_rejects_conflicting_proposals ... ok
+test locked_block_rejects_conflicting_proposals_via_engine ... ok
+test no_locked_qc_allows_proposals ... ok
+test no_locked_qc_allows_proposals_via_engine ... ok
+test unregistered_block_is_not_safe_to_vote_on ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/hotstuff_state_locking_tests.rs (target/debug/deps/hotstuff_state_locking_tests-d934369c3a9aa770)
+
+running 15 tests
+test driver_qcs_formed_counter_starts_at_zero ... ok
+test block_registration_stores_blocks ... ok
+test driver_record_qc_increments_counter_and_sets_last_qc ... ok
+test driver_record_qc_multiple_times_updates_counter_and_last_qc ... ok
+test duplicate_votes_do_not_double_count ... ok
+test higher_view_qc_replaces_lower_view_locked_qc ... ok
+test hotstuff_state_engine_starts_with_no_lock_and_no_commit ... ok
+test lower_view_qc_does_not_replace_higher_view_locked_qc ... ok
+test non_member_votes_error_and_do_not_change_locked_qc ... ok
+test qc_formation_updates_locked_qc ... ok
+test set_locked_qc_directly_sets_lock ... ok
+test votes_for_different_blocks_reach_quorum_independently ... ok
+test votes_for_different_blocks_tracked_separately ... ok
+test weighted_voting_power_for_qc_formation ... ok
+test votes_for_same_block_different_views_tracked_separately ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/m5_timeout_view_change_tests.rs (target/debug/deps/m5_timeout_view_change_tests-144c5cc4f605bbf0)
+
+running 28 tests
+test m5_double_vote_protection_during_view_change ... ok
+test m5_determinism_same_events_same_view_progression ... ok
+test m5_exponential_backoff_timeout ... ok
+test m5_fail_closed_insufficient_quorum_tc ... ok
+test m5_fail_closed_non_member_timeout ... ok
+test m5_fail_closed_sender_mismatch ... ok
+test m5_fail_closed_stale_timeout_ignored ... ok
+test m5_is_safe_to_vote_at_height ... ok
+test m5_leader_changes_after_tc ... ok
+test m5_leader_continuity_round_robin ... ok
+test m5_leader_crash_next_view_progresses ... ok
+test m5_locked_height ... ok
+test m5_no_vote_below_locked_height ... ok
+test m5_no_proposal_view_increments ... ok
+test m5_progress_resets_backoff ... ok
+test m5_proposal_no_qc_view_increments ... ok
+test m5_safety_preserved_across_view_changes ... ok
+test m5_select_max_high_qc ... ok
+test m5_set_view_forward_only ... ok
+test m5_tc_aggregates_high_qc ... ok
+test m5_tc_updates_locked_qc_when_higher ... ok
+test m5_timeout_capped_at_max ... ok
+test m5_timeout_suite_id ... ok
+test m5_try_advance_resets_flags ... ok
+test m5_try_advance_to_view_fail_closed ... ok
+test m5_view_number_never_decreases ... ok
+test m5_vote_allowed_with_sufficient_justify_qc ... ok
+test m5_partition_simulation_progress_resumes ... ok
+
+test result: ok. 28 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+     Running tests/run_422_d7c3d_qc_domain_verification_tests.rs (target/debug/deps/run_422_d7c3d_qc_domain_verification_tests-eec8050642c611d6)
+
+running 46 tests
+test c3d_10_threshold_near_u64_limit_no_wraparound ... ok
+test c3d_10_threshold_above_u64_half_no_wraparound ... ok
+test c3d_10_total_power_overflow_rejected ... ok
+test c3d_10_zero_total_power_rejected ... ok
+test c3d_11_debug_does_not_dump_signatures_on_success ... ok
+test c3d_11_bounded_backend_error_diagnostics ... ok
+test c3d_12_signature_count_65536_rejected_before_crypto ... ok
+test c3d_11_no_partial_result_on_failure ... ok
+test c3d_14_aggregate_bound_constants ... ok
+test c3d_14_checked_aggregate_signature_bytes_boundaries ... ok
+test c3d_15_independent_d6_vote_to_qc_positive_control ... ok
+test c3d_16_legacy_d6_signed_input_incompatibility_three_way ... ok
+test c3d_13_valid_sigs_then_oversized_signature_zero_backend_calls ... ok
+test c3d_1_exact_quorum_all_signers ... ok
+test c3d_1_valid_quorum_returns_associated_evidence ... ok
+test c3d_3_sparse_reordered_membership_lookup_by_validator_id ... ok
+test c3d_2_nonuniform_accept_at_threshold_reject_below ... ok
+test c3d_4_wrong_domain_authority_commitment_rejected_with_control ... ok
+test c3d_4_wrong_domain_genesis_identity_rejected_with_control ... ok
+test c3d_5_wire_chain_mismatch_rejected_before_crypto ... ok
+test c3d_4_wrong_domain_runtime_id_rejected_with_control ... ok
+test c3d_5_wrong_epoch_rejected_before_crypto_with_control ... ok
+test c3d_7_bitmap_exact_membership_span_all_zero_within_bounds ... ok
+test c3d_7_bitmap_set_bit_beyond_membership_span_rejected_before_crypto ... ok
+test c3d_6_legacy_vote_digest_signatures_rejected_by_d6 ... ok
+test c3d_7_bitmap_zero_padding_beyond_membership_span_rejected ... ok
+test c3d_7_empty_bitmap_no_signers_insufficient_power ... ok
+test c3d_7_highest_index_real_signature_positive ... ok
+test c3d_7_membership_id_not_representable_rejected ... ok
+test c3d_7_overlong_bitmap_rejected ... ok
+test c3d_7_incorrect_association_wrong_signer_signature ... ok
+test c3d_7_popcount_mismatch_more_sigs_than_bits ... ok
+test c3d_7_popcount_mismatch_more_bits_than_sigs ... ok
+test c3d_7_signature_reordering_rejected_with_control ... ok
+test c3d_7_sparse_membership_shorter_bitmap_positive_control ... ok
+test c3d_7_unknown_set_bit_within_membership_span_rejected ... ok
+test c3d_7_unknown_signer_id_rejected ... ok
+test c3d_8_empty_signature_for_set_bit_missing ... ok
+test c3d_8_header_field_tampering_rejected_with_control ... ok
+test c3d_8_overlong_signature_rejected ... ok
+test c3d_8_truncated_signature_rejected ... ok
+test c3d_9_faulting_backend_rejected_as_backend_error ... ok
+test c3d_8_valid_quorum_plus_invalid_extra_signature_rejects ... ok
+test c3d_9_governed_suite_mismatch_rejected ... ok
+test c3d_9_unsupported_backend_rejected ... ok
+test c3d_9_missing_key_rejected ... ok
+
+test result: ok. 46 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.36s
+
+     Running tests/run_422_decision_view_queries_tests.rs (target/debug/deps/run_422_decision_view_queries_tests-8cee3d38de113dd2)
+
+running 5 tests
+test no_lock_boundary_reports_no_justify_id_and_no_lock_relation ... ok
+test inspection_does_not_alter_vote_or_engine_state ... ok
+test view_sufficiency_direct_ancestry_and_justify_id_present ... ok
+test view_sufficiency_inspection_reports_absent_parent_block ... ok
+test view_sufficiency_inspection_reports_missing_parent_link ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/run_422_leader_owning_handoff_tests.rs (target/debug/deps/run_422_leader_owning_handoff_tests-f6e27983b46ac3a4)
+
+running 7 tests
+test conflicting_vote_history_refuses_before_capture ... ok
+test already_voted_refusal_is_distinct_from_already_proposed ... ok
+test full_block_capacity_refuses_without_replacing_the_locked_block ... ok
+test leader_route_refuses_nonleader_without_calling_capture_gate ... ok
+test leader_route_returns_same_invocation_proposal_vote_and_advances_after_single_validator_qc ... ok
+test same_candidate_vote_history_refuses_before_capture ... ok
+test zero_signer_capacity_refuses_before_capture_and_can_retry ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/run_422_owning_decision_vote_handoff_tests.rs (target/debug/deps/run_422_owning_decision_vote_handoff_tests-928d89331bf2eff1)
+
+running 6 tests
+test abandoning_envelope_destroys_covered_data_before_reservation ... ok
+test carried_vote_matches_non_owning_route_field_for_field ... ok
+test owning_refusal_casts_no_vote_and_produces_no_payload ... ok
+test ordinary_rejection_returns_none_without_consulting_owning_gate ... ok
+test reversed_field_order_would_release_reservation_first ... ok
+test same_invocation_ownership_sees_l0_before_self_vote_raises_l1 ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/run_422_safety_decision_gate_tests.rs (target/debug/deps/run_422_safety_decision_gate_tests-7a7f41527ea59904)
+
+running 9 tests
+test future_view_refusal_preserves_only_permitted_mutations ... ok
+test allowing_gate_matches_existing_route ... ok
+test gate_sees_l0_before_allowed_self_vote_raises_l1 ... ok
+test missing_candidate_is_typed_refusal_gate_not_consulted ... ok
+test rejecting_gate_casts_no_vote_and_leaves_opportunity ... ok
+test unsafe_proposal_is_ordinary_rejection_not_gate_refusal ... ok
+test verified_gated_enforces_prechecks_before_gate ... ok
+test verified_owning_handoff_binds_engine_vote_and_retained_evidence ... ok
+test verified_owning_prechecks_refuse_before_gate_or_engine_mutation ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+
+     Running tests/run_422_safety_decision_observer_spike_tests.rs (target/debug/deps/run_422_safety_decision_observer_spike_tests-d2c7fd3555ae542a)
+
+running 12 tests
+test ancestry_branch_when_justify_view_below_lock ... ok
+test callback_panic_prevents_self_vote_and_action ... ok
+test no_lock_branch_is_explicit ... ok
+test no_observation_on_conflicting_fork ... ok
+test observed_route_makes_missing_observation_input_explicit ... ok
+test observed_run_matches_legacy_run ... ok
+test observes_l0_before_same_event_self_vote_raises_l1 ... ok
+test opaque_ancestor_view_exposes_only_scalars_and_identifiers ... ok
+test unobserved_legacy_route_still_votes_when_candidate_evicted ... ok
+test view_layout_is_fixed_and_stack_resident ... ok
+test view_sufficiency_branch_at_equality_boundary ... ok
+test verified_entrypoint_drives_observer_without_cloning_evidence ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+

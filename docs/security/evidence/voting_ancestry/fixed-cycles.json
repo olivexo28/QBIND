@@ -1,0 +1,15 @@
+{
+  "argv": [
+    "python",
+    "docs/security/evidence/voting_ancestry/run_cases.py",
+    "target/debug/deps/a33_f1_voting_ancestry_tests-7fc5a16951aaca9c",
+    "e57a337fd5afc5f1bd2f49ea43a50c0a866c86aa",
+    "docs/security/evidence/voting_ancestry/fixed"
+  ],
+  "head": "e57a337fd5afc5f1bd2f49ea43a50c0a866c86aa",
+  "tree": "09a196c6b85a396c4d8d6b762ed0cbb5a38dad89",
+  "status": "?? docs/security/evidence/voting_ancestry/focused-tests.json\n?? docs/security/evidence/voting_ancestry/focused-tests.log\n",
+  "start_utc": "2026-11-07T06:59:58.769945+00:00",
+  "end_utc": "2026-11-07T06:59:58.901052+00:00",
+  "exit_code": 0
+}

@@ -1,0 +1,18 @@
+{
+  "argv": [
+    "cargo",
+    "check",
+    "--locked",
+    "-p",
+    "qbind-node",
+    "--lib",
+    "--bin",
+    "qbind-node"
+  ],
+  "head": "e57a337fd5afc5f1bd2f49ea43a50c0a866c86aa",
+  "tree": "09a196c6b85a396c4d8d6b762ed0cbb5a38dad89",
+  "status": "?? docs/security/evidence/voting_ancestry/consensus-regressions.json\n?? docs/security/evidence/voting_ancestry/consensus-regressions.log\n?? docs/security/evidence/voting_ancestry/fixed-cycles.json\n?? docs/security/evidence/voting_ancestry/fixed-cycles.log\n?? docs/security/evidence/voting_ancestry/fixed/\n?? docs/security/evidence/voting_ancestry/focused-tests.json\n?? docs/security/evidence/voting_ancestry/focused-tests.log\n",
+  "start_utc": "2026-11-07T07:00:30.786721+00:00",
+  "end_utc": "2026-11-07T07:01:13.121736+00:00",
+  "exit_code": 101
+}
