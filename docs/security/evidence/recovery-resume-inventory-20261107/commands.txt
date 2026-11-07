@@ -714,3 +714,11 @@ commands, stdout/stderr and exits are retained under
 signing setup, test-only model/helper sensitivity and production limitations.
 Historical prefixes and producing-revision manifests are checked separately;
 the execution `SHA256SUMS` covers current artifacts.
+
+Separate hypothetical content-binding experiment commands and full captured
+outputs/exits (including failed initial compilation) are in
+`content-binding-experiment/COMMANDS.txt` and its numbered raw artifacts.
+Only its new test target ran; accepted R/D/S/M suites were not rerun.
+`check_artifacts.py` checks historical prefixes, immutable prior files,
+producing-revision manifests, source scope, exact counts/arithmetic and links;
+current `SHA256SUMS` is generated only after final artifact checks.

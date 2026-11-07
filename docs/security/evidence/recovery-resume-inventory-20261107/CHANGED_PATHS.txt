@@ -92,3 +92,21 @@ Raw execution directory artifacts (each has .stdout, .stderr, .exit):
 08-format-check
 09-documentation-check
 10-final-documentation-check
+
+Separate hypothetical content-binding experiment:
+crates/qbind-consensus/tests/content_binding_experiment_tests.rs
+docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+docs/security/evidence/recovery-resume-inventory-20261107/README.md
+docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/commands.txt
+docs/security/evidence/recovery-resume-inventory-20261107/content-binding-experiment/README.md
+docs/security/evidence/recovery-resume-inventory-20261107/content-binding-experiment/COMMANDS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/content-binding-experiment/check_artifacts.py
+docs/security/evidence/recovery-resume-inventory-20261107/content-binding-experiment/SHA256SUMS
+Raw artifacts in that directory, each .stdout/.stderr/.exit:
+01-discovery
+02-discovery
+03-focused
+04-format
+05-integrity
+06-final-integrity

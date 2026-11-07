@@ -499,3 +499,13 @@ Prior bounded acceptances remain preserved; this author execution does not
 establish production recovery, content binding or any application/signing/
 clear/resume authority. B/C remain unselected and current refusal stays in
 force. See the execution directory's `SHA256SUMS` for current artifact hashes.
+
+## 16. Separate hypothetical content-binding experiment
+
+The [test-only complete-statement experiment](content-binding-experiment/README.md)
+records seven new passing author tests, exact bytes, fixture committee rules,
+omission sensitivities and explicit non-results. Accepted R/D/S/M controls
+and their 87 author-reported passes remain PASSED / CLOSED within scope,
+unchanged and not rerun. This new experiment does not select B/C or establish
+production/historical binding, finality, application or resume authority.
+Current hashes and producer-revision integrity are recorded separately.

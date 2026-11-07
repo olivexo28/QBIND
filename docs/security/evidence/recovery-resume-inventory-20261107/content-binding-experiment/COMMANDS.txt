@@ -1,0 +1,133 @@
+TEST-ONLY CONTENT BINDING — AUTHOR COMMANDS / OUTCOMES
+
+Working directory: /workspaces/QBIND/olivexo28/QBIND
+Evidence directory P (notation):
+docs/security/evidence/recovery-resume-inventory-20261107/content-binding-experiment
+Full stdout/stderr are preserved separately, not console previews.
+
+Initial exact repository verification:
+$ git remote get-url origin && git branch --show-current && git rev-parse HEAD 'HEAD^{tree}' '9bf0eb43e4e3c601d02d3886d220b0abeb3a103e^{tree}' && git ls-remote --heads origin refs/heads/docs/authenticated-recovery-resume-inventory refs/heads/main && git merge-base --is-ancestor 9bf0eb43e4e3c601d02d3886d220b0abeb3a103e HEAD && git status --porcelain=v1 && git diff --cached --name-only
+Exit 0, output:
+https://github.com/olivexo28/QBIND
+docs/authenticated-recovery-resume-inventory
+4162a9c20b2686f6a4d662e7e487eb536073e37a
+27068454296bc4bf4980e79b79b50d41d2406431
+56509b20084ee1cbe2c42fda9d73d87e4c82c33f
+4162a9c20b2686f6a4d662e7e487eb536073e37a refs/heads/docs/authenticated-recovery-resume-inventory
+9bf0eb43e4e3c601d02d3886d220b0abeb3a103e refs/heads/main
+No worktree/staging output. Identity, exact refs/trees, ancestry matched.
+
+$ mkdir -p docs/security/evidence/recovery-resume-inventory-20261107/content-binding-experiment
+Exit 0, no output.
+$ rustfmt --edition 2021 crates/qbind-consensus/tests/content_binding_experiment_tests.rs
+Exit 0, no output; repeated after the test-only tag correction.
+
+For each numbered capture, executed shell convention:
+  <command> > <P>/<name>.stdout 2> <P>/<name>.stderr
+  result=$?
+  printf '%s\n' "$result" > <P>/<name>.exit
+  <console previews only>
+  exit "$result"
+The .exit captures the command, not the preview. No key or signature material
+was printed. Fixed public test-statement constants are documented separately.
+
+01-discovery:
+$ cargo test -p qbind-consensus --test content_binding_experiment_tests -- --list
+Exit 101. Initial ASCII literal QBIND-TEST-CBND01 had 17 bytes, not declared
+16; compiler E0308. Only new test literal/expected bytes changed to the
+16-byte QBIND-TEST-CBND1. Complete .stdout/.stderr/.exit retained.
+Preview: cat stdout; tail -8 stderr.
+
+02-discovery:
+$ cargo test -p qbind-consensus --test content_binding_experiment_tests -- --list
+Exit 0. Seven test names, 0 benchmarks. Complete output retained.
+Preview: cat stdout; tail -5 stderr.
+
+03-focused:
+$ cargo test -p qbind-consensus --test content_binding_experiment_tests -- --nocapture --test-threads=1
+Exit 0. Seven passed, zero failed/ignored/measured/filtered, 1.43s. Complete
+stdout/stderr retained; 37 existing library warnings not changed. No accepted
+or unrelated suites rerun. Defective omission/uniqueness controls are observed
+test-only sensitivities, not production-security passes.
+Preview: cat stdout; tail -5 stderr.
+
+Pinned source inspection:
+view crates/qbind-crypto/src/consensus_sig.rs lines 1-140
+view crates/qbind-crypto/src/ml_dsa44.rs lines 30-160, 386-439, 576-605
+rg 'pub fn (generate_keypair|sign\()|impl ConsensusSigVerifier|fn verify_vote'
+  crates/qbind-crypto/src/ml_dsa44.rs
+Located keygen386/sign412/trait implementation576/verify_vote577; direct
+wrapper accepts raw preimage and ignores validator_id. Fixed fixture key
+lookup, not the backend id parameter, associates signer identity to key.
+No assumption of a message-bound consensus verifier was made.
+
+04-format:
+$ rustfmt --edition 2021 --check crates/qbind-consensus/tests/content_binding_experiment_tests.rs
+Exit 0, stdout/stderr empty, fully captured.
+
+05-integrity:
+$ python3 docs/security/evidence/recovery-resume-inventory-20261107/content-binding-experiment/check_artifacts.py
+Exit 1, complete stdout/stderr/exit retained. The initial script passed prefix,
+historical manifests, discovery and arithmetic, then a git diff path command
+without -- treated nonexistent .cargo as a revision/path ambiguity and exited
+128. Python surfaced CalledProcessError. The initial exact calls were:
+git("diff", "--name-only", BASE, "crates")
+git("diff", "--name-only", BASE, "Cargo.toml", "Cargo.lock", ".cargo", ".github")
+The final script adds -- before both path lists. No source/test change or
+suppression of the error; 05 raw artifacts remain unchanged.
+
+06-final-integrity:
+$ python3 docs/security/evidence/recovery-resume-inventory-20261107/content-binding-experiment/check_artifacts.py
+Same capture convention into 06-final-integrity.stdout/.stderr/.exit.
+Exit 0; stderr empty; complete stdout retained: four byte prefixes,
+53 unchanged historical evidence/Audit files, unchanged audit SHA256,
+ten producing-revision manifests/129 entries, exact seven-test counts,
+arithmetic, unchanged accepted tests/production/configuration, private
+test-only scope, navigation/source ranges and scoped whitespace all passed.
+Final script is retained as exact executable
+documentation check code. It verifies four historical byte prefixes, immutable
+prior evidence/Audit/accepted tests, ten producer manifests (129 entries),
+seven discovered/executed names and outcomes, arithmetic, source/link scope.
+One original cargo stdout EOF blank line is explicitly excepted from scoped
+whitespace; raw stdout remains unmodified. This exception was intentional
+before staging, following the prior raw-output preservation rule.
+
+Current manifest generation (after all raw artifacts exist):
+$ python3 - <<'PY'
+import hashlib
+from pathlib import Path
+root = Path('docs/security/evidence/recovery-resume-inventory-20261107')
+here = root / 'content-binding-experiment'
+out = here / 'SHA256SUMS'
+paths = [Path('crates/qbind-consensus/tests/content_binding_experiment_tests.rs'),
+         Path('docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md'),
+         Path('Audit/QBIND_SECURITY_FINDINGS_REGISTER.md')]
+paths += [root / name for name in ['README.md', 'CHANGED_PATHS.txt', 'commands.txt']]
+paths += list(root.glob('*SHA256SUMS'))
+paths += [root / 'binding-sensitivity-execution/SHA256SUMS']
+paths += [p for p in here.iterdir() if p.is_file() and p != out]
+out.write_text(''.join(f'{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.as_posix()}\n' for p in sorted(set(paths))))
+print(f'current manifest entries={len(set(paths))}; excludes itself')
+PY
+$ sha256sum -c docs/security/evidence/recovery-resume-inventory-20261107/content-binding-experiment/SHA256SUMS
+Old manifests are checked at their producers, not against appended current
+files. Current manifest includes preserved audit/manifests separately. Its
+own hash and final commit IDs are reported outside the self-hashed commit.
+
+Publication (only after successful checks and exact ref revalidation):
+$ git add -- crates/qbind-consensus/tests/content_binding_experiment_tests.rs docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md docs/security/evidence/recovery-resume-inventory-20261107/README.md docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt docs/security/evidence/recovery-resume-inventory-20261107/commands.txt docs/security/evidence/recovery-resume-inventory-20261107/content-binding-experiment
+$ git diff --cached --check -- . ':!docs/security/evidence/recovery-resume-inventory-20261107/content-binding-experiment/03-focused.stdout'
+$ git diff --cached --stat && git diff --cached --name-only
+$ git commit -m "test: isolate hypothetical complete content statement experiment" -m "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+$ git push origin HEAD:refs/heads/docs/authenticated-recovery-resume-inventory
+$ git show -s --format='commit=%H%ntree=%T%nparent=%P' HEAD && git ls-remote --heads origin refs/heads/docs/authenticated-recovery-resume-inventory refs/heads/main && git status --porcelain=v1 && git diff --cached --name-only && sha256sum docs/security/evidence/recovery-resume-inventory-20261107/content-binding-experiment/SHA256SUMS
+No force, reset/rebase, existing test changes, production caller, application,
+operational signing, live network, activation, PR, merge or main push.
+
+Final delivery inventory: 27 changed paths; current manifest covers 37
+entries, including every changed path except itself and separately preserved
+audit/ten producer manifests. Staged bytes are compared with working bytes;
+no unrelated staged/unstaged/untracked path is permitted.
+Identity revalidation uses the initial exact command immediately before
+commit, expecting unchanged base/task ref and main. Final publication
+outcomes/identifiers are reported outside this self-hashed record.

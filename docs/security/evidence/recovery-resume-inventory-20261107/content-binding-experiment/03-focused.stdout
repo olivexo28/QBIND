@@ -1,0 +1,17 @@
+
+running 7 tests
+test allocated_oversized_or_malformed_inputs_refuse_before_encoding_and_crypto ... LIMITS deliberately allocated negatives: pre-encoding/pre-crypto only, not pre-input-allocation; corrupt last signature refuses without quorum output
+ok
+test duplicate_unauthorized_and_insufficient_entries_never_add_weight ... ok
+test every_complete_field_mutation_refuses_original_signatures_and_restores ... BINDING seven same-path field mutations refused; full parent/content suffix included; each restored original passed
+ok
+test exact_complete_encoding_and_separate_fixture_accounting ... ACCOUNTING statement=358 bundle=7632 maximum_bundle=10056 signatures=7260 public_keys=5248 sequential_setup_secret_key=2560; decoded+encoded coexist; total memory/work/runtime UNMEASURED
+ok
+test omitted_field_defects_accept_substitutions_and_are_detected ... SENSITIVITY omitted-field test-only encoding accepts substitutions for all seven fields; intended refusal assertion would fail; complete path refuses/restores
+ok
+test omitted_uniqueness_defect_counts_one_signer_three_times_and_is_detected ... SENSITIVITY uniqueness bypass test-only: one real signature reused three times; fixture quorum incorrectly passes; strict path refuses and distinct originals restore
+ok
+test sufficient_unique_synthetic_signatures_pass_and_restore ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.43s
+

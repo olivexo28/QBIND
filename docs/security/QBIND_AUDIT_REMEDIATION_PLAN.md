@@ -5059,3 +5059,24 @@ recovery, full-prefix finality or resume authority. Total working-memory and
 operational bounds remain unselected. B/C remain unselected and current
 refusal stays in force; A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
 Activation remains DISABLED; public DevNet remains NO-GO.
+
+## 44. Hypothetical test-only content binding — independent review pending
+
+The [separate complete-statement experiment](evidence/recovery-resume-inventory-20261107/content-binding-experiment/README.md)
+records seven new author-executed tests: seven passed, zero failed/ignored/
+filtered. Synthetic real ML-DSA-44 signatures cover bounded complete bytes;
+explicit test committee uniqueness/quorum and deliberate omission sensitivity
+are exercised in one private integration target. Exact encoding, limits,
+entrypoints/counters, complete outputs/exits and initial compile failure
+are retained. No production or accepted test source/configuration changes.
+
+The user supplied PASS WITH LIMITATIONS for R/D/S/M: its specified controls
+and 87 distinct author-reported passing tests remain PASSED / CLOSED within
+their reviewed scope, unchanged and not rerun. No reviewer rerun, identity
+or unavailable raw report is invented. This experiment selects neither B
+nor C, nor any protocol/wire/commitment construction. It grants no finality,
+historical/currentness evidence, durable application/ownership, signer
+history/exclusivity, clearance or resume authority. Working-memory/runtime
+and operational guarantees remain unmeasured/unselected; current refusal
+remains. A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
+Activation remains DISABLED; public DevNet remains NO-GO.
