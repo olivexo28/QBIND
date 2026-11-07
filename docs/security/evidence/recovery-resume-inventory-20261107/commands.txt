@@ -297,6 +297,22 @@ Post-push verification record:
     stdout: empty for both.
     exit 0; worktree and staging clean.
 
+Final log-follow-up identity check:
+
+  Unsuccessful assertion:
+    test "$commit" = 826b1c1
+    stdout: empty.
+    exit 1. As above, the variable held full `git rev-parse HEAD`, while the
+    expected value was abbreviated. No reset or other repository action
+    followed. The subsequent read-only final identity command reported:
+      commit=826b1c19a00cea08114cec10c0b64d49becb296f
+      tree=b1f0799ca77bc8a970c4902c8b3bb6b8f1feafec
+      parent=8344e92412d37882ef059b6158ead1959b0fa165
+      remote task ref=826b1c19a00cea08114cec10c0b64d49becb296f
+      remote main ref=9bf0eb43e4e3c601d02d3886d220b0abeb3a103e
+    final worktree output: `## docs/authenticated-recovery-resume-inventory`
+    (clean; no staged or unstaged paths).
+
   Unsuccessful follow-up scope assertion:
     The documentation-link checker compared the current unstaged delta with
     all five paths already committed by 8344e92412d37882ef059b6158ead1959b0fa165.
