@@ -430,3 +430,18 @@ inventory corrections and bounded acceptances without reopening them or
 inventing reviewer metadata. Current correction integrity is recorded in
 `AP1-CORRECTION-SHA256SUMS`; prior manifests remain verified at their
 producing revisions.
+
+## 10. Candidate finality witness and AP1 navigation
+
+The [candidate finality-witness contract](FINALITY_WITNESS_CONTRACT.md) is a
+source-backed design for independent review, not an implemented verifier or
+authority to apply or resume. It requires per-block committed evidence,
+separates supporting descendants and calls out the missing reviewed
+quorum-to-content binding.
+
+The user supplied **PASS WITH LIMITATIONS** for the authenticated-prefix
+direction and **PASSED / CLOSED** for AP1 within its documentation scope;
+prior inventory corrections and bounded acceptances remain preserved. The
+[stable AP1 navigation note](AUTHENTICATED_PREFIX_VERIFICATION_CONTRACT.md#ap1-correction)
+supersedes the earlier single-hyphen link in section 9 without changing
+historical bytes; a rendered GitHub click was not checked.

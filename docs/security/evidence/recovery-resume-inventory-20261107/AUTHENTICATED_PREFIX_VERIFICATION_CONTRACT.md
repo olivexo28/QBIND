@@ -297,3 +297,21 @@ The plan addendum and current AP1 hashes are recorded in
 `CONTRACT-SHA256SUMS` and earlier inventory manifests remain historical
 evidence verified against their producing revisions, not against these
 appended bytes.
+
+<a id="ap1-correction"></a>
+## 9. AP1 navigation and finality-witness follow-up
+
+The user supplied **PASSED / CLOSED** for AP1 within its documented scope;
+the navigation follow-up does not reopen it. This stable explicit anchor
+supersedes the earlier single-hyphen fragment in inventory section 9 and plan
+section 37. The preserved section-8 heading's GitHub-generated fragment is
+[`#8-ap1--block-identity-and-committed-prefix-citation-correction`](#8-ap1--block-identity-and-committed-prefix-citation-correction):
+the two hyphens are distinct and must not be collapsed. A rendered GitHub
+click was **not checked**; the explicit anchor and fragment were checked
+locally against the preserved heading. See section 8 above for the full AP1
+correction, including the corrected block-ID citation and G/P/B clarification.
+
+The proposed [candidate finality-witness contract](FINALITY_WITNESS_CONTRACT.md)
+further distinguishes a committed prefix from supporting descendants and
+requires separately reviewed authenticated content binding. It is not
+implemented, approved, or permission to apply or participate.

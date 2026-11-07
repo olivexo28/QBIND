@@ -1,0 +1,204 @@
+Candidate finality-witness documentation validation
+====================================================
+
+The user supplied PASS WITH LIMITATIONS for the authenticated-prefix
+direction and AP1 PASSED / CLOSED within its documented scope. No reviewer
+identity or raw review artifact is asserted. The AP1 navigation note is a
+follow-up, not a reopening. No Rust tests, builds, live node/network operation,
+operational signing or activation were performed.
+
+Pre-change identity
+-------------------
+
+  set -eu; printf 'origin='; git remote get-url origin; printf 'branch='; git branch --show-current; git show -s --format='commit=%H%ntree=%T%nparent=%P' HEAD; printf 'main_tree='; git rev-parse '9bf0eb43e4e3c601d02d3886d220b0abeb3a103e^{tree}'; git ls-remote origin refs/heads/docs/authenticated-recovery-resume-inventory refs/heads/main; git merge-base --is-ancestor 9bf0eb43e4e3c601d02d3886d220b0abeb3a103e HEAD; echo 'ancestry=PASS'; printf 'status:\n'; git status --porcelain=v1 --untracked-files=all; printf 'staged:\n'; git diff --cached --name-only
+
+  stdout:
+    origin=https://github.com/olivexo28/QBIND
+    branch=docs/authenticated-recovery-resume-inventory
+    commit=c12b46497a404171ca41c640f614f0c308ae514b
+    tree=168e174c0e0c598065e5710207db3e05084b6856
+    parent=a4620f1e9363fbd30b23f06448e8f19174de8192
+    main_tree=56509b20084ee1cbe2c42fda9d73d87e4c82c33f
+    c12b46497a404171ca41c640f614f0c308ae514b refs/heads/docs/authenticated-recovery-resume-inventory
+    9bf0eb43e4e3c601d02d3886d220b0abeb3a103e refs/heads/main
+    ancestry=PASS
+    status: (empty)
+    staged: (empty)
+  exit 0.
+
+Semantic source inspection, not just line existence
+--------------------------------------------------
+
+The exact pinned source excerpts were read for the ID derivation, three-chain
+commit, QC verification, logical and retained evidence, Vote and Proposal
+canonical bodies, signing domain, trusted authority, baseline and dispatch.
+The following assertions corroborate that reading; they are not a proof of
+protocol safety or current authority.
+
+  python3 - <<'PY'
+  import subprocess
+  r='9bf0eb43e4e3c601d02d3886d220b0abeb3a103e'
+  def source(path,a,b):
+   return '\n'.join(subprocess.check_output(['git','show',f'{r}:{path}'],text=True).splitlines()[a-1:b])
+  id=source('crates/qbind-consensus/src/basic_hotstuff_engine.rs',3875,3890)
+  assert all(x in id for x in ('proposer: ValidatorId','view: u64','parent_block_id: &[u8; 32]','id[..8].copy_from_slice(&proposer_bytes)','id[8..16].copy_from_slice(&view_bytes)','id[16..32].copy_from_slice(&parent_block_id[..16])')) and 'payload' not in id
+  commit=source('crates/qbind-consensus/src/hotstuff_state_engine.rs',1819,1938)
+  assert all(x in commit for x in ('self.blocks.get(&qc.block_id)','match &b.parent_id','match &p.parent_id','node.own_qc.is_none()','p.own_qc.is_none()','g.own_qc.is_none()','g_view < p_view && p_view < b_view','Some(h) => g_height > h','None => {','g_view > committed_node.view','if should_commit && height_ok','self.committed_block = Some(g_id.clone())','self.committed_height = Some(g_height)'))
+  vote=source('crates/qbind-wire/src/consensus.rs',206,220)
+  assert all(x in vote for x in ('self.chain_id','self.epoch','self.height','self.round','self.step','self.block_id','self.validator_index','self.suite_id')) and 'parent' not in vote and 'payload' not in vote
+  proposal=source('crates/qbind-wire/src/consensus.rs',915,954)
+  assert all(x in proposal for x in ('self.header.parent_block_id','self.header.payload_hash','self.txs'))
+  print('PASS semantic source: ID inputs/copies/no payload; G/P/B parent/own-QC/view and monotonic G commit; vote fields and proposal full-parent/payload fields')
+  PY
+  stdout: PASS semantic source: ID inputs/copies/no payload; G/P/B
+    parent/own-QC/view and monotonic G commit; vote fields and proposal
+    full-parent/payload fields
+  exit 0.
+
+Historical producing-revision integrity
+--------------------------------------
+
+  python3 - <<'PY'
+  import hashlib,subprocess
+  root='docs/security/evidence/recovery-resume-inventory-20261107/'
+  for rev,name in [('61028eb6dbb91f0834a5235f20c935bb0ff5b549','SHA256SUMS'),('8344e92412d37882ef059b6158ead1959b0fa165','CORRECTION-SHA256SUMS'),('a4620f1e9363fbd30b23f06448e8f19174de8192','CONTRACT-SHA256SUMS'),('c12b46497a404171ca41c640f614f0c308ae514b','AP1-CORRECTION-SHA256SUMS')]:
+   manifest=subprocess.check_output(['git','show',f'{rev}:{root}{name}'],text=True); count=0
+   for line in manifest.splitlines():
+    if not line.strip(): continue
+    expected,path=line.split('  ',1); data=subprocess.check_output(['git','show',f'{rev}:{path}'])
+    assert hashlib.sha256(data).hexdigest()==expected,(rev,path)
+    count+=1
+   print(f'PASS {name} producer={rev} entries={count}')
+  PY
+  stdout:
+    PASS SHA256SUMS producer=61028eb6dbb91f0834a5235f20c935bb0ff5b549 entries=8
+    PASS CORRECTION-SHA256SUMS producer=8344e92412d37882ef059b6158ead1959b0fa165 entries=8
+    PASS CONTRACT-SHA256SUMS producer=a4620f1e9363fbd30b23f06448e8f19174de8192 entries=8
+    PASS AP1-CORRECTION-SHA256SUMS producer=c12b46497a404171ca41c640f614f0c308ae514b entries=8
+  exit 0. No historical manifest is presented as checking the newly appended
+  files. WITNESS-SHA256SUMS is a separate current delivery manifest.
+
+AP1 fragment and new links
+--------------------------
+
+  python3 - <<'PY'
+  from pathlib import Path
+  import re,subprocess,unicodedata
+  root=Path('docs/security/evidence/recovery-resume-inventory-20261107')
+  docs=[root/'README.md',root/'AUTHENTICATED_PREFIX_VERIFICATION_CONTRACT.md',root/'FINALITY_WITNESS_CONTRACT.md',Path('docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md')]
+  def slug(s):
+   s=''.join(c for c in s.lower() if not (unicodedata.category(c).startswith('P') and c not in '-_'))
+   s=''.join(c for c in s if not unicodedata.category(c).startswith('S'))
+   return s.replace(' ','-')
+  historical='8-ap1-block-identity-and-committed-prefix-citation-correction'
+  skipped=0
+  for doc in docs:
+   text=doc.read_text(); local=0
+   if doc.name=='QBIND_AUDIT_REMEDIATION_PLAN.md': text=text.split('## 37. AP1 authenticated-prefix citation correction',1)[1]
+   for link in re.findall(r'(?<!!)\[[^]]+\]\(([^)]+)\)',text):
+    if link.startswith(('https://','http://','mailto:')): continue
+    path,_,frag=link.partition('#'); target=(doc.parent/path).resolve() if path else doc.resolve()
+    assert target.exists(),(str(doc),link)
+    if frag:
+     assert target.is_file(); target_text=target.read_text(); headings=re.findall(r'^#+\s+(.+)$',target_text,re.M); ids=re.findall(r'<a\s+id="([^"]+)"',target_text)
+     if frag==historical:
+      assert slug(next(h for h in headings if h.startswith('8. AP1 —'))) == '8-ap1--block-identity-and-committed-prefix-citation-correction'
+      skipped+=1; continue
+     assert frag in {slug(h) for h in headings} or frag in ids,(str(doc),link)
+    local+=1
+   print(f'PASS {doc}: {local} local links/anchors (plan sections 37-38)')
+  assert skipped==2,skipped
+  print('PASS exact AP1 fragment: 8-ap1--block-identity-and-committed-prefix-citation-correction; two historical links superseded; explicit ap1-correction anchor present')
+  refs=re.findall(r'https://github\.com/olivexo28/QBIND/blob/([0-9a-f]{40})/([^#]+)#L(\d+)(?:-L(\d+))?',(root/'FINALITY_WITNESS_CONTRACT.md').read_text())
+  assert refs and {x[0] for x in refs}=={'9bf0eb43e4e3c601d02d3886d220b0abeb3a103e'}
+  for rev,path,a,b in refs:
+   lines=subprocess.check_output(['git','show',f'{rev}:{path}'],text=True).splitlines(); assert 1<=int(a)<=int(b or a)<=len(lines),(path,a,b)
+  print(f'PASS {len(refs)} witness source links pinned/in bounds (not a semantic proof)')
+  print('GitHub rendered click: NOT CHECKED')
+  PY
+  stdout:
+    PASS README.md: 7 local links/anchors
+    PASS AUTHENTICATED_PREFIX_VERIFICATION_CONTRACT.md: 5 local links/anchors
+    PASS FINALITY_WITNESS_CONTRACT.md: 0 local links/anchors
+    PASS QBIND_AUDIT_REMEDIATION_PLAN.md: 2 local links/anchors (sections 37-38)
+    PASS exact AP1 fragment: 8-ap1--block-identity-and-committed-prefix-citation-correction; two historical links superseded; explicit ap1-correction anchor present
+    PASS 15 witness source links pinned/in bounds (not a semantic proof)
+    GitHub rendered click: NOT CHECKED
+  exit 0. The stable explicit anchor does not depend on generated-heading slug
+  normalization. The old single-hyphen links remain as historical bytes and
+  are explicitly superseded.
+
+Unsuccessful attempts
+---------------------
+
+1. The first AP1 link-check script was identical to the successful script
+   above except it did not limit the remediation plan to sections 37-38.
+   After reporting the three inventory/contract documents as passing, it
+   reported an unrelated pre-existing plan link
+   `../devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md#run-422-a17-f1-rs1-f7-catch-up-containment-implementation`
+   as an assertion failure; exit 1. This link is outside the present
+   append-only delivery and its complex historical heading was not resolved
+   by that simple local slug routine. The corrected command above checks the
+   delivered plan sections and all new/relevant AP1 fragments; no historical
+   link was rewritten.
+2. The command-log appendix was initially inserted after an earlier repeated
+   status sentence. The following prefix check exposed it:
+
+   BASE=c12b46497a404171ca41c640f614f0c308ae514b; path=docs/security/evidence/recovery-resume-inventory-20261107/commands.txt; cmp <(git show "$BASE:$path") <(head -c "$(git cat-file -s "$BASE:$path")" "$path") && echo 'PASS commands log prefix'
+     stdout: /dev/fd/63 /dev/fd/62 differ: char 23207, line 454
+     exit 1. The newly inserted note was moved to the physical EOF; baseline
+     bytes were not discarded, and the final exact-prefix check below passes.
+
+Prefix, scope, and whitespace
+-----------------------------
+
+  set -eu
+  BASE=c12b46497a404171ca41c640f614f0c308ae514b
+  for path in docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md docs/security/evidence/recovery-resume-inventory-20261107/README.md docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt docs/security/evidence/recovery-resume-inventory-20261107/commands.txt docs/security/evidence/recovery-resume-inventory-20261107/AUTHENTICATED_PREFIX_VERIFICATION_CONTRACT.md; do cmp <(git show "$BASE:$path") <(head -c "$(git cat-file -s "$BASE:$path")" "$path"); echo "PASS exact prefix $path"; done
+  cmp <(git show "$BASE:Audit/QBIND_SECURITY_FINDINGS_REGISTER.md") Audit/QBIND_SECURITY_FINDINGS_REGISTER.md
+  git diff --quiet "$BASE" -- docs/security/evidence/empty-restore-response docs/security/evidence/voting_ancestry docs/security/evidence/recovery-resume-inventory-20261107/SHA256SUMS docs/security/evidence/recovery-resume-inventory-20261107/CORRECTION-SHA256SUMS docs/security/evidence/recovery-resume-inventory-20261107/CONTRACT-SHA256SUMS docs/security/evidence/recovery-resume-inventory-20261107/AP1-CORRECTION-SHA256SUMS
+  git diff --check && git diff --cached --check
+  echo 'PASS audit register and preserved evidence/manifests unchanged; whitespace clean'
+  python3 - <<'PY'
+  import subprocess
+  root='docs/security/evidence/recovery-resume-inventory-20261107/'
+  expected={'docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md',*(root+p for p in ['README.md','CHANGED_PATHS.txt','commands.txt','AUTHENTICATED_PREFIX_VERIFICATION_CONTRACT.md','FINALITY_WITNESS_CONTRACT.md','WITNESS-CHECKS.txt'])}
+  status=subprocess.check_output(['git','status','--porcelain=v1','--untracked-files=all'],text=True)
+  assert {s[3:] for s in status.splitlines()}==expected,status
+  assert not subprocess.check_output(['git','diff','--cached','--name-only'],text=True)
+  print('PASS exact documentation-only pending scope; staging empty')
+  PY
+  stdout: all five exact prefixes PASS; audit register and preserved
+    evidence/manifests unchanged; whitespace clean; exact documentation-only
+    pending scope and empty staging PASS.
+  exit 0. This scope was checked before adding WITNESS-SHA256SUMS; the
+  manifest is the only additional delivery path.
+
+Current manifest:
+
+  sha256sum -c docs/security/evidence/recovery-resume-inventory-20261107/WITNESS-SHA256SUMS
+    stdout: all listed paths report OK; exit 0.
+  The manifest covers current deliverable bytes and preserved evidence; it
+  deliberately excludes itself and this command record. Their SHA-256 values
+  are reported separately. Historical manifests above were verified against
+  their respective producer revisions rather than the appended working tree.
+
+Final scope and acceptance-label check, after adding the manifest:
+
+  python3 - <<'PY'
+  import subprocess
+  from pathlib import Path
+  r='docs/security/evidence/recovery-resume-inventory-20261107/'
+  expected={'docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md',*(r+p for p in ['README.md','CHANGED_PATHS.txt','commands.txt','AUTHENTICATED_PREFIX_VERIFICATION_CONTRACT.md','FINALITY_WITNESS_CONTRACT.md','WITNESS-CHECKS.txt','WITNESS-SHA256SUMS'])}
+  s=subprocess.check_output(['git','status','--porcelain=v1','--untracked-files=all'],text=True)
+  assert {l[3:] for l in s.splitlines()}==expected,s
+  assert not subprocess.check_output(['git','diff','--cached','--name-only'],text=True)
+  w=Path(r+'FINALITY_WITNESS_CONTRACT.md').read_text()
+  rows=[l for l in w.splitlines() if l.startswith('| ') and '| FUTURE / NOT EXECUTED |' in l]
+  assert len(rows)==10,len(rows)
+  assert 'APPLICATION_OR_RESUME_AUTHORITY=NOT GRANTED' in w
+  print('PASS exact 8-path documentation scope, staging empty; 10 future acceptance cases and no application/resume authority')
+  PY
+    stdout: PASS exact 8-path documentation scope, staging empty; 10 future
+      acceptance cases and no application/resume authority
+    exit 0.

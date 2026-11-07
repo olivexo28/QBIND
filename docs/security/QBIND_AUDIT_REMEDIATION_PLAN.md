@@ -4935,3 +4935,25 @@ Current correction hashes are in
 historical manifests are checked only against their producing revisions.
 A17-F1 / RS1-F7, RS1, and A33-F1 / E27 remain **OPEN**; activation remains
 **DISABLED**; public DevNet remains **NO-GO**.
+
+## 38. Candidate finality-witness contract — independent review pending
+
+The [candidate finality-witness contract](evidence/recovery-resume-inventory-20261107/FINALITY_WITNESS_CONTRACT.md)
+requires independently trusted anchor and authority inputs, distinct G/P/B
+roles, explicit per-claimed-block finality evidence, full parent and content
+binding, and finite pre-effect resource admission. It treats missing
+quorum-to-content binding as a refusal, not an implemented mechanism. The
+candidate single-epoch slice, test-only numeric ceilings and all acceptance
+cases are proposed; no format, production verifier, application or resume
+authority is selected.
+
+The user supplied **PASS WITH LIMITATIONS** for the authenticated-prefix
+direction and **PASSED / CLOSED** for AP1 within its documentation scope.
+Prior inventory corrections and bounded acceptances remain preserved; no
+reviewer identity or raw artifact is invented. The [stable AP1 navigation
+note](evidence/recovery-resume-inventory-20261107/AUTHENTICATED_PREFIX_VERIFICATION_CONTRACT.md#ap1-correction)
+supersedes the earlier single-hyphen fragment in section 37 without changing
+historical bytes; a rendered GitHub click was not checked.
+
+A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain **OPEN**; activation remains
+**DISABLED**; public DevNet remains **NO-GO**.

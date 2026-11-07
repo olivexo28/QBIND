@@ -670,3 +670,11 @@ No source or test files changed. No unchanged Rust tests or builds were run.
 The three prior inventory corrections and their bounded acceptances remain
 preserved. AP1 is corrected; A17-F1 / RS1-F7, RS1, and A33-F1 / E27 remain
 OPEN; activation remains DISABLED; public DevNet remains NO-GO.
+
+Finality-witness design follow-up: exact source, links, revision-aware
+integrity, scope, prefix and whitespace commands and outcomes are recorded in
+`WITNESS-CHECKS.txt`; current delivery hashes are in `WITNESS-SHA256SUMS`.
+The original log above remains an exact byte prefix. The user supplied
+PASS WITH LIMITATIONS for the authenticated-prefix direction and AP1
+PASSED / CLOSED within its documented scope. The AP1 navigation follow-up
+does not reopen AP1; no rendered GitHub click was performed.
