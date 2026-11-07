@@ -8,18 +8,18 @@ const TAG: &[u8; 16] = b"QBIND-TEST-CBND1";
 const CONTENT_CAP: usize = 256;
 const FIXED_BYTES: usize = 16 + 2 + 2 + 8 + 8 + 32 + 32 + 2;
 const SIGNATURE_BYTES: usize = 2420;
-const QUORUM: usize = 3;
-const COMMITTEE: usize = 4;
+pub(crate) const QUORUM: usize = 3;
+pub(crate) const COMMITTEE: usize = 4;
 
 #[derive(Clone)]
-struct Statement {
-    version: u16,
-    purpose: u16,
-    chain: u64,
-    epoch: u64,
-    authority: [u8; 32],
-    parent: [u8; 32],
-    content: Vec<u8>,
+pub(crate) struct Statement {
+    pub(crate) version: u16,
+    pub(crate) purpose: u16,
+    pub(crate) chain: u64,
+    pub(crate) epoch: u64,
+    pub(crate) authority: [u8; 32],
+    pub(crate) parent: [u8; 32],
+    pub(crate) content: Vec<u8>,
 }
 
 #[derive(Clone, Copy)]
@@ -34,13 +34,13 @@ enum Field {
 }
 
 #[derive(Clone, Copy, Default)]
-struct TestDefect {
+pub(crate) struct TestDefect {
     omit_field: Option<Field>,
     omit_uniqueness: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum Refusal {
+pub(crate) enum Refusal {
     ContentTooLarge,
     TooManyEndorsements,
     Duplicate(u16),
@@ -51,10 +51,10 @@ enum Refusal {
 }
 
 #[derive(Default)]
-struct Trace {
-    encoding_calls: usize,
-    backend_calls: usize,
-    verified_entries: usize,
+pub(crate) struct Trace {
+    pub(crate) encoding_calls: usize,
+    pub(crate) backend_calls: usize,
+    pub(crate) verified_entries: usize,
 }
 
 // Defect branches exist only in this integration target. A zeroed field models
@@ -94,19 +94,19 @@ fn test_encode(
 }
 
 #[derive(Clone)]
-struct Endorsement {
-    signer: u16,
-    signature: Vec<u8>,
+pub(crate) struct Endorsement {
+    pub(crate) signer: u16,
+    pub(crate) signature: Vec<u8>,
 }
 
-struct Fixture {
-    statement: Statement,
-    public: [Vec<u8>; COMMITTEE],
-    endorsements: Vec<Endorsement>,
+pub(crate) struct Fixture {
+    pub(crate) statement: Statement,
+    pub(crate) public: [Vec<u8>; COMMITTEE],
+    pub(crate) endorsements: Vec<Endorsement>,
 }
 
 impl Fixture {
-    fn new(defect: TestDefect) -> Self {
+    pub(crate) fn new(defect: TestDefect) -> Self {
         let statement = Statement {
             version: 1,
             purpose: 7,
@@ -149,7 +149,7 @@ impl Fixture {
     }
 }
 
-fn test_verify(
+pub(crate) fn test_verify(
     statement: &Statement,
     endorsements: &[Endorsement],
     public: &[Vec<u8>; COMMITTEE],

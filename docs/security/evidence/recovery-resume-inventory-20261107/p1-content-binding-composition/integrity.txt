@@ -1,0 +1,7 @@
+PASS: four append-only prefixes, 228 historical files and audit bytes
+PASS: 16 previous manifest entries against producing revision af3110da83a5555da5307b981e276f1cff9d058b
+PASS: prior test bodies unchanged; only test-crate visibility and module declaration added
+PASS: changed paths restricted to test-only composition and append-only evidence
+PASS: five distinct composition tests, focused/regression counts and retained failed attempt
+NOT ESTABLISHED: authenticated currentness, protocol finality, application or resume
+PASS: unstaged whitespace and targeted rustfmt checks

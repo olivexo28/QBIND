@@ -7,6 +7,9 @@ use std::rc::{Rc, Weak};
 #[path = "support/p1_provider_verifier_handoff.rs"]
 mod p1_provider_verifier_handoff;
 
+#[path = "support/p1_content_composition.rs"]
+mod p1_content_composition;
+
 const CANDIDATE_MAGIC: &[u8; 8] = b"QBP1TEST";
 const EVIDENCE_MAGIC: &[u8; 8] = b"QBE1TEST";
 const CANDIDATE_HEADER: usize = 12;

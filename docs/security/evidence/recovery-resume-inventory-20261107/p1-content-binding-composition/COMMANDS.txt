@@ -1,0 +1,54 @@
+P1 provider/content-binding composition command record
+
+Origin https://github.com/olivexo28/QBIND
+Branch docs/authenticated-recovery-resume-inventory
+Starting HEAD af3110da83a5555da5307b981e276f1cff9d058b
+Tree 622bbb167046ca5b2e201d9ab3be265ade72b95d
+Parent 25a03a1e82aca9643ea86f8368a3c6cedfe2826f
+Direct task ref af3110da83a5555da5307b981e276f1cff9d058b
+Direct main ref 9bf0eb43e4e3c601d02d3886d220b0abeb3a103e
+Main tree 56509b20084ee1cbe2c42fda9d73d87e4c82c33f
+At start: git remote get-url origin; git branch --show-current; git rev-parse
+HEAD, HEAD^{tree}, HEAD^ and main^{tree}; git merge-base --is-ancestor;
+git ls-remote origin for task and main; git status --porcelain=v1; and
+git diff --cached --name-only. Exit 0; exact refs matched, ancestry confirmed,
+worktree and index clean. No reset, rebase or force-push.
+
+Linux 6.12.8+ x86_64; rustc 1.99.1 (58cf8f9c3 2026-10-13),
+host x86_64-unknown-linux-gnu, LLVM 23.1.1; cargo 1.99.1
+(5f94df478 2026-08-27).
+
+First intermediate:
+  rustfmt --edition 2021 crates/qbind-consensus/tests/p1_provider_model_tests.rs crates/qbind-consensus/tests/content_binding_experiment_tests.rs crates/qbind-consensus/tests/p1_content_composition_tests.rs crates/qbind-consensus/tests/support/p1_content_composition.rs
+  cargo test -p qbind-consensus --test p1_content_composition_tests -- --nocapture
+Exit 0, 33 passed, 0 failed/ignored/filtered; first-focused.log.gz. A fifth
+mapping control was then added. The same format/check and discovery/focused
+commands below then passed with 34 tests; intermediate-focused.log.gz.
+The following intermediate regression command failed with exit 101:
+  cargo test -p qbind-consensus --test p1_provider_model_tests --test p1_provider_verifier_handoff_tests --test content_binding_experiment_tests
+Standalone content compilation produced E0433 because pub(super) at crate
+root has no parent. Raw output is visibility-failure.log.gz. Changed
+test-only visibility to pub(crate); no test logic changed. This failed
+attempt is not counted as a pass.
+
+Final commands, serial:
+  rustfmt --edition 2021 crates/qbind-consensus/tests/p1_provider_model_tests.rs crates/qbind-consensus/tests/content_binding_experiment_tests.rs crates/qbind-consensus/tests/p1_content_composition_tests.rs crates/qbind-consensus/tests/support/p1_content_composition.rs
+  rustfmt --edition 2021 --check crates/qbind-consensus/tests/p1_provider_model_tests.rs crates/qbind-consensus/tests/content_binding_experiment_tests.rs crates/qbind-consensus/tests/p1_content_composition_tests.rs crates/qbind-consensus/tests/support/p1_content_composition.rs
+  cargo test -p qbind-consensus --test p1_content_composition_tests -- --list
+  cargo test -p qbind-consensus --test p1_content_composition_tests -- --nocapture
+  cargo test -p qbind-consensus --test p1_provider_model_tests --test p1_provider_verifier_handoff_tests --test content_binding_experiment_tests
+All exit 0. discovery.log.gz lists 34 names; focused.log.gz reports 34 passed,
+0 failed, 0 ignored, 0 measured, 0 filtered. regressions.log.gz reports 7,
+34 and 34 passed respectively, all 0 failed/ignored/measured/filtered.
+These share test bodies; there are five distinct new composition tests.
+Warnings and raw outputs are retained; no other command failed.
+
+Documentation and integrity commands:
+  python3 docs/security/evidence/recovery-resume-inventory-20261107/p1-content-binding-composition/check_artifacts.py
+  git diff --check
+  git diff --cached --check
+  sha256sum -c docs/security/evidence/recovery-resume-inventory-20261107/p1-content-binding-composition/SHA256SUMS
+All exit 0; integrity.txt retains the checker results. Previous manifest
+entries are verified against their producing revision, not append-modified
+files. SHA256SUMS excludes itself. Final commit and direct refs are reported
+at delivery, since a commit cannot include its own hash.

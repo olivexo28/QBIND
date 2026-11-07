@@ -611,3 +611,16 @@ authority. Independent review is pending; prior bounded acceptances remain.
 
 A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
 Activation DISABLED; public DevNet NO-GO.
+
+## 25. P1 provider and content-binding composition
+
+The [test-only composition](p1-content-binding-composition/README.md) reuses
+the accepted provider and existing hypothetical content encoder and verifier
+with explicit identity, context and fixed test-threshold mapping. Parent and
+content mutations reach real signature checks; a witness-selected committee
+mutant is caught by the same selection oracle despite valid signatures.
+The result is not production provenance, quorum finality or resume authority.
+Independent review is pending; prior bounded acceptances remain unchanged.
+
+A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
+Activation DISABLED; public DevNet NO-GO.

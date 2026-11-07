@@ -252,3 +252,24 @@ docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-verifier-h
 docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-verifier-handoff/provider-regression.log.gz
 docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-verifier-handoff/integrity.txt
 docs/security/evidence/recovery-resume-inventory-20261107/p1-provider-verifier-handoff/SHA256SUMS
+
+P1 provider/content-binding test-only composition:
+crates/qbind-consensus/tests/p1_provider_model_tests.rs
+crates/qbind-consensus/tests/content_binding_experiment_tests.rs
+crates/qbind-consensus/tests/p1_content_composition_tests.rs
+crates/qbind-consensus/tests/support/p1_content_composition.rs
+docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+docs/security/evidence/recovery-resume-inventory-20261107/README.md
+docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/commands.txt
+docs/security/evidence/recovery-resume-inventory-20261107/p1-content-binding-composition/README.md
+docs/security/evidence/recovery-resume-inventory-20261107/p1-content-binding-composition/COMMANDS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/p1-content-binding-composition/check_artifacts.py
+docs/security/evidence/recovery-resume-inventory-20261107/p1-content-binding-composition/first-focused.log.gz
+docs/security/evidence/recovery-resume-inventory-20261107/p1-content-binding-composition/intermediate-focused.log.gz
+docs/security/evidence/recovery-resume-inventory-20261107/p1-content-binding-composition/visibility-failure.log.gz
+docs/security/evidence/recovery-resume-inventory-20261107/p1-content-binding-composition/discovery.log.gz
+docs/security/evidence/recovery-resume-inventory-20261107/p1-content-binding-composition/focused.log.gz
+docs/security/evidence/recovery-resume-inventory-20261107/p1-content-binding-composition/regressions.log.gz
+docs/security/evidence/recovery-resume-inventory-20261107/p1-content-binding-composition/integrity.txt
+docs/security/evidence/recovery-resume-inventory-20261107/p1-content-binding-composition/SHA256SUMS

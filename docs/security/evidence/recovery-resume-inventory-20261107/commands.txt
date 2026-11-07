@@ -779,3 +779,8 @@ P1 provider-to-verifier handoff: see
 `p1-provider-verifier-handoff/COMMANDS.txt` for discovery, focused and
 directly affected regression commands, output, preservation and hashes.
 Real signature verification is limited to the specified test message.
+
+P1 provider/content-binding composition: see
+`p1-content-binding-composition/COMMANDS.txt` for discovery, focused and
+affected regressions, the retained intermediate visibility failure, exact
+results, preservation checks and hashes. The 3-of-4 rule is test-only.
