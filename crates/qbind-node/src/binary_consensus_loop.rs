@@ -26479,6 +26479,16 @@ mod tests {
                                 true
                             }
 
+                            fn admit_preserving_prior_permit_mutant(&self) -> bool {
+                                let mut state = self.state.lock().unwrap();
+                                if !state.accepting || state.outstanding == MAX_OPERATIONS {
+                                    return false;
+                                }
+                                state.outstanding += 1;
+                                state.function_completed = false;
+                                true
+                            }
+
                             fn worker_started(&self) -> bool {
                                 let mut state = self.state.lock().unwrap();
                                 if state.outstanding == 0 || state.live_executors == MAX_EXECUTORS {
@@ -26611,16 +26621,6 @@ mod tests {
                                 state.unresolved_effect_observed = false;
                             }
 
-                            fn aggregate_permit_association_mutant(&self) -> bool {
-                                let state = self.state.lock().unwrap();
-                                !state.accepting
-                                    && state.outstanding == 0
-                                    && state.live_executors == 0
-                                    && state.permits == 0
-                                    && state.observations_valid
-                                    && state.any_permit_observed
-                                    && !state.unresolved_effect_observed
-                            }
                         }
 
                         #[derive(Default)]
@@ -27339,7 +27339,7 @@ mod tests {
                         }
 
                         #[test]
-                        fn prior_permit_does_not_authorize_later_effect_and_detects_aggregate_mutant() {
+                        fn prior_permit_does_not_authorize_later_effect_and_detects_stale_permit_mutant() {
                             let owner = TimeoutOwner::new();
                             let physical = Arc::new(PhysicalExecutors::default());
                             let first = make_f7_fixture();
@@ -27409,9 +27409,69 @@ mod tests {
                                 assert!(state.signature_returned);
                             }
                             assert!(!owner.closure_safe());
+
+                            let mutant_owner = TimeoutOwner::new();
+                            let physical = Arc::new(PhysicalExecutors::default());
+                            let first = make_f7_fixture();
+                            assert!(mutant_owner.admit());
+                            let (signer, _, _) = LifecycleSigner::new(
+                                &first,
+                                mutant_owner.clone(),
+                                SignMode::Return,
+                                None,
+                            );
+                            let (handle, completed_rx, terminated_rx, release_tx) = spawn_paused(
+                                first,
+                                mutant_owner.clone(),
+                                physical.clone(),
+                                signer,
+                                LifecycleFacade::default(),
+                            );
+                            completed_rx.recv_timeout(TEST_WAIT).unwrap();
+                            terminated_rx.recv_timeout(TEST_WAIT).unwrap();
+                            release_tx.send(()).unwrap();
+                            handle.join().unwrap();
+                            mutant_owner.worker_terminated();
+                            assert!(mutant_owner.state.lock().unwrap().permit_observed);
+
+                            let mut second = make_f7_fixture();
+                            second
+                                .engine
+                                .state_mut()
+                                .set_locked_qc(second.logical_qc.clone());
+                            assert!(mutant_owner.admit_preserving_prior_permit_mutant());
+                            let (release_signer_tx, release_signer_rx) = mpsc::channel();
+                            let (signer, entry_rx, _) = LifecycleSigner::new(
+                                &second,
+                                mutant_owner.clone(),
+                                SignMode::UnsafeCachedAdmission,
+                                Some((PausePoint::BeforePermit, release_signer_rx)),
+                            );
+                            let (handle, completed_rx, terminated_rx, release_worker_tx) = spawn_paused(
+                                second,
+                                mutant_owner.clone(),
+                                physical,
+                                signer,
+                                LifecycleFacade::default(),
+                            );
+                            entry_rx.recv_timeout(TEST_WAIT).unwrap();
+                            mutant_owner.revoke();
+                            release_signer_tx.send(()).unwrap();
+                            completed_rx.recv_timeout(TEST_WAIT).unwrap();
+                            terminated_rx.recv_timeout(TEST_WAIT).unwrap();
+                            release_worker_tx.send(()).unwrap();
+                            handle.join().unwrap();
+                            mutant_owner.worker_terminated();
+                            let state = mutant_owner.state.lock().unwrap();
+                            assert_eq!(state.underlying_calls, 2);
+                            assert!(state.any_permit_observed);
+                            assert!(state.permit_observed, "mutant retained the first operation's permit");
+                            assert!(!state.unpermitted_effect_observed);
+                            assert!(state.signature_returned);
+                            drop(state);
                             assert!(
-                                owner.aggregate_permit_association_mutant(),
-                                "sensitivity mutant incorrectly reuses the first operation's permit"
+                                mutant_owner.closure_safe(),
+                                "same checker exposes stale per-operation permit association"
                             );
                         }
 
