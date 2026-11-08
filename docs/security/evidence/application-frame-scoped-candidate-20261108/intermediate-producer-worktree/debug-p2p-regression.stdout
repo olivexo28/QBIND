@@ -1,0 +1,44 @@
+
+running 39 tests
+test p2p_tcp::decode_frame_tests::checked_frame_payload_endpoint_rejects_usize_overflow ... ok
+test p2p_tcp::decode_frame_tests::decode_frame_preserves_discriminator_and_trailing_frame_behavior ... ok
+test p2p_tcp::decode_frame_tests::decode_frame_rejects_maximum_declared_length_without_panicking ... ok
+test p2p_tcp::decode_frame_tests::decode_frame_rejects_short_header_and_truncated_payload ... ok
+test p2p_tcp::decode_frame_tests::decode_frame_round_trips_representative_messages ... ok
+test p2p_tcp::peer_retirement_tests::blocking_failure_after_interrupted_retirement_refuses_replacement ... ok
+test p2p_tcp::peer_retirement_tests::cancelled_monitor_retains_reader_handle_until_cleanup_observes_completion ... ok
+test p2p_tcp::peer_retirement_tests::cancelled_outbound_dial_keeps_handshake_worker_for_shutdown ... ok
+test p2p_tcp::peer_retirement_tests::cancelled_shutdown_keeps_old_owner_for_later_join ... ok
+test p2p_tcp::peer_retirement_tests::concurrent_replacement_is_refused_while_owned_cleanup_is_in_progress ... ok
+test p2p_tcp::peer_retirement_tests::delayed_old_failure_cannot_retire_replacement_session ... ok
+test p2p_tcp::peer_retirement_tests::active_read_and_queued_inbound_work_are_interrupted_without_replay ... ok
+test p2p_tcp::peer_retirement_tests::eviction_snapshot_preserves_later_admission_and_count ... ok
+test p2p_tcp::peer_retirement_tests::fatal_read_cleanup_failure_stays_owned_and_replacement_retries ... ok
+test p2p_tcp::peer_retirement_tests::fatal_read_racing_eviction_preserves_later_unrelated_peer ... ok
+test p2p_tcp::peer_retirement_tests::failed_shutdown_remains_tracked_and_blocks_replacement_until_retry_succeeds ... ok
+test p2p_tcp::peer_retirement_tests::fatal_read_racing_shutdown_keeps_owner_across_cancelled_cleanup ... ok
+test p2p_tcp::peer_retirement_tests::interrupted_fatal_handoff_autonomously_retires_and_retains_failed_cleanup ... ok
+test p2p_tcp::peer_retirement_tests::interrupted_fatal_handoff_completes_without_external_cleanup_and_is_identity_checked ... ok
+test p2p_tcp::peer_retirement_tests::monitor_panic_after_reader_join_is_retained_across_replacement ... ok
+test p2p_tcp::peer_retirement_tests::monitor_wait_uses_weak_registry_and_does_not_cycle_on_service_drop ... ok
+test p2p_tcp::peer_retirement_tests::observed_eof_retires_registered_session_and_joins_workers ... ok
+test p2p_tcp::peer_retirement_tests::observed_frame_decode_failure_retires_and_closes_remote_socket ... ok
+test p2p_tcp::peer_retirement_tests::outbound_retry_cancellation_retains_handshake_owner ... ok
+test p2p_tcp::peer_retirement_tests::outbound_retry_single_connection_budget ... ok
+test p2p_tcp::peer_retirement_tests::outbound_retry_single_connection_carries_handshake ... ok
+test p2p_tcp::peer_retirement_tests::outbound_service_cancellation_retains_handshake_owner ... ok
+test p2p_tcp::peer_retirement_tests::outbound_service_single_connection_budget ... ok
+test p2p_tcp::peer_retirement_tests::idle_healthy_and_unrelated_peer_remain_registered_after_fatal_read ... ok
+test p2p_tcp::peer_retirement_tests::outbound_service_single_connection_carries_handshake ... ok
+test p2p_tcp::peer_retirement_tests::published_count_cannot_wrap_when_replaced_before_caller_returns ... ok
+test p2p_tcp::peer_retirement_tests::queue_blocked_read_does_not_claim_fatal_error_observed ... ok
+test p2p_tcp::peer_retirement_tests::peer_join_failure_survives_timeout_and_cancelled_retry ... ok
+test p2p_tcp::peer_retirement_tests::reserved_registration_cannot_publish_after_shutdown ... ok
+test p2p_tcp::peer_retirement_tests::service_shutdown_joins_blocked_inbound_handshake ... ok
+test p2p_tcp::peer_retirement_tests::replacement_retires_only_displaced_session_and_preserves_new_and_other_peers ... ok
+test p2p_tcp::peer_retirement_tests::shutdown_owns_published_session_before_registration_returns ... ok
+test p2p_tcp::peer_retirement_tests::successful_inbound_handshake_reserved_during_shutdown_is_refused ... ok
+test p2p_tcp::peer_retirement_tests::shutdown_fences_inflight_registration_and_retains_cleanup_until_retry ... ok
+
+test result: ok. 39 passed; 0 failed; 0 ignored; 0 measured; 2212 filtered out; finished in 5.56s
+

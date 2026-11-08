@@ -1,0 +1,10 @@
+
+running 5 tests
+test p2p_tcp::decode_frame_tests::checked_frame_payload_endpoint_rejects_usize_overflow ... ok
+test p2p_tcp::decode_frame_tests::decode_frame_rejects_maximum_declared_length_without_panicking ... ok
+test p2p_tcp::decode_frame_tests::decode_frame_rejects_short_header_and_truncated_payload ... ok
+test p2p_tcp::decode_frame_tests::decode_frame_preserves_discriminator_and_trailing_frame_behavior ... ok
+test p2p_tcp::decode_frame_tests::decode_frame_round_trips_representative_messages ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 2246 filtered out; finished in 0.00s
+

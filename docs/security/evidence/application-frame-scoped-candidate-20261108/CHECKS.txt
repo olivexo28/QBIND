@@ -1,0 +1,66 @@
+# Application-frame scoped candidate — scope and integrity
+
+- Candidate base is exact protected main
+  `9bf0eb43e4e3c601d02d3886d220b0abeb3a103e` /
+  `56509b20084ee1cbe2c42fda9d73d87e4c82c33f`.
+- Source/test-only candidate commit
+  `c002a90e71d63747f0bb92246da78154c02c9e4a` has that main commit as parent.
+- Accepted producer endpoint is
+  `7fcb3b96dd4263dc60f1d81871c541ddb4210631` /
+  `e8881066b2b45e23b6c6d1b0368b8c632daecb16`.
+- Main `p2p_tcp.rs` blob:
+  `2430abbb742aa698caa056d04009a33efa4f40de`.
+- Accepted producer and candidate `p2p_tcp.rs` blob:
+  `ff9e99d8e77f51f3b7d118d198fa549c49d67870` (identical).
+- `git diff main accepted -- crates/qbind-node/src/p2p_tcp.rs` is the only
+  source/test patch carried. Candidate diff is exactly the same file/blob
+  as the accepted producer; no recovery-inventory or prototype source is
+  included.
+- Source identity commands/results:
+  `git rev-parse 9bf0eb43e4e3c601d02d3886d220b0abeb3a103e:crates/qbind-node/src/p2p_tcp.rs`
+  -> `2430abbb742aa698caa056d04009a33efa4f40de`;
+  `git rev-parse 7fcb3b96dd4263dc60f1d81871c541ddb4210631:crates/qbind-node/src/p2p_tcp.rs`
+  and `git rev-parse c002a90e71d63747f0bb92246da78154c02c9e4a:crates/qbind-node/src/p2p_tcp.rs`
+  -> `ff9e99d8e77f51f3b7d118d198fa549c49d67870`.
+- Candidate source-only commit changes exactly one file relative to main;
+  its complete file blob matches the accepted producer blob.
+- Source-only `git diff --check` and targeted
+  `rustfmt --check --edition 2021 crates/qbind-node/src/p2p_tcp.rs` pass. No
+  nested bincode
+  limits, catch-up guard changes, or raw transport-helper changes.
+- Retained corrected author results at producer commit: debug 5, release 5,
+  regression 39; 39 distinct bodies, 49 executions. These are historical,
+  not candidate validation. Candidate reruns are independently captured in
+  `raw/`, and the first wrong-worktree attempt is explicitly segregated in
+  `intermediate-producer-worktree/`.
+- Only x86_64 target was installed; native 32-bit execution NOT RUN.
+- Main's pre-existing audit register and evidence files remain unmodified.
+  The only new files are this candidate-specific evidence record and raw
+  execution captures.
+- `git diff --quiet 9bf0eb43e4e3c601d02d3886d220b0abeb3a103e -- Audit/QBIND_SECURITY_FINDINGS_REGISTER.md docs/security/evidence/recovery-resume-inventory-20261107`
+  passed (exit 0).
+- A first set of runs was accidentally invoked in the producer worktree; the
+  outputs were moved under `intermediate-producer-worktree/` and are
+  explicitly excluded from candidate validation counts. Candidate reruns
+  were then executed with the candidate path as working directory.
+- Raw Cargo output is retained byte-for-byte, including trailing blank
+  separator lines. `git diff --cached --check` returned exit 2 with exactly
+  six notices: one at EOF for each focused-debug, focused-release and
+  regression stdout file in both `raw/` and
+  `intermediate-producer-worktree/`. These are preserved raw output bytes,
+  not source/documentation whitespace defects.
+- `git diff --cached --check -- . ':!docs/security/evidence/application-frame-scoped-candidate-20261108/raw/**' ':!docs/security/evidence/application-frame-scoped-candidate-20261108/intermediate-producer-worktree/**'`
+  passed, exit 0 for source and documentation, excluding unchanged raw
+  captures.
+- One fail-fast pre-commit verification command stopped at the full staged
+  `git diff --cached --check` non-pass (exit 2), before its following
+  selective check and commit commands could execute. The six notices were
+  the preserved raw-output EOF blank lines listed above; the selective check
+  and commit were subsequently run separately.
+- `SHA256SUMS` covers the candidate source blob content, candidate evidence
+  and every raw candidate/intermediate output. Run
+  `sha256sum -c docs/security/evidence/application-frame-scoped-candidate-20261108/SHA256SUMS`
+  for verification.
+
+The raw `TransportFrame::decode` helper, broader resource bounds, and
+recovery/resume obligations remain unresolved.
