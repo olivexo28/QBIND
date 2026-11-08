@@ -35,14 +35,32 @@ The proposed trust chain has distinct stages and roles:
    deployment-bound channel. The association, destination record, and
    anchor must not be able to authenticate one another merely by co-location.
 4. **Verification.** The verifier establishes the anchor's provenance and
-   deployment binding, parses the association, checks its purpose/version,
-   verifies its signature with that anchor, and validates all required
-   fields. A failure at any of these steps produces refusal, not an
-   authenticated expected association.
+   deployment binding, parses the association, checks its purpose/version
+   and signing suite against independently authenticated policy, verifies
+   its signature with that anchor, and validates all required fields. A
+   failure at any of these steps produces refusal, not an authenticated
+   expected association.
 5. **Comparison.** Only after successful verification may a future
    refusal-only comparison compare observations with the authenticated
-   association. A match is a comparison result only; it grants no permission
-   to continue, load a signer, participate, sign, recover, or restart.
+   association. Equality is a result separate from signature authenticity.
+6. **Currentness/eligibility.** A separate decision would need independently
+   trusted currentness evidence and policy. Without it, currentness is
+   `Unresolved`; no inference of current, stale, or eligible status is
+   available to the verifier.
+
+These are separate, non-authorizing results:
+
+| Result | What it establishes | What it does not establish |
+|---|---|---|
+| **Authenticity** | The association's signed representation verifies under the independently authenticated anchor and permitted verifier policy. | Equality to current observations, currentness, or permission to act. |
+| **Equality** | Each required observed field equals the corresponding field in the authenticated signed tuple. | That the tuple is the latest association, is eligible, or grants permission to act. |
+| **Currentness/eligibility** | Only what a separately approved, independently authenticated currentness policy and evidence can establish. | In the absence of that policy/evidence, the result is `Unresolved`, not current or eligible. |
+
+Even when authenticity and equality both hold, a valid old association may
+have been superseded. If trusted currentness evidence is unavailable, the
+verifier cannot tell whether it was superseded. None of these results grants
+startup, signer-loading, participation, signing, recovery, or restart
+authority.
 
 The association must authenticate every required field as one indivisible
 tuple:
@@ -58,7 +76,9 @@ complete_validator_consensus_public_key
 ```
 
 The association's own signing suite, purpose, and version are separate
-metadata and must also be authenticated. The representation must prevent
+metadata and must also be authenticated. A suite must be permitted by
+independently authenticated verifier policy; an attacker-controlled header
+cannot choose which suite is trusted. The representation must prevent
 ambiguity, field omission, reinterpretation, or cross-purpose use. The
 destination identity, environment-to-numeric-chain relationship, genesis
 identity semantics, and validator-ID/key mapping remain owner decisions.
@@ -109,25 +129,27 @@ substituted anchor is not evidence that the founder approved the association.
 
 ## Refusal outcomes and unresolved currentness
 
-The future verifier/comparator is refusal-only. It must not produce an
-authenticated association or a match for any of the following:
+The future verification/comparison pipeline is refusal-only. It must not
+produce an authenticated association, an equality result, or an eligible
+result for any of the following:
 
 | Input or result | Required outcome |
 |---|---|
 | Missing or unavailable anchor or association | Refuse; do not infer a default or fall back to another local record. |
 | Unreadable anchor, association, or provisioning evidence | Refuse; surface the failure without converting it to absence or success. |
 | Malformed, ambiguous, truncated, or structurally incomplete data | Refuse before pure comparison; do not guess field meanings or choose one of multiple candidates. |
-| Unsupported purpose, version, or encoding | Refuse; no compatibility downgrade or cross-purpose interpretation. |
+| Unsupported purpose, version, encoding, or association-signing suite under independently authenticated policy | Refuse; no compatibility downgrade, attacker-selected suite, or cross-purpose interpretation. |
 | Wrong, untrusted, or substituted anchor; unestablished provenance or deployment binding | Refuse; parsing a public key or matching a stored fingerprint is not authentication. |
 | Invalid signature or a signature not covering every required field | Refuse; no unsigned or partially signed fallback. |
-| Wrong environment/chain or any mismatch in the seven association fields | Refuse the comparison; missing required observations are not matches. |
-| Valid signature over an old or superseded association | Authenticity may be established, but currentness is unresolved. Do not claim that verification alone distinguishes stale from current. |
+| Wrong environment/chain or any mismatch in the seven association fields | Refuse equality; missing required observations are not matches. |
+| No independently trusted currentness evidence or policy | Return `Currentness::Unresolved`; do not call the association current, stale, or eligible. Authenticity and equality, if established, remain separate results. |
 
-The final case requires a separately approved currentness mechanism and
+The unresolved-currentness case requires a separately approved mechanism and
 authority, such as a rollback-resistant version state or an independently
 authenticated revocation/current-association source. No such mechanism,
 sequence semantics, durable state, refresh policy, or recovery authority is
-selected here. A replayed authentic association may still be stale.
+selected here. A replayed authentic association may be stale, but without
+trusted currentness evidence the verifier cannot know that it is stale.
 
 ## Startup boundary and separated safety claims
 
@@ -213,46 +235,60 @@ The test harness supplies a fixed expected anchor with an explicit
 `provenance_authenticated = true` fixture condition. This models, but does
 not implement or prove, real independent provisioning. Define a test-only
 canonical encoding with a purpose and version and signed bytes that cover
-every tuple field. Sign with `K_bootstrap_private`, not a validator key.
-The chosen test encoding and crypto primitive are
-fixture details only; they do not select a production signature suite or
-wire/file format.
+every tuple field plus the association-signing suite, purpose, and version.
+Test permitted-suite policy is a separately fixed, authenticated fixture
+input; never select a verifier based only on an untrusted association header.
+Sign with `K_bootstrap_private`, not a validator key. The chosen test
+encoding and crypto primitive are fixture details only; they do not select a
+production signature suite or wire/file format.
 
 Keep acquisition/parsing distinct from pure verification:
 
 ```text
 acquire_anchor_and_association(input) -> ParsedEvidence | AcquisitionError
-verify_association(parsed, independently_expected_anchor)
-    -> AuthenticatedFixture | VerificationRefusal
-compare_observation(authenticated_fixture, observed_tuple)
-    -> Match | FieldMismatch | MissingObservation
+verify_association(parsed, independently_expected_anchor,
+                   authenticated_verifier_policy)
+    -> Authenticity::Verified | VerificationRefusal
+compare_observation(verified_association, observed_tuple)
+    -> Equality::Equal | Equality::Mismatch(field) | Equality::Unavailable(field)
+evaluate_currentness(verified_association, trusted_currentness_evidence?)
+    -> Currentness::Current | Currentness::NotCurrent | Currentness::Unresolved
 ```
 
 No acquisition error may be converted into a successful verification or
-comparison. Do not build the expected tuple by copying the observation under
-test. Keep temporary fixture setup and cleanup outside the decision functions.
+comparison. Authenticity, equality, and currentness are reported separately
+and are non-authorizing; `Currentness::Unresolved` is not a success or a
+`NotCurrent` finding. `Currentness::NotCurrent` could be reported only if
+separately approved trusted evidence supports that result. Do not build the
+expected tuple by copying the observation under test. Keep temporary fixture
+setup and cleanup outside the decision functions.
 
 ### Test matrix and expected results
 
 | Case | Input variation from the valid fixture | Expected result |
 |---|---|---|
-| Positive synthetic control | Correct independently expected anchor; association signed by `K_bootstrap_private`; supported test purpose/version; all seven fields fixed and matching. | Verification returns only `AuthenticatedFixture`; comparison returns only `Match`. Explicitly assert no startup, signer, participation, sign, recovery, or restart authority exists in the result. |
+| Positive synthetic control | Correct independently expected anchor and authenticated test verifier policy; association signed by `K_bootstrap_private`; supported authenticated purpose/version/suite; all seven fields fixed and matching. | Report `Authenticity::Verified`, `Equality::Equal`, and `Currentness::Unresolved` separately when no currentness evidence is supplied. Assert none grants startup, signer-loading, participation, signing, recovery, or restart authority. |
 | Missing/unavailable evidence | Independently remove the anchor, association, signature, or any required observation, one at a time. | Acquisition or comparison refusal as appropriate; never a match. |
 | Read/parse failures | Simulate unreadable input, malformed encoding, truncation, duplicate/ambiguous association, and unsupported schema before invoking pure verification. | Typed harness acquisition refusal; assert the pure verifier was not called for acquisition failures. These are simulated inputs unless an independently approved read-only helper is later used. |
 | Anchor substitution | Keep association bytes fixed but provide a different anchor, or mark anchor provenance absent/untrusted. | Refuse before authenticated-fixture result. A test-only bypass that accepts the substituted/untrusted anchor must cause the negative assertion to fail. |
 | Signature failure | Flip a signature byte, sign with a non-authorized synthetic key, or alter one signed field without re-signing. | Verification refusal. A test-only signature-bypass mutation must cause the corresponding negative assertion to fail. |
 | Wrong purpose/version | Change purpose or version to an unsupported or bundle-signing value, then sign the otherwise well-formed changed payload with `K_bootstrap_private` so the signature itself is valid. | Verification refusal specifically for purpose/version. A test-only purpose/version bypass must make this negative assertion fail. |
-| Individual field binding | With the valid signed association and expected anchor held fixed, independently change, omit, or mark unavailable each of: environment, numeric chain ID, full genesis identity, destination identity, validator ID, validator consensus suite, and complete validator public key. For signature-binding controls, alter one encoded association field while leaving its signature unchanged; for comparison controls, alter only the observed field. | The signed-field mutation fails verification; the observation mutation returns that field's mismatch/missing refusal. For each field, a same-checker mutation that ignores its signature binding or comparison must make the corresponding negative assertion fail. |
+| Wrong/unsupported association-signing suite | Supply an unsupported suite in authenticated test policy, or alter the suite metadata and re-sign using the synthetic key while keeping the trusted policy fixed. Also exercise a wrong-suite key that cannot verify under the permitted suite. | Refuse for policy/suite mismatch or signature verification. Test-only mutants that trust the header instead of policy or skip suite/key compatibility must make the corresponding negative assertions fail. |
+| Validator consensus suite | Independently change the validator consensus-suite field inside the seven-field tuple, holding association-signing suite and key constant. | The signed-field mutation fails verification; a separately re-signed tuple compared against the fixed expected tuple mismatches the validator consensus suite. Its binding sensitivity is tested separately from association-signing suite controls. |
+| Individual field binding | With the valid signed association and expected anchor held fixed, independently change, omit, or mark unavailable each of: environment, numeric chain ID, full genesis identity, destination identity, validator ID, validator consensus suite, and complete validator public key. For signature-binding controls, change one encoded association field while retaining its signature; for comparison controls, change only the observation. For each field, create a sensitivity mutant in the shared fixture signing/verification encoding path that omits that field. | Normally, changing a signed field while retaining its signature fails verification, and changing only the observation returns that field's mismatch/unavailable result. Under the per-field omission mutant, sign the original fixture tuple with the mutated shared helper, then alter just that field while retaining the signature; the negative assertion that the changed tuple must fail verification must now fail because the omitted field leaves the signed input unchanged. Independently, a comparator mutant that ignores that field must make its comparison negative fail. Do not use a whole-signature bypass as a substitute for these per-field controls. |
 | Wrong deployment/domain | Change the fixed expected deployment binding or present an association for another environment/chain/genesis/destination. | Refuse; do not treat a valid signature for another scope as a match. |
-| Stale but valid association | Produce a validly signed association that the fixture labels as superseded, while providing no approved currentness evidence. | Signature authenticity may pass in the isolated verification step; currentness result must be `Unresolved/RefuseForAdmission`, not current or authorized. This illustrates that signature validity does not prove freshness. |
+| Old association with unavailable currentness evidence | Use a validly signed association whose fixture bytes are also equal to the observed tuple, but provide no independently trusted currentness evidence. The test harness may know separately that it constructed this as an old version; do not pass that label to the verifier or currentness evaluator. | Report `Authenticity::Verified`, `Equality::Equal`, and `Currentness::Unresolved`. The verifier cannot determine whether this authentic, equal association was superseded. Do not call it stale, current, eligible, or authorized based on harness-only knowledge. |
 | Expected-anchor integrity | Mutate the fixture's anchor provenance status or deployment binding without changing association bytes. | Refuse. A test-only provenance/deployment-binding bypass must make its negative control fail. |
 
 Run positive controls alongside every negative/sensitivity family so a
 checker that rejects all inputs cannot pass. Record which guard each
 negative assertion exercises and show that bypassing the signature check,
-purpose/version check, anchor provenance/deployment binding, or any one of
-the seven field bindings breaks that assertion. These are test-harness
-sensitivity controls, not evidence that a production control exists.
+purpose/version check, authenticated suite policy/key compatibility, anchor
+provenance/deployment binding, or any one of the seven field bindings breaks
+that assertion. For each tuple field, include the shared fixture
+signing/verification-encoding omission mutant described above. These are
+test-harness sensitivity controls, not evidence that a production control
+exists.
 
 ### Evidence and limitations for a future execution
 
