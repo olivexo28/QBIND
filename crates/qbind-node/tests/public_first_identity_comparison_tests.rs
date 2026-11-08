@@ -8,7 +8,7 @@
 //!
 //! Pinned source references:
 //! - `restore_completion.rs:148-179` (`DestinationId::canonicalize`)
-//! - `genesis.rs:1576-1630` (`compute_canonical_genesis_hash`)
+//! - `genesis.rs:1576-1621` (`compute_canonical_genesis_hash`)
 //! - `genesis.rs:1797-1855` (`verify_boot_time_genesis`)
 //! - `main.rs:2404-2449` (retained boot hash can be `None`)
 //!
