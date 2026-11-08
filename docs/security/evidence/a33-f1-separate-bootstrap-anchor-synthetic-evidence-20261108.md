@@ -30,11 +30,16 @@ Seven tests cover positive verification/comparison, acquisition failures
 (missing, unreadable, malformed, truncated, ambiguous, unsupported schema)
 without verifier invocation, anchor provenance/substitution, deployment and
 anchor-suite binding, invalid signature, purpose/version/suite policy, signed
-suite-metadata binding, wrong-suite signing key, each of the seven identity
-fields, per-field shared signing/verification encoding omission, separate
-comparison sensitivity, and valid/equal input with currentness unresolved.
-Each checked result is limited to authentication, equality, refusal, or
-unresolved currentness and conveys no permission or startup authority.
+suite-metadata binding, each of the seven identity fields, per-field shared
+signing/verification encoding omission, separate comparison sensitivity, and
+valid/equal input with currentness unresolved. The scenario previously
+mislabeled “wrong-suite signing key” changes association suite metadata while
+signing with a non-anchor key that still uses ML-DSA-44; an incompatible-suite
+key case was not tested. Each checked result is limited to authentication,
+equality, refusal, or unresolved currentness and conveys no permission or
+startup authority. This earlier seven-test evidence is supplemented by the
+coverage-correction evidence in
+`a33-f1-separate-bootstrap-anchor-synthetic-coverage-correction-20261108.md`.
 
 ## Commands and retained output
 
