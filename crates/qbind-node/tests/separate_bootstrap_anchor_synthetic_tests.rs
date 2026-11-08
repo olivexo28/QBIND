@@ -26,6 +26,14 @@ struct Identity {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+struct ExpectedDomain {
+    environment: String,
+    numeric_chain_id: u64,
+    genesis_identity: [u8; 32],
+    destination_identity: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct SignedAssociation {
     purpose: String,
     version: u32,
@@ -60,6 +68,14 @@ enum Field {
     ValidatorId,
     ValidatorSuite,
     ValidatorPublicKey,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DomainField {
+    Environment,
+    NumericChainId,
+    GenesisIdentity,
+    DestinationIdentity,
 }
 
 const ALL_FIELDS: [Field; 7] = [
@@ -108,6 +124,11 @@ enum VerifyFailure {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+enum DomainFailure {
+    Mismatch(DomainField),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum Equality {
     Equal,
     Mismatch(Field),
@@ -134,6 +155,9 @@ struct VerifyBypass {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum AcquisitionFailure {
     Missing,
+    MissingAssociation,
+    MissingSignature,
+    MissingAnchor,
     Unreadable,
     Malformed,
     Truncated,
@@ -146,15 +170,18 @@ enum RawInput {
     Parsed(SignedAssociation),
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum PipelineResult {
     AcquisitionRefused(AcquisitionFailure),
     VerificationRefused(VerifyFailure),
+    DomainRefused(DomainFailure),
     Compared(Authenticity, Equality, Currentness),
 }
 
 struct Fixture {
     anchor: ExpectedAnchor,
     policy: AuthenticatedVerifierPolicy,
+    expected_domain: ExpectedDomain,
     bootstrap_secret: Vec<u8>,
     identity: Identity,
 }
@@ -176,6 +203,14 @@ fn fixture() -> Fixture {
             version: SYNTHETIC_VERSION,
             permitted_association_suite: SYNTHETIC_ASSOCIATION_SUITE,
             deployment_binding: SYNTHETIC_DEPLOYMENT.to_owned(),
+        },
+        // This profile is an independent fixed checker input, not copied from
+        // the association or the observations being evaluated.
+        expected_domain: ExpectedDomain {
+            environment: "Devnet".to_owned(),
+            numeric_chain_id: 0xD3_01,
+            genesis_identity: [0x31; 32],
+            destination_identity: "synthetic-destination-A".to_owned(),
         },
         bootstrap_secret: secret_key,
         identity: Identity {
@@ -466,11 +501,17 @@ fn acquire(input: RawInput) -> Result<SignedAssociation, AcquisitionFailure> {
 
 fn run_pipeline(
     input: RawInput,
-    anchor: &ExpectedAnchor,
+    anchor: Option<&ExpectedAnchor>,
     policy: &AuthenticatedVerifierPolicy,
+    expected_domain: &ExpectedDomain,
     observed: &Observation,
     verifier_calls: &Cell<usize>,
+    domain_bypass: Option<DomainField>,
 ) -> PipelineResult {
+    let anchor = match anchor {
+        Some(anchor) => anchor,
+        None => return PipelineResult::AcquisitionRefused(AcquisitionFailure::MissingAnchor),
+    };
     let association = match acquire(input) {
         Ok(association) => association,
         Err(failure) => return PipelineResult::AcquisitionRefused(failure),
@@ -478,12 +519,65 @@ fn run_pipeline(
     verifier_calls.set(verifier_calls.get() + 1);
     match verify(&association, anchor, policy, VerifyBypass::default()) {
         Authenticity::Refused(failure) => PipelineResult::VerificationRefused(failure),
-        authenticity @ Authenticity::Verified => PipelineResult::Compared(
-            authenticity,
-            compare(observed, &association.identity, None),
-            evaluate_currentness(&association),
-        ),
+        authenticity @ Authenticity::Verified => {
+            if let Some(field) = domain_mismatch(
+                observed,
+                &association.identity,
+                expected_domain,
+                domain_bypass,
+            ) {
+                return PipelineResult::DomainRefused(DomainFailure::Mismatch(field));
+            }
+            PipelineResult::Compared(
+                authenticity,
+                compare(observed, &association.identity, None),
+                evaluate_currentness(&association),
+            )
+        }
     }
+}
+
+fn domain_mismatch(
+    observed: &Observation,
+    signed_identity: &Identity,
+    expected: &ExpectedDomain,
+    bypass: Option<DomainField>,
+) -> Option<DomainField> {
+    macro_rules! check {
+        ($field:expr, $observed:expr, $signed:expr, $expected:expr) => {
+            if bypass != Some($field)
+                && ($observed != &Evidence::Present($expected.clone()) || $signed != &$expected)
+            {
+                return Some($field);
+            }
+        };
+    }
+
+    check!(
+        DomainField::Environment,
+        &observed.environment,
+        &signed_identity.environment,
+        expected.environment
+    );
+    check!(
+        DomainField::NumericChainId,
+        &observed.numeric_chain_id,
+        &signed_identity.numeric_chain_id,
+        expected.numeric_chain_id
+    );
+    check!(
+        DomainField::GenesisIdentity,
+        &observed.genesis_identity,
+        &signed_identity.genesis_identity,
+        expected.genesis_identity
+    );
+    check!(
+        DomainField::DestinationIdentity,
+        &observed.destination_identity,
+        &signed_identity.destination_identity,
+        expected.destination_identity
+    );
+    None
 }
 
 fn evaluate_currentness(_association: &SignedAssociation) -> Currentness {
@@ -529,10 +623,12 @@ fn acquisition_failures_are_simulated_and_never_invoke_verification() {
         let verifier_calls = Cell::new(0);
         let result = run_pipeline(
             RawInput::Failure(failure.clone()),
-            &fixture.anchor,
+            Some(&fixture.anchor),
             &fixture.policy,
+            &fixture.expected_domain,
             &observed,
             &verifier_calls,
+            None,
         );
         assert!(matches!(result, PipelineResult::AcquisitionRefused(actual) if actual == failure));
         assert_eq!(
@@ -916,10 +1012,12 @@ fn parsed_association_pipeline_preserves_distinct_result_stages() {
     let verifier_calls = Cell::new(0);
     let result = run_pipeline(
         RawInput::Parsed(association),
-        &fixture.anchor,
+        Some(&fixture.anchor),
         &fixture.policy,
+        &fixture.expected_domain,
         &observation(&fixture.identity),
         &verifier_calls,
+        None,
     );
     assert_eq!(verifier_calls.get(), 1);
     match result {
@@ -928,7 +1026,9 @@ fn parsed_association_pipeline_preserves_distinct_result_stages() {
             assert_eq!(equality, Equality::Equal);
             assert_eq!(currentness, Currentness::Unresolved);
         }
-        PipelineResult::AcquisitionRefused(_) | PipelineResult::VerificationRefused(_) => {
+        PipelineResult::AcquisitionRefused(_)
+        | PipelineResult::VerificationRefused(_)
+        | PipelineResult::DomainRefused(_) => {
             panic!("valid synthetic fixture was refused")
         }
     }
@@ -938,10 +1038,12 @@ fn parsed_association_pipeline_preserves_distinct_result_stages() {
     let verifier_calls = Cell::new(0);
     let result = run_pipeline(
         RawInput::Parsed(invalid),
-        &fixture.anchor,
+        Some(&fixture.anchor),
         &fixture.policy,
+        &fixture.expected_domain,
         &observation(&fixture.identity),
         &verifier_calls,
+        None,
     );
     assert_eq!(verifier_calls.get(), 1);
     assert!(matches!(
@@ -970,4 +1072,125 @@ fn valid_equal_association_without_currentness_evidence_remains_unresolved() {
     assert_eq!(authenticity, Authenticity::Verified);
     assert_eq!(equality, Equality::Equal);
     assert_eq!(currentness, Currentness::Unresolved);
+}
+
+#[test]
+fn independently_expected_domain_refuses_each_signed_foreign_field_sensitively() {
+    let fixture = fixture();
+    let expected_association = signed_association(&fixture, fixture.identity.clone());
+    for field in [
+        DomainField::Environment,
+        DomainField::NumericChainId,
+        DomainField::GenesisIdentity,
+        DomainField::DestinationIdentity,
+    ] {
+        let verifier_calls = Cell::new(0);
+        assert!(matches!(
+            run_pipeline(
+                RawInput::Parsed(expected_association.clone()),
+                Some(&fixture.anchor),
+                &fixture.policy,
+                &fixture.expected_domain,
+                &observation(&fixture.identity),
+                &verifier_calls,
+                None,
+            ),
+            PipelineResult::Compared(
+                Authenticity::Verified,
+                Equality::Equal,
+                Currentness::Unresolved
+            )
+        ));
+
+        let mut foreign_identity = fixture.identity.clone();
+        match field {
+            DomainField::Environment => foreign_identity.environment.push_str("-foreign"),
+            DomainField::NumericChainId => foreign_identity.numeric_chain_id ^= 1,
+            DomainField::GenesisIdentity => foreign_identity.genesis_identity[0] ^= 1,
+            DomainField::DestinationIdentity => {
+                foreign_identity.destination_identity.push_str("-foreign")
+            }
+        }
+        let foreign_association = signed_association(&fixture, foreign_identity.clone());
+        let foreign_observation = observation(&foreign_identity);
+        let verifier_calls = Cell::new(0);
+        assert_eq!(
+            run_pipeline(
+                RawInput::Parsed(foreign_association.clone()),
+                Some(&fixture.anchor),
+                &fixture.policy,
+                &fixture.expected_domain,
+                &foreign_observation,
+                &verifier_calls,
+                None,
+            ),
+            PipelineResult::DomainRefused(DomainFailure::Mismatch(field)),
+            "foreign domain {field:?} was not refused"
+        );
+        assert_eq!(verifier_calls.get(), 1);
+
+        let verifier_calls = Cell::new(0);
+        assert!(
+            matches!(
+                run_pipeline(
+                    RawInput::Parsed(foreign_association),
+                    Some(&fixture.anchor),
+                    &fixture.policy,
+                    &fixture.expected_domain,
+                    &foreign_observation,
+                    &verifier_calls,
+                    Some(field),
+                ),
+                PipelineResult::Compared(
+                    Authenticity::Verified,
+                    Equality::Equal,
+                    Currentness::Unresolved
+                )
+            ),
+            "domain-guard bypass for {field:?} did not defeat the refusal"
+        );
+        assert_eq!(verifier_calls.get(), 1);
+    }
+}
+
+#[test]
+fn missing_anchor_association_and_signature_are_distinct_acquisition_refusals() {
+    let fixture = fixture();
+    let association = signed_association(&fixture, fixture.identity.clone());
+    let observation = observation(&fixture.identity);
+
+    let verifier_calls = Cell::new(0);
+    assert!(matches!(
+        run_pipeline(
+            RawInput::Parsed(association.clone()),
+            None,
+            &fixture.policy,
+            &fixture.expected_domain,
+            &observation,
+            &verifier_calls,
+            None,
+        ),
+        PipelineResult::AcquisitionRefused(AcquisitionFailure::MissingAnchor)
+    ));
+    assert_eq!(verifier_calls.get(), 0);
+
+    for failure in [
+        AcquisitionFailure::MissingAssociation,
+        AcquisitionFailure::MissingSignature,
+    ] {
+        let verifier_calls = Cell::new(0);
+        assert!(matches!(
+            run_pipeline(
+                RawInput::Failure(failure.clone()),
+                Some(&fixture.anchor),
+                &fixture.policy,
+                &fixture.expected_domain,
+                &observation,
+                &verifier_calls,
+                None,
+            ),
+            PipelineResult::AcquisitionRefused(actual) if actual == failure
+        ));
+        assert_eq!(verifier_calls.get(), 0);
+    }
 }
