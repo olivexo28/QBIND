@@ -90,8 +90,9 @@ is retained separately and is not counted as passed evidence.
   successful admission reaches the wrapper and underlying local signer.
 - The signer-error case generates a disposable-key signature inside the
   signer but returns an error to the caller. The recorded effect remains
-  Unknown after the local worker terminates: local quiescence is true while
-  the seam's closure-safe predicate is false.
+  Unknown after the synchronous Timeout function returns: local quiescence
+  is true while the seam's closure-safe predicate is false. This earlier
+  control did not establish termination of a separate worker thread.
 - The corrupt-return control records signature bytes returned to the
   function, then observes the real verifier reject them before engine
   ingestion or publication. A successful-signature control observes engine
@@ -101,8 +102,10 @@ is retained separately and is not counted as passed evidence.
 - With revocation before permit, the actual function reaches the recording
   wrapper but the underlying signer is not called. With permit before
   revocation, the already-permitted signer returns late; dropping the
-  completion receiver does not terminate the worker, and the independent
-  physical-executor count remains nonzero until the thread is joined.
+  completion receiver does not cancel the paused call. The earlier test
+  observed a live executor while the signer was paused and zero after join,
+  but did not observe the interval after the Timeout function completed and
+  before the worker returned.
 - A real child thread is held across the parent operation. Registered
   handoff prevents quiescence until child join; a deliberately omitted
   ledger handoff is detected by the separate test-harness physical-thread
@@ -133,6 +136,18 @@ activation path is added.
 Earlier developmental logs are retained unchanged and are not substituted
 for final-source evidence. `SHA256SUMS` records checksums for every captured
 `.log` file in this directory.
+
+## TSL-1/2/3 correction
+
+The follow-up record in
+`docs/security/evidence/a33-f1-timeout-lifecycle-tsl123-20261108/README.md`
+supersedes the original seam's state-retirement and timing claims. It adds
+an actual error-after-invocation followed by denied-permit control, isolates
+an omitted-child mutant with the child as the sole physical executor, and
+places a deterministic barrier between Timeout-function completion and
+worker termination. The original ten log files and this directory's
+historical `SHA256SUMS` are unchanged; the corrective evidence is stored
+separately.
 
 **Remaining OPEN:** Transport, A17-F1 / RS1-F7, RS1 and A33-F1 / E27.
 Activation **DISABLED**; public DevNet **NO-GO**.
