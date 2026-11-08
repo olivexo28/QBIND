@@ -26425,6 +26425,7 @@ mod tests {
                             live_executors: usize,
                             live_children: usize,
                             permits: usize,
+                            permit_observed: bool,
                             wrapper_entries: usize,
                             underlying_calls: usize,
                             signature_generated: bool,
@@ -26445,6 +26446,7 @@ mod tests {
                                         live_executors: 0,
                                         live_children: 0,
                                         permits: 0,
+                                        permit_observed: false,
                                         wrapper_entries: 0,
                                         underlying_calls: 0,
                                         signature_generated: false,
@@ -26495,7 +26497,12 @@ mod tests {
                                     return false;
                                 }
                                 state.permits = 1;
+                                state.permit_observed = true;
                                 true
+                            }
+
+                            fn admission_is_open(&self) -> bool {
+                                self.state.lock().unwrap().accepting
                             }
 
                             fn revoke(&self) {
@@ -26547,6 +26554,7 @@ mod tests {
                                     && state.live_executors == 0
                                     && state.permits == 0
                                     && physical_executors == 0
+                                    && (state.underlying_calls == 0 || state.permit_observed)
                                     && state.outcome != EffectOutcome::UnknownAfterInvocation
                             }
                         }
@@ -26589,6 +26597,7 @@ mod tests {
                             Return,
                             ErrorAfterInvocation,
                             CorruptReturnedSignature,
+                            UnsafeCachedAdmission,
                         }
 
                         struct LifecycleSigner {
@@ -26682,15 +26691,23 @@ mod tests {
                                 view: u64,
                                 high_qc: Option<&qbind_consensus::qc::QuorumCertificate<[u8; 32]>>,
                             ) -> Result<Vec<u8>, SignError> {
+                                let cached_admission = self.owner.admission_is_open();
                                 self.owner.wrapper_entered();
                                 let _ = self.entry_tx.send(());
                                 self.await_pause(PausePoint::BeforePermit);
-                                if !self.owner.acquire_effect_permit() {
+                                let has_permit = if matches!(self.mode, SignMode::UnsafeCachedAdmission) {
+                                    cached_admission
+                                } else {
+                                    self.owner.acquire_effect_permit()
+                                };
+                                if !has_permit {
                                     return Err(SignError::HsmError(
                                         "test owner refused effect permit".into(),
                                     ));
                                 }
-                                let _ = self.permit_tx.send(());
+                                if !matches!(self.mode, SignMode::UnsafeCachedAdmission) {
+                                    let _ = self.permit_tx.send(());
+                                }
                                 self.await_pause(PausePoint::AfterPermit);
                                 self.owner.signer_invoked();
                                 let signature = match self
@@ -26719,6 +26736,10 @@ mod tests {
                                         self.owner.signature_returned();
                                         let mut signature = signature;
                                         signature[0] ^= 0x80;
+                                        Ok(signature)
+                                    }
+                                    SignMode::UnsafeCachedAdmission => {
+                                        self.owner.signature_returned();
                                         Ok(signature)
                                     }
                                 }
@@ -27123,19 +27144,56 @@ mod tests {
                             drop(worker);
                             assert!(owner.local_quiescent(physical.count()));
 
-                            // Sensitivity mutant: a prior Boolean check is not
-                            // serialized with revocation and can still perform
-                            // the effect. The real permit check refuses instead.
+                            // Sensitivity mutant: cache admission, revoke, then
+                            // exercise the real timeout function and local signer
+                            // without acquiring the serialized permit.
+                            let mut fixture = make_f7_fixture();
+                            fixture
+                                .engine
+                                .state_mut()
+                                .set_locked_qc(fixture.logical_qc.clone());
                             let owner = TimeoutOwner::new();
                             assert!(owner.admit());
-                            let stale_generation_was_valid = owner.state.lock().unwrap().accepting;
+                            let physical = Arc::new(PhysicalExecutors::default());
+                            let (release_tx, release_rx) = mpsc::channel();
+                            let (signer, entry_rx, _) = LifecycleSigner::new(
+                                &fixture,
+                                owner.clone(),
+                                SignMode::UnsafeCachedAdmission,
+                                Some((PausePoint::BeforePermit, release_rx)),
+                            );
+                            let (handle, _) = spawn_paused(
+                                fixture,
+                                owner.clone(),
+                                physical.clone(),
+                                signer,
+                                LifecycleFacade::default(),
+                            );
+                            entry_rx
+                                .recv_timeout(TEST_WAIT)
+                                .expect("mutant reached actual timeout signer path");
                             owner.revoke();
-                            let unsafe_effect_ran = stale_generation_was_valid;
-                            assert!(unsafe_effect_ran);
-                            assert!(!owner.acquire_effect_permit());
+                            release_tx.send(()).unwrap();
+                            handle.join().unwrap();
                             let state = owner.state.lock().unwrap();
-                            assert_eq!(state.outcome, EffectOutcome::RefusedBeforeEffect);
-                            assert_eq!(state.underlying_calls, 0);
+                            assert_eq!(state.underlying_calls, 1);
+                            assert!(state.signature_generated && state.signature_returned);
+                            assert!(!state.permit_observed);
+                            drop(state);
+                            assert!(owner.local_quiescent(physical.count()));
+                            assert!(
+                                !owner.closure_safe(physical.count()),
+                                "sensitivity oracle rejects an unpermitted actual effect"
+                            );
+
+                            let owner = TimeoutOwner::new();
+                            assert!(owner.admit());
+                            owner.revoke();
+                            assert!(!owner.acquire_effect_permit());
+                            assert_eq!(
+                                owner.state.lock().unwrap().outcome,
+                                EffectOutcome::RefusedBeforeEffect
+                            );
                         }
                     }
                     #[test]
