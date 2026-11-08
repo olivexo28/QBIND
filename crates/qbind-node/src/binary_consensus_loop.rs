@@ -26395,6 +26395,749 @@ mod tests {
                             .any(|msg| matches!(msg, ConsensusNetMsg::Timeout(_))));
                     }
 
+                    // A33-F1 / E27: test-only owner observations around the
+                    // actual local Timeout signer call. The production function
+                    // and its guards are exercised unchanged; the coordinator
+                    // exists only in this test module.
+                    mod a33_timeout_lifecycle {
+                        use super::*;
+                        use std::sync::atomic::{AtomicUsize, Ordering};
+                        use std::sync::mpsc::{self, Receiver, Sender};
+                        use std::sync::{Arc, Mutex};
+                        use std::time::Duration;
+
+                        const MAX_OPERATIONS: usize = 1;
+                        const MAX_EXECUTORS: usize = 2;
+                        const TEST_WAIT: Duration = Duration::from_secs(10);
+
+                        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+                        enum EffectOutcome {
+                            NotInvoked,
+                            RefusedBeforeEffect,
+                            SignatureReturned,
+                            UnknownAfterInvocation,
+                        }
+
+                        #[derive(Debug)]
+                        struct OwnerState {
+                            accepting: bool,
+                            outstanding: usize,
+                            live_executors: usize,
+                            live_children: usize,
+                            permits: usize,
+                            wrapper_entries: usize,
+                            underlying_calls: usize,
+                            signature_generated: bool,
+                            signature_returned: bool,
+                            outcome: EffectOutcome,
+                        }
+
+                        struct TimeoutOwner {
+                            state: Mutex<OwnerState>,
+                        }
+
+                        impl TimeoutOwner {
+                            fn new() -> Arc<Self> {
+                                Arc::new(Self {
+                                    state: Mutex::new(OwnerState {
+                                        accepting: true,
+                                        outstanding: 0,
+                                        live_executors: 0,
+                                        live_children: 0,
+                                        permits: 0,
+                                        wrapper_entries: 0,
+                                        underlying_calls: 0,
+                                        signature_generated: false,
+                                        signature_returned: false,
+                                        outcome: EffectOutcome::NotInvoked,
+                                    }),
+                                })
+                            }
+
+                            fn admit(&self) -> bool {
+                                let mut state = self.state.lock().unwrap();
+                                if !state.accepting || state.outstanding == MAX_OPERATIONS {
+                                    return false;
+                                }
+                                state.outstanding += 1;
+                                true
+                            }
+
+                            fn worker_started(&self) -> bool {
+                                let mut state = self.state.lock().unwrap();
+                                if state.outstanding == 0 || state.live_executors == MAX_EXECUTORS {
+                                    return false;
+                                }
+                                state.live_executors += 1;
+                                true
+                            }
+
+                            fn handoff_child(&self) -> bool {
+                                let mut state = self.state.lock().unwrap();
+                                if state.outstanding == 0 || state.live_executors == MAX_EXECUTORS {
+                                    return false;
+                                }
+                                state.live_executors += 1;
+                                state.live_children += 1;
+                                true
+                            }
+
+                            fn child_finished(&self) {
+                                let mut state = self.state.lock().unwrap();
+                                state.live_executors -= 1;
+                                state.live_children -= 1;
+                            }
+
+                            fn acquire_effect_permit(&self) -> bool {
+                                let mut state = self.state.lock().unwrap();
+                                if !state.accepting || state.outstanding == 0 || state.permits != 0 {
+                                    state.outcome = EffectOutcome::RefusedBeforeEffect;
+                                    return false;
+                                }
+                                state.permits = 1;
+                                true
+                            }
+
+                            fn revoke(&self) {
+                                self.state.lock().unwrap().accepting = false;
+                            }
+
+                            fn wrapper_entered(&self) {
+                                self.state.lock().unwrap().wrapper_entries += 1;
+                            }
+
+                            fn signer_invoked(&self) {
+                                self.state.lock().unwrap().underlying_calls += 1;
+                            }
+
+                            fn signature_generated(&self) {
+                                self.state.lock().unwrap().signature_generated = true;
+                            }
+
+                            fn signature_returned(&self) {
+                                let mut state = self.state.lock().unwrap();
+                                state.signature_returned = true;
+                                state.outcome = EffectOutcome::SignatureReturned;
+                            }
+
+                            fn signer_error_after_invocation(&self) {
+                                self.state.lock().unwrap().outcome = EffectOutcome::UnknownAfterInvocation;
+                            }
+
+                            fn finish_operation(&self) {
+                                let mut state = self.state.lock().unwrap();
+                                state.outstanding -= 1;
+                                state.live_executors -= 1;
+                                state.permits = 0;
+                            }
+
+                            fn local_quiescent(&self, physical_executors: usize) -> bool {
+                                let state = self.state.lock().unwrap();
+                                !state.accepting
+                                    && state.outstanding == 0
+                                    && state.live_executors == 0
+                                    && state.permits == 0
+                                    && physical_executors == 0
+                            }
+
+                            fn closure_safe(&self, physical_executors: usize) -> bool {
+                                let state = self.state.lock().unwrap();
+                                !state.accepting
+                                    && state.outstanding == 0
+                                    && state.live_executors == 0
+                                    && state.permits == 0
+                                    && physical_executors == 0
+                                    && state.outcome != EffectOutcome::UnknownAfterInvocation
+                            }
+                        }
+
+                        #[derive(Default)]
+                        struct PhysicalExecutors(AtomicUsize);
+
+                        impl PhysicalExecutors {
+                            fn enter(self: &Arc<Self>) -> ExecutorLease {
+                                self.0.fetch_add(1, Ordering::SeqCst);
+                                ExecutorLease(Arc::clone(self))
+                            }
+
+                            fn count(&self) -> usize {
+                                self.0.load(Ordering::SeqCst)
+                            }
+                        }
+
+                        struct ExecutorLease(Arc<PhysicalExecutors>);
+
+                        impl Drop for ExecutorLease {
+                            fn drop(&mut self) {
+                                self.0 .0.fetch_sub(1, Ordering::SeqCst);
+                            }
+                        }
+
+                        #[derive(Clone, Copy)]
+                        enum PausePoint {
+                            BeforePermit,
+                            AfterPermit,
+                        }
+
+                        struct PauseHook {
+                            point: PausePoint,
+                            release: Mutex<Receiver<()>>,
+                        }
+
+                        #[derive(Clone, Copy)]
+                        enum SignMode {
+                            Return,
+                            ErrorAfterInvocation,
+                            CorruptReturnedSignature,
+                        }
+
+                        struct LifecycleSigner {
+                            inner: LocalKeySigner,
+                            owner: Arc<TimeoutOwner>,
+                            entry_tx: Sender<()>,
+                            permit_tx: Sender<()>,
+                            pause: Option<PauseHook>,
+                            mode: SignMode,
+                        }
+
+                        impl LifecycleSigner {
+                            fn new(
+                                fixture: &Fixture,
+                                owner: Arc<TimeoutOwner>,
+                                mode: SignMode,
+                                pause: Option<(PausePoint, Receiver<()>)>,
+                            ) -> (Arc<Self>, Receiver<()>, Receiver<()>) {
+                                let (entry_tx, entry_rx) = mpsc::channel();
+                                let (permit_tx, permit_rx) = mpsc::channel();
+                                let pause = pause.map(|(point, release)| PauseHook {
+                                    point,
+                                    release: Mutex::new(release),
+                                });
+                                let inner = LocalKeySigner::new(
+                                    ValidatorId(0),
+                                    TEST_SUITE_U16,
+                                    fixture
+                                        .keys
+                                        .sk_objs
+                                        .get(&ValidatorId(0))
+                                        .expect("disposable fixture key")
+                                        .clone(),
+                                );
+                                (
+                                    Arc::new(Self {
+                                        inner,
+                                        owner,
+                                        entry_tx,
+                                        permit_tx,
+                                        pause,
+                                        mode,
+                                    }),
+                                    entry_rx,
+                                    permit_rx,
+                                )
+                            }
+
+                            fn await_pause(&self, point: PausePoint) {
+                                if let Some(pause) = &self.pause {
+                                    if std::mem::discriminant(&pause.point) == std::mem::discriminant(&point) {
+                                        pause
+                                            .release
+                                            .lock()
+                                            .unwrap()
+                                            .recv_timeout(TEST_WAIT)
+                                            .expect("test releases paused signer");
+                                    }
+                                }
+                            }
+                        }
+
+                        impl ValidatorSigner for LifecycleSigner {
+                            fn validator_id(&self) -> &ValidatorId {
+                                self.inner.validator_id()
+                            }
+
+                            fn suite_id(&self) -> u16 {
+                                self.inner.suite_id()
+                            }
+
+                            fn sign_proposal(&self, preimage: &[u8]) -> Result<Vec<u8>, SignError> {
+                                self.inner.sign_proposal(preimage)
+                            }
+
+                            fn sign_vote(&self, preimage: &[u8]) -> Result<Vec<u8>, SignError> {
+                                self.inner.sign_vote(preimage)
+                            }
+
+                            fn sign_timeout(
+                                &self,
+                                view: u64,
+                                high_qc: Option<&qbind_consensus::qc::QuorumCertificate<[u8; 32]>>,
+                            ) -> Result<Vec<u8>, SignError> {
+                                self.inner.sign_timeout(view, high_qc)
+                            }
+
+                            fn sign_timeout_with_chain_id(
+                                &self,
+                                chain_id: qbind_types::ChainId,
+                                view: u64,
+                                high_qc: Option<&qbind_consensus::qc::QuorumCertificate<[u8; 32]>>,
+                            ) -> Result<Vec<u8>, SignError> {
+                                self.owner.wrapper_entered();
+                                let _ = self.entry_tx.send(());
+                                self.await_pause(PausePoint::BeforePermit);
+                                if !self.owner.acquire_effect_permit() {
+                                    return Err(SignError::HsmError(
+                                        "test owner refused effect permit".into(),
+                                    ));
+                                }
+                                let _ = self.permit_tx.send(());
+                                self.await_pause(PausePoint::AfterPermit);
+                                self.owner.signer_invoked();
+                                let signature = match self
+                                    .inner
+                                    .sign_timeout_with_chain_id(chain_id, view, high_qc)
+                                {
+                                    Ok(signature) => signature,
+                                    Err(error) => {
+                                        self.owner.signer_error_after_invocation();
+                                        return Err(error);
+                                    }
+                                };
+                                self.owner.signature_generated();
+                                match self.mode {
+                                    SignMode::Return => {
+                                        self.owner.signature_returned();
+                                        Ok(signature)
+                                    }
+                                    SignMode::ErrorAfterInvocation => {
+                                        self.owner.signer_error_after_invocation();
+                                        Err(SignError::HsmError(
+                                            "test signer error after invocation".into(),
+                                        ))
+                                    }
+                                    SignMode::CorruptReturnedSignature => {
+                                        self.owner.signature_returned();
+                                        let mut signature = signature;
+                                        signature[0] ^= 0x80;
+                                        Ok(signature)
+                                    }
+                                }
+                            }
+                        }
+
+                        #[derive(Default)]
+                        struct LifecycleFacade {
+                            messages: Mutex<Vec<ConsensusNetMsg>>,
+                            fail_timeout: bool,
+                        }
+
+                        impl ConsensusNetworkFacade for LifecycleFacade {
+                            fn send_vote_to(
+                                &self,
+                                _target: ValidatorId,
+                                _vote: &Vote,
+                            ) -> Result<(), qbind_consensus::network::NetworkError> {
+                                Ok(())
+                            }
+
+                            fn broadcast_vote(
+                                &self,
+                                _vote: &Vote,
+                            ) -> Result<(), qbind_consensus::network::NetworkError> {
+                                Ok(())
+                            }
+
+                            fn broadcast_proposal(
+                                &self,
+                                _proposal: &BlockProposal,
+                            ) -> Result<(), qbind_consensus::network::NetworkError> {
+                                Ok(())
+                            }
+
+                            fn broadcast_consensus_msg(
+                                &self,
+                                msg: &ConsensusNetMsg,
+                            ) -> Result<(), qbind_consensus::network::NetworkError> {
+                                self.messages.lock().unwrap().push(msg.clone());
+                                if self.fail_timeout && matches!(msg, ConsensusNetMsg::Timeout(_)) {
+                                    return Err(qbind_consensus::network::NetworkError::Other(
+                                        "injected test publication failure".into(),
+                                    ));
+                                }
+                                Ok(())
+                            }
+                        }
+
+                        fn context_with_signer(
+                            fixture: &Fixture,
+                            signer: Arc<dyn ValidatorSigner>,
+                        ) -> TimeoutVerificationContext {
+                            TimeoutVerificationContext {
+                                validators: fixture.keys.validators.clone(),
+                                key_provider: fixture.keys.kp.clone(),
+                                backend_registry: fixture.keys.br.clone(),
+                                chain_id: fixture.pv.signing_domain.runtime_chain_id(),
+                                signer: Some(signer),
+                            }
+                        }
+
+                        fn run_inline(
+                            fixture: &mut Fixture,
+                            owner: &TimeoutOwner,
+                            physical: &Arc<PhysicalExecutors>,
+                            signer: Arc<LifecycleSigner>,
+                            use_snapshot: bool,
+                            facade: &LifecycleFacade,
+                        ) -> BinaryConsensusLoopInboundStats {
+                            assert!(owner.admit(), "bounded operation slot admitted");
+                            assert!(owner.worker_started(), "worker ownership recorded");
+                            let _physical = physical.enter();
+                            let ctx = context_with_signer(fixture, signer);
+                            let current_auth = use_snapshot.then_some(&fixture.snapshot);
+                            let mut state = ViewTimeoutState::new(0, 0);
+                            let mut backoff = ViewTimeoutBackoffState::no_growth(Some(5));
+                            let mut stats = BinaryConsensusLoopInboundStats::default();
+                            maybe_emit_view_timeout_with_auth(
+                                &mut fixture.engine,
+                                &mut state,
+                                5,
+                                &mut backoff,
+                                false,
+                                Some(facade),
+                                &mut stats,
+                                current_auth,
+                                Some(&ctx),
+                            );
+                            owner.revoke();
+                            drop(_physical);
+                            owner.finish_operation();
+                            stats
+                        }
+
+                        fn spawn_paused(
+                            fixture: Fixture,
+                            owner: Arc<TimeoutOwner>,
+                            physical: Arc<PhysicalExecutors>,
+                            signer: Arc<LifecycleSigner>,
+                            facade: LifecycleFacade,
+                        ) -> (std::thread::JoinHandle<()>, Receiver<()>) {
+                            let (completed_tx, completed_rx) = mpsc::channel();
+                            let handle = std::thread::spawn(move || {
+                                assert!(owner.worker_started());
+                                let physical_lease = physical.enter();
+                                let ctx = context_with_signer(&fixture, signer);
+                                let mut engine = fixture.engine;
+                                let mut state = ViewTimeoutState::new(0, 0);
+                                let mut backoff = ViewTimeoutBackoffState::no_growth(Some(5));
+                                let mut stats = BinaryConsensusLoopInboundStats::default();
+                                maybe_emit_view_timeout_with_auth(
+                                    &mut engine,
+                                    &mut state,
+                                    5,
+                                    &mut backoff,
+                                    false,
+                                    Some(&facade),
+                                    &mut stats,
+                                    Some(&fixture.snapshot),
+                                    Some(&ctx),
+                                );
+                                drop(physical_lease);
+                                owner.finish_operation();
+                                let _ = completed_tx.send(());
+                            });
+                            (handle, completed_rx)
+                        }
+
+                        #[test]
+                        fn actual_timeout_guard_refusal_and_success_are_observed_end_to_end() {
+                            let mut refused = make_f7_fixture();
+                            refused
+                                .engine
+                                .state_mut()
+                                .set_locked_qc(refused.logical_qc.clone());
+                            let owner = TimeoutOwner::new();
+                            let physical = Arc::new(PhysicalExecutors::default());
+                            let (signer, _, _) = LifecycleSigner::new(&refused, owner.clone(), SignMode::Return, None);
+                            let stats = run_inline(
+                                &mut refused,
+                                &owner,
+                                &physical,
+                                signer.clone(),
+                                false,
+                                &LifecycleFacade::default(),
+                            );
+                            assert_eq!(owner.state.lock().unwrap().wrapper_entries, 0);
+                            assert_eq!(owner.state.lock().unwrap().underlying_calls, 0);
+                            assert_eq!(stats.retained_qc_admission_rejected_total, 1);
+                            assert_eq!(refused.engine.timeout_count(0), 0);
+
+                            let mut accepted = make_f7_fixture();
+                            accepted
+                                .engine
+                                .state_mut()
+                                .set_locked_qc(accepted.logical_qc.clone());
+                            let owner = TimeoutOwner::new();
+                            let physical = Arc::new(PhysicalExecutors::default());
+                            let (signer, _, _) = LifecycleSigner::new(&accepted, owner.clone(), SignMode::Return, None);
+                            let facade = LifecycleFacade::default();
+                            let stats = run_inline(
+                                &mut accepted,
+                                &owner,
+                                &physical,
+                                signer.clone(),
+                                true,
+                                &facade,
+                            );
+                            let state = owner.state.lock().unwrap();
+                            assert_eq!(state.wrapper_entries, 1);
+                            assert_eq!(state.underlying_calls, 1);
+                            assert!(state.signature_generated && state.signature_returned);
+                            assert_eq!(state.outcome, EffectOutcome::SignatureReturned);
+                            drop(state);
+                            assert_eq!(stats.outbound_timeout_signing_success, 1);
+                            assert_eq!(stats.view_timeouts_emitted, 1);
+                            assert_eq!(accepted.engine.timeout_count(0), 1);
+                            assert!(accepted.engine.timeout_emitted_in_view());
+                            assert!(facade
+                                .messages
+                                .lock()
+                                .unwrap()
+                                .iter()
+                                .any(|m| matches!(m, ConsensusNetMsg::Timeout(_))));
+                            assert!(owner.local_quiescent(physical.count()));
+                            assert!(owner.closure_safe(physical.count()));
+                        }
+
+                        #[test]
+                        fn invoked_error_unknown_and_late_stage_failure_keep_signature_observations() {
+                            let mut failed = make_f7_fixture();
+                            failed
+                                .engine
+                                .state_mut()
+                                .set_locked_qc(failed.logical_qc.clone());
+                            let owner = TimeoutOwner::new();
+                            let physical = Arc::new(PhysicalExecutors::default());
+                            let (signer, _, _) =
+                                LifecycleSigner::new(&failed, owner.clone(), SignMode::ErrorAfterInvocation, None);
+                            let stats = run_inline(
+                                &mut failed,
+                                &owner,
+                                &physical,
+                                signer,
+                                true,
+                                &LifecycleFacade::default(),
+                            );
+                            let state = owner.state.lock().unwrap();
+                            assert_eq!(state.wrapper_entries, 1);
+                            assert_eq!(state.underlying_calls, 1);
+                            assert!(state.signature_generated);
+                            assert!(!state.signature_returned);
+                            assert_eq!(state.outcome, EffectOutcome::UnknownAfterInvocation);
+                            drop(state);
+                            assert_eq!(stats.outbound_timeout_signing_failure, 1);
+                            assert!(owner.local_quiescent(physical.count()));
+                            assert!(!owner.closure_safe(physical.count()));
+
+                            let mut invalid = make_f7_fixture();
+                            invalid
+                                .engine
+                                .state_mut()
+                                .set_locked_qc(invalid.logical_qc.clone());
+                            let owner = TimeoutOwner::new();
+                            let physical = Arc::new(PhysicalExecutors::default());
+                            let (signer, _, _) = LifecycleSigner::new(
+                                &invalid,
+                                owner.clone(),
+                                SignMode::CorruptReturnedSignature,
+                                None,
+                            );
+                            let stats = run_inline(
+                                &mut invalid,
+                                &owner,
+                                &physical,
+                                signer,
+                                true,
+                                &LifecycleFacade::default(),
+                            );
+                            let state = owner.state.lock().unwrap();
+                            assert!(state.signature_generated && state.signature_returned);
+                            drop(state);
+                            assert_eq!(stats.outbound_timeout_signing_failure, 1);
+                            assert!(invalid.engine.timeout_count(0) == 0);
+
+                            let mut publication = make_f7_fixture();
+                            publication
+                                .engine
+                                .state_mut()
+                                .set_locked_qc(publication.logical_qc.clone());
+                            let owner = TimeoutOwner::new();
+                            let physical = Arc::new(PhysicalExecutors::default());
+                            let (signer, _, _) =
+                                LifecycleSigner::new(&publication, owner.clone(), SignMode::Return, None);
+                            let facade = LifecycleFacade {
+                                fail_timeout: true,
+                                ..LifecycleFacade::default()
+                            };
+                            let stats = run_inline(&mut publication, &owner, &physical, signer, true, &facade);
+                            assert_eq!(stats.outbound_timeout_signing_success, 1);
+                            assert_eq!(stats.view_timeouts_emitted, 0);
+                            assert_eq!(publication.engine.timeout_count(0), 1);
+                            assert!(facade
+                                .messages
+                                .lock()
+                                .unwrap()
+                                .iter()
+                                .any(|m| matches!(m, ConsensusNetMsg::Timeout(_))));
+                            assert!(publication.engine.timeout_emitted_in_view());
+                        }
+
+                        #[test]
+                        fn revocation_order_and_cancelled_waiter_preserve_worker_ownership() {
+                            let fixture = make_f7_fixture();
+                            let owner = TimeoutOwner::new();
+                            assert!(owner.admit());
+                            let physical = Arc::new(PhysicalExecutors::default());
+                            let (release_tx, release_rx) = mpsc::channel();
+                            let (signer, entry_rx, _) = LifecycleSigner::new(
+                                &fixture,
+                                owner.clone(),
+                                SignMode::Return,
+                                Some((PausePoint::BeforePermit, release_rx)),
+                            );
+                            let (handle, _) = spawn_paused(
+                                fixture,
+                                owner.clone(),
+                                physical.clone(),
+                                signer.clone(),
+                                LifecycleFacade::default(),
+                            );
+                            entry_rx
+                                .recv_timeout(TEST_WAIT)
+                                .expect("actual path reached signer");
+                            owner.revoke();
+                            release_tx.send(()).unwrap();
+                            handle.join().unwrap();
+                            let state = owner.state.lock().unwrap();
+                            assert_eq!(state.wrapper_entries, 1);
+                            assert_eq!(state.underlying_calls, 0);
+                            assert_eq!(state.outcome, EffectOutcome::RefusedBeforeEffect);
+                            drop(state);
+                            assert!(owner.local_quiescent(physical.count()));
+
+                            let fixture = make_f7_fixture();
+                            let owner = TimeoutOwner::new();
+                            assert!(owner.admit());
+                            let physical = Arc::new(PhysicalExecutors::default());
+                            let (release_tx, release_rx) = mpsc::channel();
+                            let (signer, _, permit_rx) = LifecycleSigner::new(
+                                &fixture,
+                                owner.clone(),
+                                SignMode::Return,
+                                Some((PausePoint::AfterPermit, release_rx)),
+                            );
+                            let (handle, completion_rx) = spawn_paused(
+                                fixture,
+                                owner.clone(),
+                                physical.clone(),
+                                signer,
+                                LifecycleFacade::default(),
+                            );
+                            permit_rx
+                                .recv_timeout(TEST_WAIT)
+                                .expect("effect permit acquired before signer call");
+                            owner.revoke();
+                            drop(completion_rx); // waiter cancellation is not executor cancellation
+                            assert!(!owner.local_quiescent(physical.count()));
+                            assert_eq!(physical.count(), 1);
+                            release_tx.send(()).unwrap();
+                            handle.join().unwrap();
+                            let state = owner.state.lock().unwrap();
+                            assert_eq!(state.underlying_calls, 1);
+                            assert!(state.signature_returned);
+                            drop(state);
+                            assert_eq!(physical.count(), 0);
+                            assert!(owner.local_quiescent(physical.count()));
+                        }
+
+                        #[test]
+                        fn capacity_child_handoff_and_check_then_act_sensitivity() {
+                            let owner = TimeoutOwner::new();
+                            assert!(owner.admit());
+                            assert!(!owner.admit(), "ledger exhaustion refuses new work");
+                            assert!(owner.worker_started());
+                            let physical = Arc::new(PhysicalExecutors::default());
+                            let worker = physical.enter();
+                            assert!(owner.handoff_child());
+                            assert!(
+                                !owner.handoff_child(),
+                                "executor ledger exhaustion refuses another child"
+                            );
+                            let (child_started_tx, child_started_rx) = mpsc::channel();
+                            let (child_release_tx, child_release_rx) = mpsc::channel();
+                            let child_physical = Arc::clone(&physical);
+                            let child_handle = std::thread::spawn(move || {
+                                let _lease = child_physical.enter();
+                                child_started_tx.send(()).unwrap();
+                                child_release_rx
+                                    .recv_timeout(TEST_WAIT)
+                                    .expect("test releases tracked child");
+                            });
+                            child_started_rx
+                                .recv_timeout(TEST_WAIT)
+                                .expect("tracked child started");
+                            owner.revoke();
+                            owner.finish_operation();
+                            assert!(!owner.local_quiescent(physical.count()));
+                            child_release_tx.send(()).unwrap();
+                            child_handle.join().unwrap();
+                            owner.child_finished();
+                            drop(worker);
+                            assert!(owner.local_quiescent(physical.count()));
+
+                            let owner = TimeoutOwner::new();
+                            assert!(owner.admit());
+                            assert!(owner.worker_started());
+                            let physical = Arc::new(PhysicalExecutors::default());
+                            let worker = physical.enter();
+                            let (child_started_tx, child_started_rx) = mpsc::channel();
+                            let (child_release_tx, child_release_rx) = mpsc::channel();
+                            let child_physical = Arc::clone(&physical);
+                            let untracked_child = std::thread::spawn(move || {
+                                let _lease = child_physical.enter();
+                                child_started_tx.send(()).unwrap();
+                                child_release_rx
+                                    .recv_timeout(TEST_WAIT)
+                                    .expect("test releases omitted child");
+                            });
+                            child_started_rx
+                                .recv_timeout(TEST_WAIT)
+                                .expect("untracked child started");
+                            owner.revoke();
+                            owner.finish_operation();
+                            assert!(
+                                !owner.local_quiescent(physical.count()),
+                                "independent executor observation detects omitted child handoff"
+                            );
+                            child_release_tx.send(()).unwrap();
+                            untracked_child.join().unwrap();
+                            drop(worker);
+                            assert!(owner.local_quiescent(physical.count()));
+
+                            // Sensitivity mutant: a prior Boolean check is not
+                            // serialized with revocation and can still perform
+                            // the effect. The real permit check refuses instead.
+                            let owner = TimeoutOwner::new();
+                            assert!(owner.admit());
+                            let stale_generation_was_valid = owner.state.lock().unwrap().accepting;
+                            owner.revoke();
+                            let unsafe_effect_ran = stale_generation_was_valid;
+                            assert!(unsafe_effect_ran);
+                            assert!(!owner.acquire_effect_permit());
+                            let state = owner.state.lock().unwrap();
+                            assert_eq!(state.outcome, EffectOutcome::RefusedBeforeEffect);
+                            assert_eq!(state.underlying_calls, 0);
+                        }
+                    }
                     #[test]
                     fn run422_f7_retained_qc_local_timeout_accepts_exact_lock_before_consumption() {
                         let mut fixture = make_f7_fixture();
