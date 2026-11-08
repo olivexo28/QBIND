@@ -146,6 +146,53 @@ uncompromised verifier, exact scope checks and refusal semantics. It is not
 a claim against joint compromise, an authorized-but-malicious authority, or
 a compromised host.
 
+### Independence decision boundary — proposal, not an established fact
+
+**Proposed boundary:** a future deployment's independence review is a
+precondition to claiming Candidate B's independently authenticated
+expected-anchor result. A future verifier would receive a separately trusted
+input attesting that a specifically scoped review was completed and accepted
+for this commitment authority, anchor/deployment channel, recipient and
+deployment. The attestation would need to bind the review scope and the
+identified channels/authorities; a Boolean configuration flag, operator
+assertion, two-channel count, or synthetic fixture label is not that
+attestation and does not prove real administrative independence.
+
+This boundary does not select an attestation format, signer, trust root,
+review body, delivery channel, or provisioning procedure. Before reliance,
+an independent process must establish the review's authority and evidence;
+the verifier must authenticate the attestation under a separately established
+trust policy and check that its scope matches the actual channels and
+deployment. That introduces trust dependencies on the review authority,
+attestation credential and enrollment, review evidence integrity, recipient
+binding, and verifier enforcement. It also introduces a **currentness**
+dependency: an authentic prior review may be withdrawn, superseded or made
+inapplicable by changed channel administration, credentials, providers or
+deployment. Without separate authenticated evidence that the scoped review
+remains applicable, independence is not established for a current result.
+Neither the raw commitment match nor a self-asserted or stale attestation can
+repair missing review evidence.
+
+If owners later choose not to provide a separately authenticated review
+attestation to the verifier, independence would remain an externally reviewed
+deployment prerequisite, and the verifier could not itself claim to have
+established it. That alternative is not selected. Under either boundary,
+missing, conflicting, insufficient or threat-model-disqualifying
+independence evidence makes expected-anchor authentication **refused or
+unavailable**. Association authenticity and tuple equality that depend on
+that expected-anchor result must likewise be **refused or unavailable**;
+they cannot be promoted by a raw match, a signature under the delivered
+anchor, or matching observations. No startup, signer-loading, signing,
+participation, recovery, restart or other authority follows.
+
+A byte-for-byte anchor match or equality between a computed digest and
+delivered digest may be retained only as **non-authoritative diagnostic
+information** (for example, to explain which values matched during a
+refused evaluation). It is not Candidate B's independently authenticated
+expected-anchor result. That result additionally requires authenticated
+commitment provenance, independently established deployment binding, and
+applicable channel-independence evidence under the approved threat model.
+
 ## 3. What independence would mean and what evidence is missing
 
 Physical separation or different transport protocols is not the independence
@@ -195,7 +242,9 @@ independent reviewer would need evidence that, for the defined threat model:
   either channel alone cannot produce a false accepted anchor and that
   the failure is observable as refusal. This exercise cannot prove that
   unseen common administrators or dependencies do not exist; it must be
-  paired with the authority/credential/failure-domain review.
+  paired with the authority/credential/failure-domain review and any
+  separately authenticated review attestation required by the proposed
+  verifier boundary.
 
 No evidence satisfying these criteria is supplied or asserted here. No
 authority, account, provider, root, credential or delivery channel is
@@ -227,6 +276,16 @@ self-authenticating. Trust-on-first-use is not independent initial
 authentication unless an explicit owner decision accepts that first contact
 as the trust root and separately addresses substitution during enrollment.
 No recursive or implicit first-use fallback is authorized.
+
+The proposed reviewer attestation described above has the same
+non-circularity requirement: its own authority and initial enrollment must
+be authenticated separately; it cannot attest to its own trustworthiness.
+An attestation of a past review is evidence that the review occurred, not
+proof that the reviewed conditions remain true. Updates to either channel's
+administrators, recovery mechanisms, credentials, shared providers or
+deployment scope may invalidate its applicability. A separate currentness
+source/policy would be needed to claim that the attestation remains in force;
+without it, independence is unavailable for that claim.
 
 ## 4. Abstract commitment statement and binding requirements
 
@@ -340,10 +399,14 @@ hook.
    future approved canonical meaning and commitment method over the full
    anchor and all commitment-bound scope/purpose/policy data. Compare to the
    authenticated expected commitment. Independently compare every required
-   deployment restriction to the expected context. A mismatch, incomplete
-   field, unbound scope, wrong deployment, duplicate candidate, or more than
-   one inconsistent evidence set refuses; no partial match or first-match
-   selection.
+   deployment restriction to the expected context. A matching raw byte/digest
+   value is diagnostic only until the channel-independence precondition and
+   any required separately trusted review attestation are established. If
+   independence is missing, conflicting, insufficient or disqualified under
+   the approved threat model, expected-anchor authentication is refused or
+   unavailable despite a raw match. A mismatch, incomplete field, unbound
+   scope, wrong deployment, duplicate candidate, or more than one inconsistent
+   evidence set also refuses; no partial match or first-match selection.
 7. **Verify the association, separately.** Only after anchor authentication
    succeeds may a distinct, future approved association verifier evaluate
    its signature using the authenticated anchor and independently
@@ -352,10 +415,14 @@ hook.
    authenticated tuple to observations. Anchor commitment match does not
    prove association signature validity; a valid association signature
    does not prove its anchor is expected.
-8. **Report results separately.** Report anchor/commitment authentication,
-   association authenticity, tuple equality and currentness as distinct
-   findings. No result or combination grants permission to start, load a
-   signer, participate, sign, restore, recover or restart.
+8. **Report results separately.** Report raw commitment comparison (if
+   useful, diagnostic and non-authoritative), independently authenticated
+   expected-anchor status, association authenticity, tuple equality and
+   currentness as distinct findings. If expected-anchor authentication is
+   refused or unavailable, association authenticity and equality that depend
+   on that anchor are also refused or unavailable. No result or combination
+   grants permission to start, load a signer, participate, sign, restore,
+   recover or restart.
 9. **Protect check/use consistency.** Future code must ensure the bytes and
    policy that passed the commitment comparison are the same immutable
    values consumed by association verification and any separately authorized
@@ -469,8 +536,8 @@ enforces these outcomes.
 |---|---|
 | Commitment absent, inaccessible, unreadable, delayed beyond any separately approved rule, or channel unavailable | Refuse anchor authentication/current-eligibility claim; no unsigned, local-config, anchor-channel or cached fallback. |
 | Commitment sender/authenticator missing, unknown, invalid, unauthorized, revoked under trusted applicable evidence, or its enrollment provenance circular | Refuse; a digest comparison alone cannot repair missing sender authentication. |
-| Commitment and anchor channels share an unreviewed account, key, administrator, identity provider, recovery root or publishing pipeline | Independence is **not established**; refuse to claim Candidate B's one-channel-compromise property pending review. |
-| Commitment messages conflict, are ambiguous, incomplete, duplicate, malformed, truncated, unsupported or bind different recipients/policies | Refuse; do not choose by arrival order, local majority, filename, timestamp or operator convenience. |
+| Commitment and anchor channels share an unreviewed account, key, administrator, identity provider, recovery root or publishing pipeline, or available evidence is insufficient to distinguish their failure domains under the approved threat model | Independence is **not established**; expected-anchor authentication is refused or unavailable, and dependent association-authenticity and tuple-equality results are refused or unavailable. A raw digest/byte match may be diagnostic only. |
+| Commitment messages conflict, are ambiguous, incomplete, duplicate, malformed, truncated, unsupported or bind different recipients/policies; independence-review evidence is missing, conflicting, insufficient or stale for the claimed scope | Refuse or mark unavailable the expected-anchor result and all dependent association-authenticity/equality results; do not choose by arrival order, local majority, filename, timestamp or operator convenience. |
 | Full anchor bytes or suite differ from the independently authenticated commitment | Refuse expected-anchor authentication, even if an association verifies under the delivered anchor. |
 | Anchor key matches but purpose, policy, environment, numeric chain, genesis, destination, validator scope or recipient differs | Refuse deployment binding; no key-only match or label-only fallback. |
 | Association or commitment representation admits multiple interpretations, duplicate fields, unknown critical values, omitted signed/committed values or downgrade | Refuse before accepting an anchor or association; do not guess a parser or compatibility behavior. |
@@ -546,10 +613,11 @@ do not prove real independence.
 
 | Proposed control | Required observable result and sensitivity |
 |---|---|
-| Positive control: properly authenticated synthetic commitment covers full expected anchor and deployment scope; separately delivered anchor matches; association test fixture is valid. | Report anchor commitment authentication, association authenticity and tuple equality independently. Currentness remains unresolved without separately approved synthetic currentness evidence. No permission/capability result exists. |
+| Positive control: properly authenticated synthetic commitment covers full expected anchor and deployment scope; a separately fixed synthetic input attests that the scoped independence review passed; separately delivered anchor matches; association test fixture is valid. | Report raw match only as diagnostic, then independently report expected-anchor authentication, association authenticity and tuple equality. Currentness remains unresolved without separately approved synthetic currentness evidence. No permission/capability result exists. The fixture models, but cannot prove, real channel or administrative independence. |
 | Anchor-channel substitution: keep independently authenticated commitment fixed; alter one byte of full anchor, suite, purpose or bound scope; use an attacker key with a valid synthetic association signature. | Anchor comparison refuses despite signature validity under substituted key. A test-only bypass of commitment comparison must make this negative control fail; positive control prevents reject-all passing. |
 | Commitment-channel substitution: keep anchor delivery fixed; alter commitment or authenticated deployment binding; test bad/untrusted authenticator, unauthorized issuer and statement alteration. | Refuse commitment authentication or scope. Bypassing sender authentication or binding must break the negative assertion. |
-| Same-credential/common-administrator control | Model both channels as authenticated by one credential, one account or one administrator; demonstrate that changing both inputs can produce internally matching evidence and therefore independence is **not established**. Checker must refuse the independence claim or explicitly mark its trust premise unmet; it must not count channel count as independence. |
+| Same-credential/common-administrator control | Model both channels as authenticated by one credential, one account or one administrator; demonstrate that changing both inputs can produce an internally matching raw byte/digest result, but independence is **not established** under the fixture's stated threat model. The expected-anchor result and dependent association authenticity/equality must be refused or unavailable; any raw match is diagnostic only. A positive fixture with the separately trusted independence-review input must pass, and a same-checker bypass of the independence gate must make this negative assertion fail. The fixture models this boundary; it does not prove real administrative independence. |
+| Missing/conflicting/insufficient independence evidence | Hold a positive raw commitment match, anchor, association and observations fixed; remove, conflict, stale, or make insufficient the independence-review evidence or its trusted scope binding. | Refuse or mark unavailable expected-anchor authentication and dependent association authenticity/equality; preserve raw match as diagnostic only and keep currentness distinct. A same-checker bypass of the independence gate must make the negative assertion fail; the positive fixture must still pass. Do not treat a software flag or fixture label as operational proof. |
 | One-channel compromise matrix | Independently inject substitution, replay, delay, omission, conflict and denial on commitment channel only, then anchor/deployment channel only; hold the other synthetic source and verifier policy fixed. Alteration must not produce accepted false anchor; unavailability causes refusal. Separate controls must show joint compromise is outside the guarantee. |
 | Wrong deployment / cross-deployment reuse | Reuse the same synthetic anchor or commitment in another environment, numeric chain, full genesis, destination, recipient or approved validator scope; vary one field at a time, including a signed/committed foreign tuple matching its observations. | Refuse the independently expected-domain check. Per-field same-checker omission/bypass must make the negative assertion fail. |
 | Ambiguous representation and downgrade | Exercise duplicate/conflicting fields, alternate encodings, concatenation-boundary ambiguity, unknown critical values, unsupported versions/suites, omitted purpose/scope, attacker-selected method and permissive fallback. | Refuse before trust; mutating the parser/policy to accept the ambiguous or downgraded case must break the negative control. No encoding or method is chosen by this plan. |
