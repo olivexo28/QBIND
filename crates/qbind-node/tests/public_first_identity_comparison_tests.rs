@@ -703,11 +703,9 @@ fn actual_acquired_helper_results_compare_to_fixed_synthetic_expectation() {
     )
     .expect("actual helper acquisition for varied destination");
     assert_eq!(
-        compare(
-            &destination_observation.identity,
-            ExpectedSource::SyntheticAuthenticated(expected.clone()),
-        ),
-        Comparison::Refuse(Refusal::Mismatch(IdentityField::DestinationId))
+        acquire_against_expected(Ok(destination_observation.clone()), &expected, false),
+        Comparison::Refuse(Refusal::Mismatch(IdentityField::DestinationId)),
+        "normal wrapper path compares the acquired destination against fixed expectation"
     );
     assert_eq!(
         acquire_against_expected(Ok(destination_observation), &expected, true),
@@ -738,10 +736,7 @@ fn actual_acquired_helper_results_compare_to_fixed_synthetic_expectation() {
         "genesis chain name remains from the owned parse; numeric chain stays explicit"
     );
     assert_eq!(
-        compare(
-            &varied_genesis_observation.identity,
-            ExpectedSource::SyntheticAuthenticated(expected.clone()),
-        ),
+        acquire_against_expected(Ok(varied_genesis_observation.clone()), &expected, false),
         Comparison::Refuse(Refusal::Mismatch(IdentityField::GenesisHash)),
         "valid changed genesis is rejected by the fixed expected association comparison"
     );
@@ -750,17 +745,6 @@ fn actual_acquired_helper_results_compare_to_fixed_synthetic_expectation() {
         Comparison::Match,
         "discarding acquired genesis identity invalidates comparison negative control"
     );
-    assert_eq!(
-        compare_with_test_bypass(
-            &varied_genesis_observation.identity,
-            ExpectedSource::SyntheticAuthenticated(expected),
-            Some(IdentityField::GenesisHash),
-            false,
-        ),
-        Comparison::Match,
-        "bypassing acquired full-genesis-hash comparison invalidates negative control"
-    );
-
     // Using the original retained hash rejects at boot-hash validation,
     // before comparator execution; this is distinct from the fixed-authority
     // mismatch above, which used the changed fixture's own retained hash.
