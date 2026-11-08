@@ -55,6 +55,16 @@ enum ClassificationDecision {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RecordObservation {
+    Absent,
+    CorruptOrInvalid,
+    Unreadable,
+    ForeignOrAmbiguous,
+    Unresolved,
+    SyntheticPositiveFixture,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PreExitEffect {
     IdentityUtilityWroteFiles,
     GenesisHashUtilityReadGenesis,
@@ -67,6 +77,7 @@ enum Event {
     NormalDestinationOwned,
     ResetDestinationOwned,
     Classified {
+        record: RecordObservation,
         identity: IdentityClaims,
         decision: ClassificationDecision,
     },
@@ -77,7 +88,7 @@ enum Event {
     SnapshotEpochPersisted,
     RestoreCompletePublished,
     ResetMutation,
-    MetricsWorkerStarted,
+    MetricsTaskSpawned,
     SignerLoaded,
     P2pListenerStarted,
     SnapshotWorkerStarted,
@@ -104,6 +115,9 @@ enum Violation {
     RestoreEffectsOutOfOrder,
     StatelessIdentityNotUnavailable,
     EarlyExitCrossedStartupBoundary,
+    RecordObservationCannotAdmit,
+    ProtectedEffectAfterRefusal,
+    NormalMetricsStorageOrder,
 }
 
 fn is_protected_effect(event: Event) -> bool {
@@ -116,7 +130,7 @@ fn is_protected_effect(event: Event) -> bool {
             | Event::SnapshotEpochPersisted
             | Event::RestoreCompletePublished
             | Event::ResetMutation
-            | Event::MetricsWorkerStarted
+            | Event::MetricsTaskSpawned
             | Event::SignerLoaded
             | Event::P2pListenerStarted
             | Event::SnapshotWorkerStarted
@@ -142,11 +156,20 @@ fn check_trace(route: Route, events: &[Event]) -> Vec<Violation> {
         .iter()
         .filter(|event| **event == Event::ResetDestinationOwned)
         .count();
-    let classifications: Vec<(usize, IdentityClaims, ClassificationDecision)> = events
+    let classifications: Vec<(
+        usize,
+        RecordObservation,
+        IdentityClaims,
+        ClassificationDecision,
+    )> = events
         .iter()
         .enumerate()
         .filter_map(|(index, event)| match event {
-            Event::Classified { identity, decision } => Some((index, *identity, *decision)),
+            Event::Classified {
+                record,
+                identity,
+                decision,
+            } => Some((index, *record, *identity, *decision)),
             _ => None,
         })
         .collect();
@@ -170,7 +193,8 @@ fn check_trace(route: Route, events: &[Event]) -> Vec<Violation> {
             }
             if classification.is_none() {
                 violations.push(Violation::MissingOrRepeatedClassification);
-            } else if let (Some(owner), Some((class_index, _, _))) = (normal_owner, classification)
+            } else if let (Some(owner), Some((class_index, _, _, _))) =
+                (normal_owner, classification)
             {
                 if class_index < owner {
                     violations.push(Violation::ClassificationBeforeOwnership);
@@ -190,7 +214,9 @@ fn check_trace(route: Route, events: &[Event]) -> Vec<Violation> {
             }
             if classification.is_none() {
                 violations.push(Violation::MissingOrRepeatedClassification);
-            } else if let (Some(owner), Some((class_index, _, _))) = (reset_owner, classification) {
+            } else if let (Some(owner), Some((class_index, _, _, _))) =
+                (reset_owner, classification)
+            {
                 if class_index < owner {
                     violations.push(Violation::ClassificationBeforeOwnership);
                 }
@@ -202,9 +228,10 @@ fn check_trace(route: Route, events: &[Event]) -> Vec<Violation> {
             }
             if classification.is_none() {
                 violations.push(Violation::MissingOrRepeatedClassification);
-            } else if let Some((_, identity, decision)) = classification {
+            } else if let Some((_, record, identity, decision)) = classification {
                 if identity.destination != IdentityEvidence::Unavailable
                     || decision != ClassificationDecision::Refuse
+                    || record != RecordObservation::Absent
                 {
                     violations.push(Violation::StatelessIdentityNotUnavailable);
                 }
@@ -217,16 +244,18 @@ fn check_trace(route: Route, events: &[Event]) -> Vec<Violation> {
         }
     }
 
-    if let Some((_, identity, decision)) = classification {
+    if let Some((_, record, identity, decision)) = classification {
         let identity_trusted = identity.can_admit_synthetic_trace();
         match decision {
-            ClassificationDecision::AdmitSyntheticTrace if !identity_trusted => {
-                violations.push(Violation::IdentityCannotSupportAdmission);
+            ClassificationDecision::AdmitSyntheticTrace => {
+                if !identity_trusted {
+                    violations.push(Violation::IdentityCannotSupportAdmission);
+                }
+                if record != RecordObservation::SyntheticPositiveFixture {
+                    violations.push(Violation::RecordObservationCannotAdmit);
+                }
             }
-            ClassificationDecision::Refuse if route != Route::NoDataDir && identity_trusted => {
-                // Refusal is permitted even for a complete synthetic fixture.
-            }
-            _ => {}
+            ClassificationDecision::Refuse => {}
         }
         if route == Route::NoDataDir && decision != ClassificationDecision::Refuse {
             violations.push(Violation::RefusalModelAdmitted);
@@ -238,12 +267,17 @@ fn check_trace(route: Route, events: &[Event]) -> Vec<Violation> {
             continue;
         }
         match classification {
-            Some((class_index, identity, ClassificationDecision::AdmitSyntheticTrace))
-                if class_index < index && identity.can_admit_synthetic_trace() =>
+            Some((class_index, record, identity, ClassificationDecision::AdmitSyntheticTrace))
+                if class_index < index
+                    && record == RecordObservation::SyntheticPositiveFixture
+                    && identity.can_admit_synthetic_trace() =>
             {
                 if matches!(route, Route::NoDataDir | Route::EarlyExit) {
                     violations.push(Violation::StatelessRouteHasOwnershipOrParticipation);
                 }
+            }
+            Some((class_index, _, _, ClassificationDecision::Refuse)) if class_index < index => {
+                violations.push(Violation::ProtectedEffectAfterRefusal);
             }
             _ => violations.push(Violation::ProtectedEffectBeforeClassification),
         }
@@ -254,7 +288,12 @@ fn check_trace(route: Route, events: &[Event]) -> Vec<Violation> {
         && (route != Route::NormalWithDataDir && route != Route::RequestedRestore
             || !matches!(
                 classification,
-                Some((index, identity, ClassificationDecision::AdmitSyntheticTrace))
+                Some((
+                    index,
+                    RecordObservation::SyntheticPositiveFixture,
+                    identity,
+                    ClassificationDecision::AdmitSyntheticTrace
+                ))
                     if index < participation.unwrap()
                         && identity.can_admit_synthetic_trace()
             ))
@@ -284,7 +323,7 @@ fn check_trace(route: Route, events: &[Event]) -> Vec<Violation> {
         }
         Route::Reset => {
             if let (Some(class_index), Some(reset_index)) = (
-                classification.map(|(index, _, _)| index),
+                classification.map(|(index, _, _, _)| index),
                 position(events, Event::ResetMutation),
             ) {
                 if class_index >= reset_index {
@@ -304,7 +343,16 @@ fn check_trace(route: Route, events: &[Event]) -> Vec<Violation> {
                 violations.push(Violation::ExitNotLast);
             }
         }
-        Route::NormalWithDataDir => {}
+        Route::NormalWithDataDir => {
+            if let (Some(metrics), Some(storage)) = (
+                position(events, Event::MetricsTaskSpawned),
+                position(events, Event::ConsensusStorageOpened),
+            ) {
+                if metrics >= storage {
+                    violations.push(Violation::NormalMetricsStorageOrder);
+                }
+            }
+        }
     }
 
     violations.dedup();
@@ -313,13 +361,15 @@ fn check_trace(route: Route, events: &[Event]) -> Vec<Violation> {
 
 fn admitted(identity: IdentityClaims) -> Event {
     Event::Classified {
+        record: RecordObservation::SyntheticPositiveFixture,
         identity,
         decision: ClassificationDecision::AdmitSyntheticTrace,
     }
 }
 
-fn refused(identity: IdentityClaims) -> Event {
+fn refused(record: RecordObservation, identity: IdentityClaims) -> Event {
     Event::Classified {
+        record,
         identity,
         decision: ClassificationDecision::Refuse,
     }
@@ -331,8 +381,8 @@ fn positive_normal_ordering_keeps_directory_creation_before_ownership() {
         Event::DataDirectoryCreated,
         Event::NormalDestinationOwned,
         admitted(IdentityClaims::synthetic_trusted()),
+        Event::MetricsTaskSpawned,
         Event::ConsensusStorageOpened,
-        Event::MetricsWorkerStarted,
         Event::SignerLoaded,
         Event::P2pListenerStarted,
         Event::SnapshotWorkerStarted,
@@ -354,7 +404,7 @@ fn positive_restore_ordering_preserves_the_restore_effect_sequence() {
         Event::AccountStateMaterialized,
         Event::SnapshotEpochPersisted,
         Event::RestoreCompletePublished,
-        Event::MetricsWorkerStarted,
+        Event::MetricsTaskSpawned,
         Event::ParticipationAuthorityProduced,
     ];
     assert!(check_trace(Route::RequestedRestore, &events).is_empty());
@@ -375,10 +425,13 @@ fn positive_reset_ordering_uses_its_own_owner_and_classification() {
 #[test]
 fn stateless_and_untrusted_identity_traces_refuse_without_authority() {
     let no_data_dir = [
-        refused(IdentityClaims {
-            destination: IdentityEvidence::Unavailable,
-            ..IdentityClaims::synthetic_trusted()
-        }),
+        refused(
+            RecordObservation::Absent,
+            IdentityClaims {
+                destination: IdentityEvidence::Unavailable,
+                ..IdentityClaims::synthetic_trusted()
+            },
+        ),
         Event::Exit,
     ];
     assert!(check_trace(Route::NoDataDir, &no_data_dir).is_empty());
@@ -399,7 +452,7 @@ fn stateless_and_untrusted_identity_traces_refuse_without_authority() {
             let events = [
                 Event::DataDirectoryCreated,
                 Event::NormalDestinationOwned,
-                refused(identity),
+                refused(RecordObservation::SyntheticPositiveFixture, identity),
                 Event::Exit,
             ];
             assert!(check_trace(Route::NormalWithDataDir, &events).is_empty());
@@ -426,6 +479,7 @@ fn normal_classification_omission_mutant_is_detected() {
     let mutant = [
         Event::DataDirectoryCreated,
         Event::NormalDestinationOwned,
+        Event::MetricsTaskSpawned,
         Event::ConsensusStorageOpened,
         Event::ParticipationAuthorityProduced,
     ];
@@ -446,6 +500,70 @@ fn normal_classification_misordering_mutant_is_detected() {
     ];
     let violations = check_trace(Route::NormalWithDataDir, &mutant);
     assert!(violations.contains(&Violation::ProtectedEffectBeforeClassification));
+}
+
+#[test]
+fn normal_metrics_task_must_precede_consensus_storage() {
+    let reversed = [
+        Event::DataDirectoryCreated,
+        Event::NormalDestinationOwned,
+        admitted(IdentityClaims::synthetic_trusted()),
+        Event::ConsensusStorageOpened,
+        Event::MetricsTaskSpawned,
+    ];
+    let violations = check_trace(Route::NormalWithDataDir, &reversed);
+    assert!(violations.contains(&Violation::NormalMetricsStorageOrder));
+}
+
+#[test]
+fn record_refusal_observations_cannot_be_forced_into_admission() {
+    for record in [
+        RecordObservation::Absent,
+        RecordObservation::CorruptOrInvalid,
+        RecordObservation::Unreadable,
+        RecordObservation::ForeignOrAmbiguous,
+        RecordObservation::Unresolved,
+    ] {
+        let valid_refusal = [
+            Event::DataDirectoryCreated,
+            Event::NormalDestinationOwned,
+            refused(record, IdentityClaims::synthetic_trusted()),
+            Event::Exit,
+        ];
+        assert!(
+            check_trace(Route::NormalWithDataDir, &valid_refusal).is_empty(),
+            "valid refusal trace rejected for {record:?}"
+        );
+
+        let forced_admission = [
+            Event::DataDirectoryCreated,
+            Event::NormalDestinationOwned,
+            Event::Classified {
+                record,
+                identity: IdentityClaims::synthetic_trusted(),
+                decision: ClassificationDecision::AdmitSyntheticTrace,
+            },
+            Event::Exit,
+        ];
+        assert!(
+            check_trace(Route::NormalWithDataDir, &forced_admission)
+                .contains(&Violation::RecordObservationCannotAdmit),
+            "forced admission accepted for {record:?}"
+        );
+
+        let effect_after_refusal = [
+            Event::DataDirectoryCreated,
+            Event::NormalDestinationOwned,
+            refused(record, IdentityClaims::synthetic_trusted()),
+            Event::ConsensusStorageOpened,
+            Event::Exit,
+        ];
+        assert!(
+            check_trace(Route::NormalWithDataDir, &effect_after_refusal)
+                .contains(&Violation::ProtectedEffectAfterRefusal),
+            "protected effect accepted after refusal for {record:?}"
+        );
+    }
 }
 
 #[test]

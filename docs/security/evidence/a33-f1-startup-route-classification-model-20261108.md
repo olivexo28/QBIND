@@ -29,16 +29,21 @@ versions of `main.rs`, `cli.rs`, `identity_cli.rs`, `restore_completion.rs`,
 revision. `binary_consensus_loop.rs` differs between the task base and pinned
 main and is not used by this model.
 
-Only these paths are added:
+The model and evidence paths are:
 
 - `crates/qbind-node/tests/a33_f1_startup_route_classification_model.rs`
 - `docs/security/evidence/a33-f1-startup-route-classification-model-20261108.md`
+- `docs/security/evidence/a33-f1-startup-route-classification-model-srm-focused-test-output.txt`
+- `docs/security/evidence/a33-f1-startup-route-classification-model-srm-compile-output.txt`
+- `docs/security/evidence/a33-f1-startup-route-classification-model-srm-order-enforcement-failed-output.txt`
 
 The test uses synthetic `Event` arrays and one `check_trace` checker. It does
 not invoke `qbind-node`, use a real lock, open production stores, exercise
 Timeout signing, or observe process/restart behavior. Events corresponding
 to existing source are explicitly separated below from future classifier
-requirements encoded by the checker.
+requirements encoded by the checker. The SRM correction gives each
+classification a separate synthetic Timeout-record observation, independent
+of identity claims and the caller-supplied decision.
 
 ## Source route inventory and modeled boundary
 
@@ -47,7 +52,7 @@ Source links below are pinned to main
 
 | Route | Existing source order represented | Future requirement represented by the model |
 |---|---|---|
-| Normal startup with `data_dir` | Main creates the directory, then acquires `<data_dir>/restore.lock` ([`main.rs:2515-2550`](https://github.com/olivexo28/QBIND/blob/0d1b56515c52abe2862064027d1a9f103fef5a0c/crates/qbind-node/src/main.rs#L2515-L2550)). The metrics task is spawned at `:5025-5031` before the current RTR classifier at `:5062-5133`; consensus storage opens at `:5180-5197`; VM state opens at `:5380-5400`. P2P security preflight is called at `:8124-8138`; the builder starts transport before spawning its demux task ([`p2p_node_builder.rs:1754-1821`](https://github.com/olivexo28/QBIND/blob/0d1b56515c52abe2862064027d1a9f103fef5a0c/crates/qbind-node/src/p2p_node_builder.rs#L1754-L1821)). | Keep directory creation before ownership; require successful normal destination ownership before classification; require future classification before modeled storage, workers, signer loading, listener, snapshot, consensus and participation effects. This intentionally moves a *proposed Timeout classifier* earlier than the existing RTR check; it does not claim that such a classifier exists. |
+| Normal startup with `data_dir` | Main creates the directory, then acquires `<data_dir>/restore.lock` ([`main.rs:2515-2550`](https://github.com/olivexo28/QBIND/blob/0d1b56515c52abe2862064027d1a9f103fef5a0c/crates/qbind-node/src/main.rs#L2515-L2550)). The metrics task is spawned at `:5025-5031` before the current RTR classifier at `:5062-5133`; consensus storage opens at `:5180-5197`; VM state opens at `:5380-5400`. P2P security preflight is called at `:8124-8138`; the builder starts transport before spawning its demux task ([`p2p_node_builder.rs:1754-1821`](https://github.com/olivexo28/QBIND/blob/0d1b56515c52abe2862064027d1a9f103fef5a0c/crates/qbind-node/src/p2p_node_builder.rs#L1754-L1821)). | Keep directory creation before ownership; require successful normal destination ownership before classification; require future classification before modeled protected effects. Separately preserve the source order **metrics-task spawn before ordinary consensus-storage open**. This intentionally moves a *proposed Timeout classifier* earlier than the existing RTR check; it does not claim that such a classifier exists. |
 | Requested restore | The same normal lock applies. Requested restore opens consensus storage at `:2619-2649` **before** its existing restore-record precondition at `:2776-2811`. It publishes the restore transaction’s own `INTENT` at `:2814-2847` before calling guarded restore at `:2852-2857`; later it persists snapshot epoch at `:5227-5257` and publishes `COMPLETE` at `:5260-5358`. | Require the proposed classifier after ownership but before modeled storage open and restore effects. Preserve source order among consensus open, restore-record check, restore `INTENT`, materialization, epoch effect and `COMPLETE`. The existing restore transaction record is not a Timeout-intent classifier. |
 | Reset | `--authority-state-reset` is dispatched separately at `:2222-2281`; it creates the data directory, acquires its own destination lock, then executes reset effects. It bypasses the later normal-startup lock/classifier path. | Require a distinct reset-owner event and a distinct classifier between reset ownership and reset mutation. A normal-startup classification hook cannot be assumed to cover reset. |
 | Startup without `data_dir` | The normal lock binding is `None` when no data directory is configured (`:2515-2550`). Production consensus storage likewise returns no handle if `data_dir` is absent ([`production_consensus_storage.rs:391-398`](https://github.com/olivexo28/QBIND/blob/0d1b56515c52abe2862064027d1a9f103fef5a0c/crates/qbind-node/src/production_consensus_storage.rs#L391-L398)). | Treat destination identity as unavailable and require refusal with no modeled protected effect or participation authority. This is a property of the refusal-only model, not a selected production stateless-start policy. |
@@ -78,29 +83,56 @@ preimage inputs, message/record identity and separately established authority
 are distinct; recording fields does not make them authenticated by that
 signature.
 
+## SRM correction: record-state and route-order sensitivity
+
+The shared checker receives three independent classification inputs:
+`RecordObservation`, the four-field `IdentityClaims`, and the caller-supplied
+`ClassificationDecision`. It models `Absent`, `CorruptOrInvalid`,
+`Unreadable`, `ForeignOrAmbiguous`, and `Unresolved` as refusal observations.
+Each is tested with otherwise trusted synthetic identity: a refusal trace is
+accepted, forced `AdmitSyntheticTrace` is rejected, and a protected storage
+effect after refusal is rejected. `SyntheticPositiveFixture` is the only
+record observation that can satisfy the test model's synthetic-admission
+condition. It is an artificial test fixture only; it does not mean that an
+absent record is clean, define a restart policy, establish identity or grant
+production authority.
+
+The normal positive trace and the same checker enforce metrics-task spawn
+before ordinary consensus-storage open. A mutant reversing those events is
+rejected. Restore retains its separately modeled source order: consensus
+storage opens before restore-record check, intent, materialization, epoch
+persistence and completion; the normal metrics/storage relation is not imposed
+on restore. The earlier normal/reset classification omission and
+misordering mutants remain in the target.
+
 ## Controls and outcomes
 
-The focused target contains nine test bodies:
+The corrected focused target contains eleven test bodies:
 
 1. Positive normal ordering, explicitly retaining data-directory creation
-   before ownership.
+   before ownership and metrics-task spawn before ordinary consensus-storage
+   open.
 2. Positive restore ordering, with classification before storage and the
-   restore-specific sequence preserved.
+   restore-specific sequence preserved independently of normal-route order.
 3. Positive reset ordering through separate ownership/classification.
 4. No-data-dir refusal plus unavailable, untrusted and
    display-fingerprint-only identity in each of destination, chain, genesis
    and signer fields.
 5. Early-exit traces retaining identity-file writes, genesis reads or
    configuration reads before exit, without participation.
-6. Normal-route classification omission mutant.
-7. Normal-route classification-after-storage mutant.
-8. Reset-route classification omission mutant.
-9. Reset-route classification-after-mutation mutant.
+6. Five record-state refusal controls, each including an accepted refusal
+   trace, a forced-admission mutant and a protected-effect-after-refusal
+   mutant with fully trusted synthetic identity.
+7. Normal-route metrics/storage reversal mutant.
+8. Normal-route classification omission mutant.
+9. Normal-route classification-after-storage mutant.
+10. Reset-route classification omission mutant.
+11. Reset-route classification-after-mutation mutant.
 
-The four mutants are submitted to the exact same `check_trace` function as
-the positive traces. Each returns a classification-order violation (and
-where applicable a missing-classification or participation-without-admission
-violation); the positive traces produce no violations.
+All positive and mutant traces use the same `check_trace` function. The record
+controls demonstrate that identity claims alone cannot override a refusal
+observation, and that no modeled protected effect is accepted after refusal.
+All positive traces produce no violations.
 
 ### Executions
 
@@ -117,32 +149,51 @@ Exact focused command:
 cargo test -p qbind-node --test a33_f1_startup_route_classification_model -- --nocapture
 ```
 
-The first development execution exited **101**: 9 tests ran, 8 passed, and
+The earlier development execution at the original model version exited
+**101**: 9 tests ran, 8 passed, and
 `normal_classification_misordering_mutant_is_detected` failed because its
 assertion required an additional `ParticipationWithoutAdmission` violation
 even though the same checker had already identified the prior protected
 storage effect. The assertion was corrected to require the ordering
-violation; no production code was changed. The final execution of the same
-command exited **0**:
+violation; no production code was changed. The original model's reported
+final execution was 9/9, but it is historical author-reported evidence and
+was not independently rerun for this correction.
+
+For this correction, the exact focused command was run against the task
+branch worktree based on source commit `23ecb16465e25e4e79b0f1acc894c51a0313521c`
+(tree `84fcbeead2b52c5eca81842468ee460d15c6bd1d`). It exited **0**:
 
 ```text
-running 9 tests
+running 11 tests
 test early_exits_preserve_prior_observable_effects_without_participation ... ok
 test normal_classification_misordering_mutant_is_detected ... ok
 test normal_classification_omission_mutant_is_detected ... ok
+test normal_metrics_task_must_precede_consensus_storage ... ok
 test positive_normal_ordering_keeps_directory_creation_before_ownership ... ok
 test positive_reset_ordering_uses_its_own_owner_and_classification ... ok
 test positive_restore_ordering_preserves_the_restore_effect_sequence ... ok
+test record_refusal_observations_cannot_be_forced_into_admission ... ok
 test reset_classification_misordering_mutant_is_detected ... ok
 test reset_classification_omission_mutant_is_detected ... ok
 test stateless_and_untrusted_identity_traces_refuse_without_authority ... ok
 
-test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
 
-The test build emitted dead-code warnings from `qbind-consensus` and
-`qbind-node`; compilation completed and the warnings did not fail the test.
-`rustfmt --check --edition 2021
+The exact output, including all compiler warnings and the appended command
+exit code, is retained in
+[`a33-f1-startup-route-classification-model-srm-focused-test-output.txt`](a33-f1-startup-route-classification-model-srm-focused-test-output.txt).
+The directly relevant compilation-only command
+`cargo test -p qbind-node --test a33_f1_startup_route_classification_model --no-run`
+also exited **0**; its complete output and exit code are retained in
+[`a33-f1-startup-route-classification-model-srm-compile-output.txt`](a33-f1-startup-route-classification-model-srm-compile-output.txt).
+One intermediate focused run exited **101** after a stricter checker edit
+required metrics and storage events even on a refusal trace that correctly
+stopped before protected effects. That overconstraint was removed; the final
+11/11 run above passed. The full failed output and exit code are retained in
+[`a33-f1-startup-route-classification-model-srm-order-enforcement-failed-output.txt`](a33-f1-startup-route-classification-model-srm-order-enforcement-failed-output.txt).
+Both builds emitted existing dead-code warnings from `qbind-consensus` and
+`qbind-node`; they compiled successfully. `rustfmt --check --edition 2021
 crates/qbind-node/tests/a33_f1_startup_route_classification_model.rs` and
 `git diff --check` completed successfully after formatting. No unchanged
 accepted TSL tests were rerun. No CLI process, node, key, storage durability,
