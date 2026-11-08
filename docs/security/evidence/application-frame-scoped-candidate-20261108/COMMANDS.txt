@@ -1,0 +1,107 @@
+# Application-frame scoped candidate — validation record
+
+Candidate branch: `integration/application-frame-checked-endpoint-candidate`
+Source/test commit:
+`c002a90e71d63747f0bb92246da78154c02c9e4a`
+Source/test tree: `b7f120eb64cd0134a641cbe43aa3fd069f2ae784`
+Base/parent: `9bf0eb43e4e3c601d02d3886d220b0abeb3a103e`
+Expected base tree: `56509b20084ee1cbe2c42fda9d73d87e4c82c33f`
+Reviewed producer endpoint: `7fcb3b96dd4263dc60f1d81871c541ddb4210631`
+Reviewed producer tree: `e8881066b2b45e23b6c6d1b0368b8c632daecb16`
+
+Candidate validation was run from the separate worktree
+`/workspaces/QBIND/olivexo28/QBIND-application-frame-candidate`, on Rust
+`1.99.1 (58cf8f9c3 2026-10-13)`, host/target
+`x86_64-unknown-linux-gnu`, LLVM `23.1.1`. Native 32-bit execution:
+**NOT RUN**; only the x86_64 target was installed. Toolchain and target
+discovery stdout/stderr/exit are in `raw/toolchain.*` and `raw/targets.*`.
+
+## Candidate-run commands
+
+Each command was invoked from the candidate worktree root. Separate complete
+stdout, stderr and actual exit files are in `raw/`. The command capture uses
+redirection followed immediately by saving Cargo's `$?`, before any later
+status check; it does not use a pipeline or `tee`.
+
+The three exact invocations were:
+
+```sh
+cargo test -p qbind-node --lib decode_frame_tests \
+  > docs/security/evidence/application-frame-scoped-candidate-20261108/raw/debug-focused.stdout \
+  2> docs/security/evidence/application-frame-scoped-candidate-20261108/raw/debug-focused.stderr
+rc=$?; printf '%s\n' "$rc" > docs/security/evidence/application-frame-scoped-candidate-20261108/raw/debug-focused.exit
+
+cargo test -p qbind-node --lib --release decode_frame_tests \
+  > docs/security/evidence/application-frame-scoped-candidate-20261108/raw/release-focused.stdout \
+  2> docs/security/evidence/application-frame-scoped-candidate-20261108/raw/release-focused.stderr
+rc=$?; printf '%s\n' "$rc" > docs/security/evidence/application-frame-scoped-candidate-20261108/raw/release-focused.exit
+
+cargo test -p qbind-node --lib p2p_tcp:: \
+  > docs/security/evidence/application-frame-scoped-candidate-20261108/raw/debug-p2p-regression.stdout \
+  2> docs/security/evidence/application-frame-scoped-candidate-20261108/raw/debug-p2p-regression.stderr
+rc=$?; printf '%s\n' "$rc" > docs/security/evidence/application-frame-scoped-candidate-20261108/raw/debug-p2p-regression.exit
+```
+
+- `cargo test -p qbind-node --lib decode_frame_tests`
+  - `raw/debug-focused.stdout`, `.stderr`, `.exit`
+  - Result: five focused decoder tests passed; exact output and status below.
+- `cargo test -p qbind-node --lib --release decode_frame_tests`
+  - `raw/release-focused.stdout`, `.stderr`, `.exit`
+  - Result: five focused decoder tests passed; exact output and status below.
+- `cargo test -p qbind-node --lib p2p_tcp::`
+  - `raw/debug-p2p-regression.stdout`, `.stderr`, `.exit`
+  - Result: 39 P2P tests passed; exact output and status below.
+- `rustfmt --check --edition 2021 crates/qbind-node/src/p2p_tcp.rs`
+  - PASS, exit 0.
+
+Candidate execution summaries:
+
+```
+debug focused:   running 5 tests; 5 passed, 0 failed; exit 0
+release focused: running 5 tests; 5 passed, 0 failed; exit 0
+P2P regression:  running 39 tests; 39 passed, 0 failed; exit 0
+```
+
+The two focused stdout files each list all five passing test names; the
+regression stdout lists all 39. Captured debug/release compiler warnings are
+preserved in their stderr files and do not indicate test failures.
+
+Focused decoder test names:
+
+- `checked_frame_payload_endpoint_rejects_usize_overflow`
+- `decode_frame_preserves_discriminator_and_trailing_frame_behavior`
+- `decode_frame_rejects_maximum_declared_length_without_panicking`
+- `decode_frame_rejects_short_header_and_truncated_payload`
+- `decode_frame_round_trips_representative_messages`
+
+The selections share all five focused decoder test bodies. Their union is
+39 distinct test bodies (five decoder plus 34 peer-retirement tests); total
+instances executed are 49 (5 + 5 + 39). This is one set of new candidate
+executions, not a 49-test distinct suite.
+
+## Historical author executions and invalid initial attempt
+
+The accepted producer at `7fcb3b96dd4263dc60f1d81871c541ddb4210631`
+retains author-run results of debug focused 5/5, release focused 5/5, and
+P2P regression 39/39. Those are historical author executions, not
+independent review and not the candidate reruns above. The producer's
+complete logs and manifest are linked in the candidate README and remain on
+the producer branch.
+
+An initial attempt to execute the three commands was accidentally launched
+from the producer worktree at
+`/workspaces/QBIND/olivexo28/QBIND` (branch
+`docs/authenticated-recovery-resume-inventory`, HEAD
+`7fcb3b96dd4263dc60f1d81871c541ddb4210631`), not this candidate. Although
+those three runs passed, they are invalid as candidate validation and are
+not counted in the 49 candidate-run instances. Their complete captures are
+preserved under `intermediate-producer-worktree/` to make the mistaken
+attempt explicit; they are not candidate acceptance evidence.
+
+Earlier author summaries about an initial missing-libclang failure and a
+workspace-formatting non-pass are historical only. They are not raw logs or
+new candidate failures. Exact candidate output hashes, scope and
+preservation checks are in `CHECKS.txt` and `SHA256SUMS`.
+
+Whitespace checks and their raw-log-specific non-pass are recorded in
+`CHECKS.txt`; raw evidence is intentionally not normalized.
