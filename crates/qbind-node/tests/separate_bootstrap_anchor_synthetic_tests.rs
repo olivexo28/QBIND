@@ -210,8 +210,6 @@ struct IndependenceReview {
 enum IndependenceEvidence {
     Missing,
     Conflicting(IndependenceReview, IndependenceReview),
-    Insufficient(IndependenceReview),
-    Inapplicable(IndependenceReview),
     Trusted(IndependenceReview),
 }
 
@@ -221,6 +219,21 @@ enum IndependenceFailure {
     Conflicting,
     Insufficient,
     Inapplicable,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum IndependenceReviewCheck {
+    TrustedReviewAuthority,
+    AuthoritySeparation,
+    CredentialSeparation,
+    AdministratorSeparation,
+    FailureDomainSeparation,
+    CommonControl,
+    Applicability,
+    CommitmentChannelScope,
+    AnchorChannelScope,
+    RecipientScope,
+    DeploymentBindingScope,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -639,17 +652,46 @@ fn synthetic_trusted_independence_review(fixture: &Fixture) -> IndependenceRevie
 fn independence_failure(
     evidence: &IndependenceEvidence,
     expected_scope: &IndependenceScope,
+    bypass_review_check: Option<IndependenceReviewCheck>,
 ) -> Option<IndependenceFailure> {
     let review_failure = |review: &IndependenceReview| {
-        if !review.trusted_review_authority
-            || !review.authority_separation
-            || !review.credential_separation
-            || !review.administrator_separation
-            || !review.failure_domain_separation
-            || review.common_control_under_threat_model
-        {
+        let failed = |check, condition| condition && bypass_review_check != Some(check);
+        if failed(
+            IndependenceReviewCheck::TrustedReviewAuthority,
+            !review.trusted_review_authority,
+        ) || failed(
+            IndependenceReviewCheck::AuthoritySeparation,
+            !review.authority_separation,
+        ) || failed(
+            IndependenceReviewCheck::CredentialSeparation,
+            !review.credential_separation,
+        ) || failed(
+            IndependenceReviewCheck::AdministratorSeparation,
+            !review.administrator_separation,
+        ) || failed(
+            IndependenceReviewCheck::FailureDomainSeparation,
+            !review.failure_domain_separation,
+        ) || failed(
+            IndependenceReviewCheck::CommonControl,
+            review.common_control_under_threat_model,
+        ) {
             Some(IndependenceFailure::Insufficient)
-        } else if !review.remains_applicable || &review.scope != expected_scope {
+        } else if failed(
+            IndependenceReviewCheck::Applicability,
+            !review.remains_applicable,
+        ) || failed(
+            IndependenceReviewCheck::CommitmentChannelScope,
+            review.scope.commitment_channel != expected_scope.commitment_channel,
+        ) || failed(
+            IndependenceReviewCheck::AnchorChannelScope,
+            review.scope.anchor_channel != expected_scope.anchor_channel,
+        ) || failed(
+            IndependenceReviewCheck::RecipientScope,
+            review.scope.recipient != expected_scope.recipient,
+        ) || failed(
+            IndependenceReviewCheck::DeploymentBindingScope,
+            review.scope.deployment_binding != expected_scope.deployment_binding,
+        ) {
             Some(IndependenceFailure::Inapplicable)
         } else {
             None
@@ -659,8 +701,6 @@ fn independence_failure(
     match evidence {
         IndependenceEvidence::Missing => Some(IndependenceFailure::Missing),
         IndependenceEvidence::Conflicting(_, _) => Some(IndependenceFailure::Conflicting),
-        IndependenceEvidence::Insufficient(_) => Some(IndependenceFailure::Insufficient),
-        IndependenceEvidence::Inapplicable(_) => Some(IndependenceFailure::Inapplicable),
         IndependenceEvidence::Trusted(review) => review_failure(review),
     }
 }
@@ -675,6 +715,7 @@ fn run_candidate_b_check(
     expected_domain: &ExpectedDomain,
     observed: &Observation,
     verifier_calls: &Cell<usize>,
+    bypass_review_check: Option<IndependenceReviewCheck>,
     bypass_independence_gate: bool,
 ) -> CandidateBResult {
     let raw_commitment_match_diagnostic = anchor.public_key == expected_commitment.public_key
@@ -683,7 +724,9 @@ fn run_candidate_b_check(
         && anchor.deployment_binding == expected_commitment.deployment_binding;
 
     if !bypass_independence_gate {
-        if let Some(failure) = independence_failure(independence_evidence, expected_scope) {
+        if let Some(failure) =
+            independence_failure(independence_evidence, expected_scope, bypass_review_check)
+        {
             return CandidateBResult {
                 raw_commitment_match_diagnostic,
                 expected_anchor: ExpectedAnchorStatus::Unavailable(failure),
@@ -1391,6 +1434,7 @@ fn candidate_b_positive_independence_fixture_keeps_currentness_unresolved() {
         &fixture.expected_domain,
         &observation(&fixture.identity),
         &verifier_calls,
+        None,
         false,
     );
 
@@ -1413,31 +1457,98 @@ fn candidate_b_independence_failures_refuse_dependent_results_sensitively() {
     let association = signed_association(&fixture, fixture.identity.clone());
     let expected_commitment = synthetic_expected_anchor_commitment(&fixture);
     let trusted_review = synthetic_trusted_independence_review(&fixture);
-    let mut conflicting_review = trusted_review.clone();
-    conflicting_review.scope.anchor_channel.push_str("-other");
-    let mut insufficient_review = trusted_review.clone();
-    insufficient_review.administrator_separation = false;
-    insufficient_review.common_control_under_threat_model = true;
-    let mut inapplicable_review = trusted_review.clone();
-    inapplicable_review.remains_applicable = false;
+    let mut review_cases = Vec::new();
 
-    let cases = [
-        (IndependenceFailure::Missing, IndependenceEvidence::Missing),
-        (
-            IndependenceFailure::Conflicting,
-            IndependenceEvidence::Conflicting(trusted_review.clone(), conflicting_review),
-        ),
-        (
-            IndependenceFailure::Insufficient,
-            IndependenceEvidence::Insufficient(insufficient_review),
-        ),
-        (
-            IndependenceFailure::Inapplicable,
-            IndependenceEvidence::Inapplicable(inapplicable_review),
-        ),
-    ];
+    let mut altered = trusted_review.clone();
+    altered.trusted_review_authority = false;
+    review_cases.push((
+        IndependenceReviewCheck::TrustedReviewAuthority,
+        IndependenceFailure::Insufficient,
+        altered,
+    ));
 
-    for (failure, evidence) in cases {
+    let mut altered = trusted_review.clone();
+    altered.authority_separation = false;
+    review_cases.push((
+        IndependenceReviewCheck::AuthoritySeparation,
+        IndependenceFailure::Insufficient,
+        altered,
+    ));
+
+    let mut altered = trusted_review.clone();
+    altered.credential_separation = false;
+    review_cases.push((
+        IndependenceReviewCheck::CredentialSeparation,
+        IndependenceFailure::Insufficient,
+        altered,
+    ));
+
+    let mut altered = trusted_review.clone();
+    altered.administrator_separation = false;
+    review_cases.push((
+        IndependenceReviewCheck::AdministratorSeparation,
+        IndependenceFailure::Insufficient,
+        altered,
+    ));
+
+    let mut altered = trusted_review.clone();
+    altered.failure_domain_separation = false;
+    review_cases.push((
+        IndependenceReviewCheck::FailureDomainSeparation,
+        IndependenceFailure::Insufficient,
+        altered,
+    ));
+
+    let mut altered = trusted_review.clone();
+    altered.common_control_under_threat_model = true;
+    review_cases.push((
+        IndependenceReviewCheck::CommonControl,
+        IndependenceFailure::Insufficient,
+        altered,
+    ));
+
+    let mut altered = trusted_review.clone();
+    altered.remains_applicable = false;
+    review_cases.push((
+        IndependenceReviewCheck::Applicability,
+        IndependenceFailure::Inapplicable,
+        altered,
+    ));
+
+    let mut altered = trusted_review.clone();
+    altered.scope.commitment_channel.push_str("-other");
+    review_cases.push((
+        IndependenceReviewCheck::CommitmentChannelScope,
+        IndependenceFailure::Inapplicable,
+        altered,
+    ));
+
+    let mut altered = trusted_review.clone();
+    altered.scope.anchor_channel.push_str("-other");
+    review_cases.push((
+        IndependenceReviewCheck::AnchorChannelScope,
+        IndependenceFailure::Inapplicable,
+        altered,
+    ));
+
+    let mut altered = trusted_review.clone();
+    altered.scope.recipient.push_str("-other");
+    review_cases.push((
+        IndependenceReviewCheck::RecipientScope,
+        IndependenceFailure::Inapplicable,
+        altered,
+    ));
+
+    let mut altered = trusted_review.clone();
+    altered.scope.deployment_binding.push_str("-other");
+    review_cases.push((
+        IndependenceReviewCheck::DeploymentBindingScope,
+        IndependenceFailure::Inapplicable,
+        altered,
+    ));
+
+    for (check, failure, review) in review_cases {
+        let evidence = IndependenceEvidence::Trusted(review);
         let verifier_calls = Cell::new(0);
         let result = run_candidate_b_check(
             RawInput::Parsed(association.clone()),
@@ -1449,6 +1560,7 @@ fn candidate_b_independence_failures_refuse_dependent_results_sensitively() {
             &fixture.expected_domain,
             &observation(&fixture.identity),
             &verifier_calls,
+            None,
             false,
         );
 
@@ -1460,17 +1572,17 @@ fn candidate_b_independence_failures_refuse_dependent_results_sensitively() {
         };
         assert_eq!(
             result, expected_unavailable,
-            "{failure:?} independence evidence must make expected-anchor and dependent association results unavailable; raw match is diagnostic only"
+            "{check:?} failure must make expected-anchor and dependent association results unavailable; raw match is diagnostic only"
         );
         assert_eq!(
             verifier_calls.get(),
             0,
-            "association verifier must not run when independence evidence is {failure:?}"
+            "association verifier must not run when trusted-review check {check:?} fails"
         );
 
-        // Test-only mutant: use the same checker and unchanged synthetic
-        // anchor, commitment, association, observations, and policy, but skip
-        // only the independence gate. It must defeat each negative assertion.
+        // This narrow test-only mutant skips only the selected trusted-review
+        // predicate; all other synthetic inputs and checks remain unchanged.
+        let bypass_calls = Cell::new(0);
         let bypassed = run_candidate_b_check(
             RawInput::Parsed(association.clone()),
             &fixture.anchor,
@@ -1480,17 +1592,18 @@ fn candidate_b_independence_failures_refuse_dependent_results_sensitively() {
             &fixture.policy,
             &fixture.expected_domain,
             &observation(&fixture.identity),
-            &Cell::new(0),
-            true,
+            &bypass_calls,
+            Some(check),
+            false,
         );
         assert!(
             bypassed != expected_unavailable,
-            "independence-gate bypass mutant did not make the {failure:?} negative assertion fail"
+            "narrow bypass for {check:?} did not make its negative assertion fail"
         );
         assert_eq!(
             bypassed.expected_anchor,
             ExpectedAnchorStatus::Authenticated,
-            "bypass mutant should expose the otherwise matching anchor for {failure:?}"
+            "narrow bypass should expose the otherwise matching anchor for {check:?}"
         );
         assert!(
             matches!(
@@ -1501,7 +1614,78 @@ fn candidate_b_independence_failures_refuse_dependent_results_sensitively() {
                     Currentness::Unresolved
                 ))
             ),
-            "bypass mutant should reach dependent results for {failure:?}"
+            "narrow bypass should reach dependent results for {check:?}"
         );
+        assert_eq!(
+            bypass_calls.get(),
+            1,
+            "narrow bypass should reach association verification for {check:?}"
+        );
+    }
+
+    let mut conflicting_review = trusted_review.clone();
+    conflicting_review.scope.anchor_channel.push_str("-other");
+    let preclassified_cases = [
+        (IndependenceFailure::Missing, IndependenceEvidence::Missing),
+        (
+            IndependenceFailure::Conflicting,
+            IndependenceEvidence::Conflicting(trusted_review.clone(), conflicting_review),
+        ),
+    ];
+
+    for (failure, evidence) in preclassified_cases {
+        let verifier_calls = Cell::new(0);
+        let result = run_candidate_b_check(
+            RawInput::Parsed(association.clone()),
+            &fixture.anchor,
+            &expected_commitment,
+            &evidence,
+            &fixture.independence_scope,
+            &fixture.policy,
+            &fixture.expected_domain,
+            &observation(&fixture.identity),
+            &verifier_calls,
+            None,
+            false,
+        );
+        let expected_unavailable = CandidateBResult {
+            raw_commitment_match_diagnostic: true,
+            expected_anchor: ExpectedAnchorStatus::Unavailable(failure.clone()),
+            dependent_association_results: DependentResults::Unavailable,
+        };
+        assert_eq!(result, expected_unavailable);
+        assert_eq!(verifier_calls.get(), 0);
+
+        // The conflict variant propagates a supplied classification. This
+        // checker does not inspect or compare the two review contents.
+        let bypassed = run_candidate_b_check(
+            RawInput::Parsed(association.clone()),
+            &fixture.anchor,
+            &expected_commitment,
+            &evidence,
+            &fixture.independence_scope,
+            &fixture.policy,
+            &fixture.expected_domain,
+            &observation(&fixture.identity),
+            &Cell::new(0),
+            None,
+            true,
+        );
+        assert_ne!(
+            bypassed, expected_unavailable,
+            "whole-independence-gate bypass did not defeat {failure:?} refusal"
+        );
+        assert_eq!(
+            bypassed.expected_anchor,
+            ExpectedAnchorStatus::Authenticated
+        );
+        assert!(matches!(
+            bypassed.dependent_association_results,
+            DependentResults::Evaluated(PipelineResult::Compared(
+                Authenticity::Verified,
+                Equality::Equal,
+                Currentness::Unresolved
+            ))
+        ));
     }
 }
