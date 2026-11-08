@@ -178,10 +178,76 @@ enum PipelineResult {
     Compared(Authenticity, Equality, Currentness),
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ExpectedAnchorCommitment {
+    public_key: Vec<u8>,
+    key_suite: u16,
+    purpose: String,
+    deployment_binding: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct IndependenceScope {
+    commitment_channel: String,
+    anchor_channel: String,
+    recipient: String,
+    deployment_binding: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct IndependenceReview {
+    trusted_review_authority: bool,
+    remains_applicable: bool,
+    scope: IndependenceScope,
+    authority_separation: bool,
+    credential_separation: bool,
+    administrator_separation: bool,
+    failure_domain_separation: bool,
+    common_control_under_threat_model: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum IndependenceEvidence {
+    Missing,
+    Conflicting(IndependenceReview, IndependenceReview),
+    Insufficient(IndependenceReview),
+    Inapplicable(IndependenceReview),
+    Trusted(IndependenceReview),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum IndependenceFailure {
+    Missing,
+    Conflicting,
+    Insufficient,
+    Inapplicable,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ExpectedAnchorStatus {
+    Authenticated,
+    Unavailable(IndependenceFailure),
+    RefusedCommitmentMismatch,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum DependentResults {
+    Unavailable,
+    Evaluated(PipelineResult),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CandidateBResult {
+    raw_commitment_match_diagnostic: bool,
+    expected_anchor: ExpectedAnchorStatus,
+    dependent_association_results: DependentResults,
+}
+
 struct Fixture {
     anchor: ExpectedAnchor,
     policy: AuthenticatedVerifierPolicy,
     expected_domain: ExpectedDomain,
+    independence_scope: IndependenceScope,
     bootstrap_secret: Vec<u8>,
     identity: Identity,
 }
@@ -211,6 +277,12 @@ fn fixture() -> Fixture {
             numeric_chain_id: 0xD3_01,
             genesis_identity: [0x31; 32],
             destination_identity: "synthetic-destination-A".to_owned(),
+        },
+        independence_scope: IndependenceScope {
+            commitment_channel: "synthetic-commitment-channel-A".to_owned(),
+            anchor_channel: "synthetic-anchor-channel-B".to_owned(),
+            recipient: "synthetic-verifier-A".to_owned(),
+            deployment_binding: SYNTHETIC_DEPLOYMENT.to_owned(),
         },
         bootstrap_secret: secret_key,
         identity: Identity {
@@ -534,6 +606,112 @@ fn run_pipeline(
                 evaluate_currentness(&association),
             )
         }
+    }
+}
+
+fn synthetic_expected_anchor_commitment(fixture: &Fixture) -> ExpectedAnchorCommitment {
+    // This fixed value models an independently authenticated commitment input;
+    // it does not select a production commitment encoding or digest.
+    ExpectedAnchorCommitment {
+        public_key: fixture.anchor.public_key.clone(),
+        key_suite: fixture.anchor.key_suite,
+        purpose: fixture.policy.purpose.clone(),
+        deployment_binding: fixture.independence_scope.deployment_binding.clone(),
+    }
+}
+
+fn synthetic_trusted_independence_review(fixture: &Fixture) -> IndependenceReview {
+    // These separately supplied fixture values model trusted review evidence.
+    // They do not prove real channel, credential, administrator, or provider
+    // independence, and do not establish currentness outside this fixture.
+    IndependenceReview {
+        trusted_review_authority: true,
+        remains_applicable: true,
+        scope: fixture.independence_scope.clone(),
+        authority_separation: true,
+        credential_separation: true,
+        administrator_separation: true,
+        failure_domain_separation: true,
+        common_control_under_threat_model: false,
+    }
+}
+
+fn independence_failure(
+    evidence: &IndependenceEvidence,
+    expected_scope: &IndependenceScope,
+) -> Option<IndependenceFailure> {
+    let review_failure = |review: &IndependenceReview| {
+        if !review.trusted_review_authority
+            || !review.authority_separation
+            || !review.credential_separation
+            || !review.administrator_separation
+            || !review.failure_domain_separation
+            || review.common_control_under_threat_model
+        {
+            Some(IndependenceFailure::Insufficient)
+        } else if !review.remains_applicable || &review.scope != expected_scope {
+            Some(IndependenceFailure::Inapplicable)
+        } else {
+            None
+        }
+    };
+
+    match evidence {
+        IndependenceEvidence::Missing => Some(IndependenceFailure::Missing),
+        IndependenceEvidence::Conflicting(_, _) => Some(IndependenceFailure::Conflicting),
+        IndependenceEvidence::Insufficient(_) => Some(IndependenceFailure::Insufficient),
+        IndependenceEvidence::Inapplicable(_) => Some(IndependenceFailure::Inapplicable),
+        IndependenceEvidence::Trusted(review) => review_failure(review),
+    }
+}
+
+fn run_candidate_b_check(
+    input: RawInput,
+    anchor: &ExpectedAnchor,
+    expected_commitment: &ExpectedAnchorCommitment,
+    independence_evidence: &IndependenceEvidence,
+    expected_scope: &IndependenceScope,
+    policy: &AuthenticatedVerifierPolicy,
+    expected_domain: &ExpectedDomain,
+    observed: &Observation,
+    verifier_calls: &Cell<usize>,
+    bypass_independence_gate: bool,
+) -> CandidateBResult {
+    let raw_commitment_match_diagnostic = anchor.public_key == expected_commitment.public_key
+        && anchor.key_suite == expected_commitment.key_suite
+        && policy.purpose == expected_commitment.purpose
+        && anchor.deployment_binding == expected_commitment.deployment_binding;
+
+    if !bypass_independence_gate {
+        if let Some(failure) = independence_failure(independence_evidence, expected_scope) {
+            return CandidateBResult {
+                raw_commitment_match_diagnostic,
+                expected_anchor: ExpectedAnchorStatus::Unavailable(failure),
+                dependent_association_results: DependentResults::Unavailable,
+            };
+        }
+    }
+
+    if !raw_commitment_match_diagnostic {
+        return CandidateBResult {
+            raw_commitment_match_diagnostic,
+            expected_anchor: ExpectedAnchorStatus::RefusedCommitmentMismatch,
+            dependent_association_results: DependentResults::Unavailable,
+        };
+    }
+
+    CandidateBResult {
+        raw_commitment_match_diagnostic,
+        expected_anchor: ExpectedAnchorStatus::Authenticated,
+        dependent_association_results: DependentResults::Evaluated(run_pipeline(
+            input,
+            Some(anchor),
+            policy,
+            expected_domain,
+            observed,
+            verifier_calls,
+            None,
+        )),
     }
 }
 
@@ -1192,5 +1370,138 @@ fn missing_anchor_association_and_signature_are_distinct_acquisition_refusals() 
             PipelineResult::AcquisitionRefused(actual) if actual == failure
         ));
         assert_eq!(verifier_calls.get(), 0);
+    }
+}
+
+#[test]
+fn candidate_b_positive_independence_fixture_keeps_currentness_unresolved() {
+    let fixture = fixture();
+    let association = signed_association(&fixture, fixture.identity.clone());
+    let expected_commitment = synthetic_expected_anchor_commitment(&fixture);
+    let trusted_review = synthetic_trusted_independence_review(&fixture);
+    let verifier_calls = Cell::new(0);
+
+    let result = run_candidate_b_check(
+        RawInput::Parsed(association),
+        &fixture.anchor,
+        &expected_commitment,
+        &IndependenceEvidence::Trusted(trusted_review),
+        &fixture.independence_scope,
+        &fixture.policy,
+        &fixture.expected_domain,
+        &observation(&fixture.identity),
+        &verifier_calls,
+        false,
+    );
+
+    assert!(result.raw_commitment_match_diagnostic);
+    assert_eq!(result.expected_anchor, ExpectedAnchorStatus::Authenticated);
+    assert_eq!(
+        result.dependent_association_results,
+        DependentResults::Evaluated(PipelineResult::Compared(
+            Authenticity::Verified,
+            Equality::Equal,
+            Currentness::Unresolved
+        ))
+    );
+    assert_eq!(verifier_calls.get(), 1);
+}
+
+#[test]
+fn candidate_b_independence_failures_refuse_dependent_results_sensitively() {
+    let fixture = fixture();
+    let association = signed_association(&fixture, fixture.identity.clone());
+    let expected_commitment = synthetic_expected_anchor_commitment(&fixture);
+    let trusted_review = synthetic_trusted_independence_review(&fixture);
+    let mut conflicting_review = trusted_review.clone();
+    conflicting_review.scope.anchor_channel.push_str("-other");
+    let mut insufficient_review = trusted_review.clone();
+    insufficient_review.administrator_separation = false;
+    insufficient_review.common_control_under_threat_model = true;
+    let mut inapplicable_review = trusted_review.clone();
+    inapplicable_review.remains_applicable = false;
+
+    let cases = [
+        (IndependenceFailure::Missing, IndependenceEvidence::Missing),
+        (
+            IndependenceFailure::Conflicting,
+            IndependenceEvidence::Conflicting(trusted_review.clone(), conflicting_review),
+        ),
+        (
+            IndependenceFailure::Insufficient,
+            IndependenceEvidence::Insufficient(insufficient_review),
+        ),
+        (
+            IndependenceFailure::Inapplicable,
+            IndependenceEvidence::Inapplicable(inapplicable_review),
+        ),
+    ];
+
+    for (failure, evidence) in cases {
+        let verifier_calls = Cell::new(0);
+        let result = run_candidate_b_check(
+            RawInput::Parsed(association.clone()),
+            &fixture.anchor,
+            &expected_commitment,
+            &evidence,
+            &fixture.independence_scope,
+            &fixture.policy,
+            &fixture.expected_domain,
+            &observation(&fixture.identity),
+            &verifier_calls,
+            false,
+        );
+
+        assert!(result.raw_commitment_match_diagnostic);
+        let expected_unavailable = CandidateBResult {
+            raw_commitment_match_diagnostic: true,
+            expected_anchor: ExpectedAnchorStatus::Unavailable(failure.clone()),
+            dependent_association_results: DependentResults::Unavailable,
+        };
+        assert_eq!(
+            result, expected_unavailable,
+            "{failure:?} independence evidence must make expected-anchor and dependent association results unavailable; raw match is diagnostic only"
+        );
+        assert_eq!(
+            verifier_calls.get(),
+            0,
+            "association verifier must not run when independence evidence is {failure:?}"
+        );
+
+        // Test-only mutant: use the same checker and unchanged synthetic
+        // anchor, commitment, association, observations, and policy, but skip
+        // only the independence gate. It must defeat each negative assertion.
+        let bypassed = run_candidate_b_check(
+            RawInput::Parsed(association.clone()),
+            &fixture.anchor,
+            &expected_commitment,
+            &evidence,
+            &fixture.independence_scope,
+            &fixture.policy,
+            &fixture.expected_domain,
+            &observation(&fixture.identity),
+            &Cell::new(0),
+            true,
+        );
+        assert!(
+            bypassed != expected_unavailable,
+            "independence-gate bypass mutant did not make the {failure:?} negative assertion fail"
+        );
+        assert_eq!(
+            bypassed.expected_anchor,
+            ExpectedAnchorStatus::Authenticated,
+            "bypass mutant should expose the otherwise matching anchor for {failure:?}"
+        );
+        assert!(
+            matches!(
+                bypassed.dependent_association_results,
+                DependentResults::Evaluated(PipelineResult::Compared(
+                    Authenticity::Verified,
+                    Equality::Equal,
+                    Currentness::Unresolved
+                ))
+            ),
+            "bypass mutant should reach dependent results for {failure:?}"
+        );
     }
 }
