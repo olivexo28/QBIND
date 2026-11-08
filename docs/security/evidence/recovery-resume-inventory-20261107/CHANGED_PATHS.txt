@@ -334,3 +334,30 @@ Earlier catch-up-ingress-resource-boundary/README.md:
 inspected/preserved unchanged in this correction. The actual ingress
 investigation's earlier diff remains ten paths; inspection here is not a
 change to that historical path count.
+
+Application-frame target-aware test/evidence correction (no production
+behavior change; complete corrected run outputs retained):
+crates/qbind-node/src/p2p_tcp.rs
+docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+docs/security/evidence/recovery-resume-inventory-20261107/README.md
+docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/commands.txt
+docs/security/evidence/recovery-resume-inventory-20261107/application-frame-test-evidence-correction/README.md
+docs/security/evidence/recovery-resume-inventory-20261107/application-frame-test-evidence-correction/COMMANDS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/application-frame-test-evidence-correction/CHECKS.txt
+docs/security/evidence/recovery-resume-inventory-20261107/application-frame-test-evidence-correction/SHA256SUMS
+docs/security/evidence/recovery-resume-inventory-20261107/application-frame-test-evidence-correction/raw/toolchain.stdout
+docs/security/evidence/recovery-resume-inventory-20261107/application-frame-test-evidence-correction/raw/toolchain.stderr
+docs/security/evidence/recovery-resume-inventory-20261107/application-frame-test-evidence-correction/raw/toolchain.exit
+docs/security/evidence/recovery-resume-inventory-20261107/application-frame-test-evidence-correction/raw/targets.stdout
+docs/security/evidence/recovery-resume-inventory-20261107/application-frame-test-evidence-correction/raw/targets.stderr
+docs/security/evidence/recovery-resume-inventory-20261107/application-frame-test-evidence-correction/raw/targets.exit
+docs/security/evidence/recovery-resume-inventory-20261107/application-frame-test-evidence-correction/raw/debug-focused.stdout
+docs/security/evidence/recovery-resume-inventory-20261107/application-frame-test-evidence-correction/raw/debug-focused.stderr
+docs/security/evidence/recovery-resume-inventory-20261107/application-frame-test-evidence-correction/raw/debug-focused.exit
+docs/security/evidence/recovery-resume-inventory-20261107/application-frame-test-evidence-correction/raw/release-focused.stdout
+docs/security/evidence/recovery-resume-inventory-20261107/application-frame-test-evidence-correction/raw/release-focused.stderr
+docs/security/evidence/recovery-resume-inventory-20261107/application-frame-test-evidence-correction/raw/release-focused.exit
+docs/security/evidence/recovery-resume-inventory-20261107/application-frame-test-evidence-correction/raw/debug-p2p-regression.stdout
+docs/security/evidence/recovery-resume-inventory-20261107/application-frame-test-evidence-correction/raw/debug-p2p-regression.stderr
+docs/security/evidence/recovery-resume-inventory-20261107/application-frame-test-evidence-correction/raw/debug-p2p-regression.exit

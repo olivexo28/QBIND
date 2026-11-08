@@ -1,0 +1,123 @@
+# Application-frame test/evidence correction — execution record
+
+Repository: `olivexo28/QBIND`
+Task branch: `docs/authenticated-recovery-resume-inventory`
+Base commit/tree/parent:
+`be0e83749233143ff0b713ea353600c922fdbaab` /
+`e66d2e3b5a4a00fc3832695bee8409541bc30219` /
+`97c8b4d3b7e8f72f86544fe544a0b8b871c6ee63`
+
+Identity and clean-start checks:
+
+- `git rev-parse --show-toplevel` -> `/workspaces/QBIND/olivexo28/QBIND`
+- `git remote get-url origin` -> `https://github.com/olivexo28/QBIND`
+- `git branch --show-current` -> `docs/authenticated-recovery-resume-inventory`
+- `git rev-parse HEAD HEAD^{tree} HEAD^` -> the expected commit, tree and
+  parent above.
+- Initial `git status --porcelain=v1` was empty; cached diff was empty.
+- `git merge-base --is-ancestor 9bf0eb43e4e3c601d02d3886d220b0abeb3a103e HEAD`
+  exited 0.
+- `git ls-remote --heads origin refs/heads/docs/authenticated-recovery-resume-inventory refs/heads/main`
+  returned task ref `be0e83749233143ff0b713ea353600c922fdbaab` and main
+  ref `9bf0eb43e4e3c601d02d3886d220b0abeb3a103e`.
+
+Toolchain: Rust `1.99.1 (58cf8f9c3 2026-10-13)`;
+host/target `x86_64-unknown-linux-gnu`; LLVM `23.1.1`.
+`rustup target list --installed` returned only
+`x86_64-unknown-linux-gnu`. Native 32-bit execution: **NOT RUN**.
+Full toolchain and target stdout/stderr/exit files are in `raw/`.
+The recorded toolchain command was `rustc --version --verbose`; target
+discovery was `rustup target list --installed`. Both exited 0.
+
+## Exact Cargo selections and captured results
+
+Each command was invoked in the repository root. Stdout, stderr and the
+immediate command exit status are separate files. The shell's essential
+capture sequence for each command was:
+
+```sh
+cargo test ... > raw/<selection>.stdout 2> raw/<selection>.stderr
+rc=$?
+printf '%s\n' "$rc" > raw/<selection>.exit
+```
+
+There was no `tee` or pipeline between Cargo and `$?`. The captured `.exit`
+file records Cargo's actual exit status. Exact commands:
+
+1. `cargo test -p qbind-node --lib decode_frame_tests`
+   - stdout: `raw/debug-focused.stdout`
+   - stderr: `raw/debug-focused.stderr`
+   - exit: `raw/debug-focused.exit` (`0`)
+   - Result: five named tests; `5 passed; 0 failed; 0 ignored; 0 measured;
+     2246 filtered out`.
+2. `cargo test -p qbind-node --lib --release decode_frame_tests`
+   - stdout: `raw/release-focused.stdout`
+   - stderr: `raw/release-focused.stderr`
+   - exit: `raw/release-focused.exit` (`0`)
+   - Result: five named tests; `5 passed; 0 failed; 0 ignored; 0 measured;
+     2247 filtered out`.
+3. `cargo test -p qbind-node --lib p2p_tcp::`
+   - stdout: `raw/debug-p2p-regression.stdout`
+   - stderr: `raw/debug-p2p-regression.stderr`
+   - exit: `raw/debug-p2p-regression.exit` (`0`)
+   - Result: 39 named tests; `39 passed; 0 failed; 0 ignored; 0 measured;
+     2212 filtered out`.
+
+The five focused test bodies are
+`checked_frame_payload_endpoint_rejects_usize_overflow`,
+`decode_frame_preserves_discriminator_and_trailing_frame_behavior`,
+`decode_frame_rejects_maximum_declared_length_without_panicking`,
+`decode_frame_rejects_short_header_and_truncated_payload`, and
+`decode_frame_round_trips_representative_messages`. The P2P regression
+selection includes all five plus 34 `peer_retirement_tests`. Thus the union
+contains 39 distinct test bodies; executed instances total 49 across debug,
+release, and regression selections. No distinct test body was added or
+removed in this correction.
+
+## Failed/intermediate attempts and historical evidence
+
+No corrected test command failed or had an intermediate attempt. The earlier
+author summaries in
+`../application-frame-checked-endpoint/COMMANDS.txt` remain historical:
+they summarize the prior task's initial missing-libclang build failures,
+subsequent successful runs, and a workspace-wide formatting non-pass. Those
+summaries are not raw logs and are not rerun reviewer evidence. This
+correction did not rerun the workspace-wide formatter or unrelated tests.
+There was no 32-bit target available to try.
+
+No node, live network, operational signing, or recovery/resume action was
+performed.
+
+## Integrity commands
+
+- `rustfmt --check --edition 2021 crates/qbind-node/src/p2p_tcp.rs` —
+  exit 0.
+- `git diff --check be0e83749233143ff0b713ea353600c922fdbaab` — exit 0.
+- `git diff --cached --check` — NOT PASS, exit 2, with trailing-blank-line
+  notices on the three complete Cargo stdout logs. Raw evidence was retained
+  byte-for-byte, not normalized. The source/documentation-only staged check
+  `git diff --cached --check -- . ':!docs/security/evidence/recovery-resume-inventory-20261107/application-frame-test-evidence-correction/raw/**'`
+  passed, exit 0.
+- Revision-aware prefix comparison: the Python command and exact output are
+  reproduced in `CHECKS.txt`; it compares README, changed-path log, command
+  log and remediation-plan bytes against the base commit.
+- `git diff --quiet be0e83749233143ff0b713ea353600c922fdbaab -- Audit/QBIND_SECURITY_FINDINGS_REGISTER.md docs/security/evidence/recovery-resume-inventory-20261107/catch-up-ingress-resource-boundary docs/security/evidence/recovery-resume-inventory-20261107/application-frame-checked-endpoint`
+  — exit 0; prior audit register and both prior evidence directories remain
+  unchanged.
+- Hash manifest generation:
+
+  ```sh
+  {
+    sha256sum crates/qbind-node/src/p2p_tcp.rs \
+      docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md \
+      docs/security/evidence/recovery-resume-inventory-20261107/README.md \
+      docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt \
+      docs/security/evidence/recovery-resume-inventory-20261107/commands.txt
+    find docs/security/evidence/recovery-resume-inventory-20261107/application-frame-test-evidence-correction \
+      -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum
+  } > docs/security/evidence/recovery-resume-inventory-20261107/application-frame-test-evidence-correction/SHA256SUMS
+  sha256sum -c docs/security/evidence/recovery-resume-inventory-20261107/application-frame-test-evidence-correction/SHA256SUMS
+  ```
+
+  Verification passed for all 23 listed files (five source/index/plan files,
+  three evidence records, and 15 complete raw artifacts).

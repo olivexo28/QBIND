@@ -5332,3 +5332,32 @@ results, unsuccessful attempts and hashes are in the linked evidence.
 The raw helper and all broader recovery/resume prerequisites remain
 unresolved. A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
 Activation DISABLED; public DevNet NO-GO.
+
+## 58. Application-frame target-aware test/evidence correction
+
+The [test/evidence correction record](evidence/recovery-resume-inventory-20261107/application-frame-test-evidence-correction/README.md)
+addresses the user-supplied CHANGES REQUIRED review for the test/validation
+package at `be0e83749233143ff0b713ea353600c922fdbaab`. Only the
+maximum-declared-length test oracle changes: it queries the checked endpoint
+arithmetic on the active target, then requires the real decoder to return
+`frame truncated` when representable or `frame payload length overflow`
+when unrepresentable. Both arms require an error, not a panic. Production
+checked-endpoint behavior and the other decoder test bodies are unchanged.
+
+Complete stdout, stderr and actual exit status files are retained for the
+corrected debug focused, release focused and debug `p2p_tcp::` regression
+runs. The selections overlap: five decoder tests are included in the 39-test
+P2P regression, yielding 39 distinct test bodies and 49 test-body
+executions. Rust `1.99.1`, x86_64 target, discovery/results and output
+capture semantics are recorded in the evidence directory. Native 32-bit
+execution is NOT RUN because no suitable target was installed.
+
+The earlier author summaries remain historical summaries, not raw logs or
+reviewer reruns. Prior accepted tests, closed ingress inventory
+clarifications, documentation prefixes and audit-register bytes are
+preserved. The raw transport helper, nested decoding/resource limits and
+recovery/resume obligations remain unresolved.
+
+**APPLICATION-FRAME TEST/EVIDENCE CORRECTION — INDEPENDENT REVIEW PENDING.**
+A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
+Activation DISABLED; public DevNet NO-GO.

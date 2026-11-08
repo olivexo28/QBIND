@@ -1,0 +1,69 @@
+# Application-frame test/evidence correction — checks
+
+- `rustfmt --check --edition 2021 crates/qbind-node/src/p2p_tcp.rs`:
+  PASS, exit 0.
+- `git diff --check`: PASS, exit 0.
+- Full `git diff --cached --check` after staging: NOT PASS, exit 2, because
+  the three complete Cargo stdout captures each end with Cargo's blank
+  separator line. The raw output bytes were intentionally not stripped or
+  rewritten. `git diff --cached --check -- . ':!docs/security/evidence/recovery-resume-inventory-20261107/application-frame-test-evidence-correction/raw/**'`
+  passed, exit 0, for all source and documentation paths.
+- The maximum-length test's target-aware oracle checks the active-target
+  checked endpoint result and demands the corresponding specific decoder
+  error. Both arms assert `Err`; neither accepts the other arm's error.
+- The production checked endpoint calculation and all other decoder test
+  bodies are unchanged from the correction base.
+- `git diff be0e83749233143ff0b713ea353600c922fdbaab -- crates/qbind-node/src/p2p_tcp.rs`
+  contains only the target-aware expectation change in
+  `decode_frame_rejects_maximum_declared_length_without_panicking`.
+- Documentation prefixes in the delivery README, changed-path log, command
+  log, and remediation plan compare byte-for-byte with base commit
+  `be0e83749233143ff0b713ea353600c922fdbaab`. Exact command:
+
+  ```sh
+  python3 - <<'PY'
+  from pathlib import Path
+  import subprocess
+  for path in [
+      'docs/security/evidence/recovery-resume-inventory-20261107/README.md',
+      'docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt',
+      'docs/security/evidence/recovery-resume-inventory-20261107/commands.txt',
+      'docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md',
+  ]:
+      prior = subprocess.run(
+          ['git', 'show', f'be0e83749233143ff0b713ea353600c922fdbaab:{path}'],
+          check=True,
+          stdout=subprocess.PIPE,
+      ).stdout
+      current = Path(path).read_bytes()
+      assert current.startswith(prior), path
+      print(f'PASS append-only prefix: {path} ({len(prior)} bytes)')
+  PY
+  ```
+
+  Output:
+  `PASS append-only prefix: docs/security/evidence/recovery-resume-inventory-20261107/README.md (49140 bytes)`
+  `PASS append-only prefix: docs/security/evidence/recovery-resume-inventory-20261107/CHANGED_PATHS.txt (21760 bytes)`
+  `PASS append-only prefix: docs/security/evidence/recovery-resume-inventory-20261107/commands.txt (43245 bytes)`
+  `PASS append-only prefix: docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md (410825 bytes)`.
+- All files and raw outputs in the prior
+  `catch-up-ingress-resource-boundary` evidence directory remain unchanged;
+  its previously closed clarifications are not reopened.
+- `Audit/QBIND_SECURITY_FINDINGS_REGISTER.md` remains byte-identical.
+- Audit-register baseline/current SHA-256:
+  `6e68d3d05964f9a6dc0384ffda2bb53d81d7da97ffb786ce84f4bd5a4360c0d9`.
+- Prior ingress README baseline/current SHA-256:
+  `f92521c24ffd02225abb98a96458ecd94d0b3819044fd6d85a17e0668df759d3`.
+- Only `crates/qbind-node/src/p2p_tcp.rs` and append-only documentation plus
+  new raw execution artifacts in the correction evidence directory are in
+  scope. No production decoder behavior, catch-up refusal/ignore behavior,
+  or recovery/resume behavior changed.
+- `rustup target list --installed` contains only
+  `x86_64-unknown-linux-gnu`; native 32-bit execution is NOT RUN.
+- Exact debug/release/regression output, stderr, and Cargo exit statuses are
+  retained separately in `raw/`. Hashes are recorded in `SHA256SUMS`.
+- `sha256sum -c .../application-frame-test-evidence-correction/SHA256SUMS`:
+  PASS, all listed source/docs/log files verify.
+- Captured corrected run exit files all contain `0`; regression stdout
+  contains 39 `test p2p_tcp::...` result lines, five of which are the
+  `decode_frame_tests` selected by both focused commands.

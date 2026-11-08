@@ -814,3 +814,14 @@ unchanged; its actual prior diff remains ten paths. No 32-bit target is
 installed, so production decoder execution on 32-bit was NOT RUN. The
 `usize::MAX` endpoint check is a helper-level arithmetic control on the
 available x86_64 target, not 32-bit execution.
+
+Application-frame target-aware test/evidence correction: see
+`application-frame-test-evidence-correction/COMMANDS.txt` for the corrected
+maximum-length test oracle, exact focused/debug/release and directly
+affected P2P selections, capture semantics, test names/counts, toolchain,
+target and exit statuses. Complete stdout/stderr/exit files are retained in
+that directory's `raw/`; see its `SHA256SUMS`. The three selections have 39
+distinct test bodies and 49 executions due to overlapping repeated
+debug/release/regression runs. No 32-bit target is installed; native 32-bit
+execution is NOT RUN. The earlier checked-endpoint task's command summaries
+remain historical, not raw logs or reviewer reruns.

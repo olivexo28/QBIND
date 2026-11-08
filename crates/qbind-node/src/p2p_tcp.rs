@@ -3058,10 +3058,17 @@ mod decode_frame_tests {
     #[test]
     fn decode_frame_rejects_maximum_declared_length_without_panicking() {
         let frame = [DISCRIMINATOR_CONTROL, 0xff, 0xff, 0xff, 0xff];
-        assert!(matches!(
-            decode_frame(&frame),
-            Err(P2pTransportError::Encoding(message)) if message == "frame truncated"
-        ));
+        match checked_frame_payload_end(u32::MAX as usize) {
+            Ok(_) => assert!(matches!(
+                decode_frame(&frame),
+                Err(P2pTransportError::Encoding(message)) if message == "frame truncated"
+            )),
+            Err(_) => assert!(matches!(
+                decode_frame(&frame),
+                Err(P2pTransportError::Encoding(message))
+                    if message == "frame payload length overflow"
+            )),
+        }
     }
 
     #[test]

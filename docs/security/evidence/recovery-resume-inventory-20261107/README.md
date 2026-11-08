@@ -688,3 +688,21 @@ The separate raw transport helper, nested decoding/resource limits,
 production currentness, durable application, fencing, and resume remain
 unresolved. A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN.
 Activation DISABLED; public DevNet NO-GO.
+
+## 30. Application-frame target-aware test/evidence correction
+
+The [test/evidence correction](application-frame-test-evidence-correction/README.md)
+records the user-supplied CHANGES REQUIRED for the test/validation package at
+`be0e83749233143ff0b713ea353600c922fdbaab`. It makes the maximum declared
+length oracle depend on the actual checked endpoint arithmetic and retains
+complete corrected debug, release, and directly affected P2P regression
+stdout/stderr/exit evidence. The three selections cover 39 distinct test
+bodies and 49 test-body executions; their overlap and limitations are
+specified in the evidence record. Native 32-bit execution remains NOT RUN.
+The production checked-endpoint calculation and prior closed inventory
+clarifications remain unchanged.
+
+**APPLICATION-FRAME TEST/EVIDENCE CORRECTION — INDEPENDENT REVIEW PENDING.**
+The separate raw transport helper, nested decoding/resource limits, and
+recovery/resume obligations remain unresolved. A17-F1 / RS1-F7, RS1 and
+A33-F1 / E27 remain OPEN. Activation DISABLED; public DevNet NO-GO.
