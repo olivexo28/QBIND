@@ -129,9 +129,10 @@ substituted anchor is not evidence that the founder approved the association.
 
 ## Refusal outcomes and unresolved currentness
 
-The future verification/comparison pipeline is refusal-only. It must not
-produce an authenticated association, an equality result, or an eligible
-result for any of the following:
+Verification failures produce no verified association. Comparison failures
+produce no equality result. When trusted currentness evidence is unavailable,
+currentness is unresolved and no eligibility or authority follows; any
+previously established authenticity and equality remain non-authorizing.
 
 | Input or result | Required outcome |
 |---|---|
