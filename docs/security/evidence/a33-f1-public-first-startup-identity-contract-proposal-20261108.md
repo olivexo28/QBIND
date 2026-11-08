@@ -125,15 +125,22 @@ the signer-derived local key if no explicit local key is configured
 
 ### Source clarification: LoopbackTesting
 
-There is a documentation/implementation conflict: operator key-management
-documentation describes `loopback-testing` as using in-memory keys
-([`KEY_MANAGEMENT.md:49-69`][key-doc]), while the `LoopbackTesting` branch
-in the loader selects `LocalKeystorePlain` and, when a keystore path is
-configured, loads the `validator-{N}` plaintext local keystore entry
-([`signer_loader.rs:314-352`][loopback-code]). The loader's own module
-documentation also records this behavior ([`signer_loader.rs:1-30`][loader-doc]).
-This is a source/documentation clarification only; it is not a demonstrated
-vulnerability, and this proposal changes no code or operator guidance.
+At pinned main `810a6759ef1e3ddb42c9a0f09f78502dc4655276`, three distinct
+source observations need to remain separate:
+
+1. The operator key-management guide describes `loopback-testing` as using
+   in-memory keys ([`KEY_MANAGEMENT.md:49-69`][key-doc]).
+2. The signer-loader **function documentation** lists `LoopbackTesting`
+   alongside `RemoteSigner` and `HsmPkcs11` as refused modes
+   ([`signer_loader.rs:282-293`][loader-function-doc]).
+3. The implementation and its adjacent comment say that, when a keystore
+   path is configured, `LoopbackTesting` selects `LocalKeystorePlain` and
+   loads the plaintext `validator-{N}` entry
+   ([`signer_loader.rs:314-336`][loopback-code]).
+
+These are documentation/implementation observations, not a demonstrated
+production vulnerability. This proposal changes no operator guide, loader
+documentation, implementation, or test plan.
 
 ## Routes and genesis handling
 
@@ -209,6 +216,13 @@ outside the pure decision function; the comparison path should only receive
 already constructed values and return match/refusal. Synthetic keys/bytes
 only—no operational keys and no live signer.
 
+Handling malformed, unreadable or ambiguous inputs **before** they reach a
+comparator remains an open test-entry requirement; a pure comparator test
+alone does not cover acquisition, parsing or provenance failures. Any future
+test claiming orchestration order must also add explicit protected-effect
+controls proving that refusal reaches none of those effects. These controls
+are future requirements, not implemented or claimed here.
+
 Every test and control in this section is **FUTURE / NOT EXECUTED**. Such a
 test would not prove production CLI ordering, that real startup calls the
 comparator, trusted provisioning, durability, filesystem race resistance,
@@ -248,8 +262,8 @@ All links below pin to base commit
 [provider]: https://github.com/olivexo28/QBIND/blob/810a6759ef1e3ddb42c9a0f09f78502dc4655276/crates/qbind-node/src/peer_key_provider.rs#L329-L401
 [model]: https://github.com/olivexo28/QBIND/blob/810a6759ef1e3ddb42c9a0f09f78502dc4655276/crates/qbind-node/tests/a33_f1_startup_route_classification_model.rs#L80-L143
 [key-doc]: https://github.com/olivexo28/QBIND/blob/810a6759ef1e3ddb42c9a0f09f78502dc4655276/docs/release/public-devnet/security/KEY_MANAGEMENT.md#L49-L69
-[loopback-code]: https://github.com/olivexo28/QBIND/blob/810a6759ef1e3ddb42c9a0f09f78502dc4655276/crates/qbind-node/src/signer_loader.rs#L314-L352
-[loader-doc]: https://github.com/olivexo28/QBIND/blob/810a6759ef1e3ddb42c9a0f09f78502dc4655276/crates/qbind-node/src/signer_loader.rs#L1-L30
+[loader-function-doc]: https://github.com/olivexo28/QBIND/blob/810a6759ef1e3ddb42c9a0f09f78502dc4655276/crates/qbind-node/src/signer_loader.rs#L282-L293
+[loopback-code]: https://github.com/olivexo28/QBIND/blob/810a6759ef1e3ddb42c9a0f09f78502dc4655276/crates/qbind-node/src/signer_loader.rs#L314-L336
 [restore-open]: https://github.com/olivexo28/QBIND/blob/810a6759ef1e3ddb42c9a0f09f78502dc4655276/crates/qbind-node/src/main.rs#L2619-L2680
 [restore-intent]: https://github.com/olivexo28/QBIND/blob/810a6759ef1e3ddb42c9a0f09f78502dc4655276/crates/qbind-node/src/main.rs#L2776-L2857
 [reset]: https://github.com/olivexo28/QBIND/blob/810a6759ef1e3ddb42c9a0f09f78502dc4655276/crates/qbind-node/src/main.rs#L2222-L2281
