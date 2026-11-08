@@ -4,6 +4,8 @@
 A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain **OPEN**. Activation remains
 **DISABLED**; public DevNet remains **NO-GO**. This is source/design and
 documentation only, not implementation, recovery or integration approval.
+The [local fencing clarification](#local-owner-and-worker-contract--fencing-clarification)
+below supersedes ambiguous fencing language in this historical proposal.
 
 ## Identity and provenance
 
@@ -265,3 +267,219 @@ resource bounds, safe reconciliation and any separately authorized
 clear/resume remain OPEN. A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain OPEN;
 activation DISABLED; public DevNet NO-GO. This proposal is neither public
 DevNet nor integration approval.
+
+## Local owner and worker contract — fencing clarification
+
+**LOCAL STAY-CLOSED FENCING CONTRACT — INDEPENDENT REVIEW PENDING.**
+The user supplied independent **PASS WITH LIMITATIONS** for the reviewed
+proposal's documentation and direction; it is not acceptance of a
+production quarantine or an implementation-ready contract. Earlier scoped
+acceptances are unchanged; no reviewer identity or raw review artifact is
+asserted. This addendum is a concrete proposed local contract, not implemented
+enforcement, and still needs independent review and the decisions below.
+
+Continuation preflight: direct remote `main` and local `main` at
+`0d1b56515c52abe2862064027d1a9f103fef5a0c`, tree
+`b3e8914e6ff234afd80fd29b58470c43f2b08009`; direct remote and local
+`docs/a33-f1-e27-stay-closed-next-slice`, starting HEAD and reviewed parent
+`f0c516a755c155d409c3655f50ba04a63aa98ad8`, tree
+`d41db469bef858062b4f63feaa460e9c90ee2281`. Checkout was already on that
+branch; index, tracked worktree and untracked status were clean. Remote is
+`olivexo28/QBIND`; no applicable `AGENTS.md` was found. This continuation
+changes only this file, preserving the original text as historical evidence.
+
+### Controlling clarification: three independent observations
+
+The earlier sentence in **Fencing contract**, “must not report a complete
+fence until in-flight effects are resolved or explicitly classified
+uncertain”, is **superseded**: classification as uncertain alone does not
+establish a fence. The earlier acceptance-control phrase “observed/drained
+or reported uncertain” likewise means effect accounting, **not an
+alternative to the required quiescence barrier**. The rule below controls
+all readings of the original proposal.
+
+* **A — admission closed:** the local owner has atomically stopped granting
+  new protected-work admissions and recorded revocation of the active
+  generation. This does not imply pre-existing work has stopped.
+* **B — effect outcome unknown:** an already admitted operation may have
+  invoked a signer, sent bytes or attempted a write without an authoritative
+  result. Record `Unknown` against that operation and retain the unresolved
+  state; neither record proves no effect occurred or that a worker stopped.
+* **C — local quiescence proven:** A holds, every previously admitted
+  operation and descendant capable of a covered local effect is accounted
+  for, and the barrier has positively established that none can subsequently
+  initiate or complete a covered **local** effect. No queue, worker,
+  active effect permit or local callback capable of the covered effect
+  remains. This statement is scoped to the inventoried local boundary.
+
+A and B can hold while C is false, e.g. a signer call is still executing.
+A and C can later hold while B remains true, e.g. a local worker has
+terminated and no local publication can follow, but the remote signer's
+result is still unknown. C does not prove that the external signer has
+stopped, that no signature exists, or that delivered bytes were retracted.
+Already published bytes cannot be recalled. Closing a channel, requesting
+cancellation, timing out, dropping a future/handle, a counter increment, or
+writing `Unknown` is not a join, drain, effect acknowledgement or proof of
+physical cancellation. If C cannot be proven, the barrier remains incomplete
+and participation stays refused. If C is proven but B persists, remain
+unresolved and refused; C is not permission to clear or resume.
+
+### Proposed local owner protocol
+
+The candidate node lifecycle owner owns destination ownership, admission,
+revocation and a complete outstanding-operation ledger; the engine loop and
+workers are subordinate, not independent sources of authority. This is
+proposed wiring: today's restore-mode flag, transport queues, snapshot tasks
+and signer do not implement it. A ledger entry has an owner-incarnation and
+non-reused generation, operation identity, effect class, ownership/liveness
+state and a **separate** effect outcome (`not invoked`, acknowledged,
+partial or unknown). Exhaustion, duplicate identity, failed bookkeeping,
+owner loss or missing handoff refuses; `Unknown` must never be treated as
+`not invoked`. Bounds and durable representation remain undecided.
+
+1. **Admission linearization.** A single local coordinator serializes
+   `admit`, `revoke`, effect-permit reservation and operation/child handoff.
+   `admit(G)` atomically checks owner live and admission open for G and
+   registers an outstanding operation **before** its work is queued or
+   executed. No protected work exists without a ledger owner. Queue transfer,
+   fan-out, callback and dequeue either atomically transfer ownership to a
+   tracked child/worker or retain the parent until all descendants terminate;
+   failed handoff cannot erase ownership. Untrusted peer response refusal is
+   not an attempt and creates no durable latch.
+2. **Revocation.** Under the same serialization boundary `revoke(G)` closes
+   admission and invalidates G. That atomic change is A's linearization point.
+   Cancellation requests and dropping queued work may assist draining, but
+   entries retire only on positive completion or positively proven
+   non-execution, including tracked descendants. A discarded queue entry
+   requires proof it was never concurrently dequeued; otherwise it stays
+   outstanding. No new generation may reopen participation in this slice.
+3. **Final-effect interleaving.** A worker's earlier generation check is
+   advisory only. Immediately at each protected effect, it must acquire an
+   effect permit by atomically checking G and the live ledger entry under the
+   **same** coordinator as revocation. If revoke linearizes first, permit
+   acquisition fails and no effect is attempted. If the permit linearizes
+   first, the operation remains explicitly owned as in flight until the
+   effect and all locally capable continuations complete; revocation can
+   close new admission but cannot declare C meanwhile. The physical effect
+   may occur after A and before C. No unprotected check-then-act gap or
+   untracked child is allowed. A stale result cannot acquire a new permit
+   for publication; retain its actual effect outcome independently.
+4. **Barrier.** After closing A, durably publish the unresolved intent
+   before any new catch-up protected effect and before relying on a
+   completed drain. Await positive, identity-bound worker termination and
+   child/queue ownership discharge, and completion of each locally capable
+   effect permit. Only the coordinator's atomic observation of A plus an
+   empty live-operation/permit set and verified termination of inventoried
+   local executors establishes C. A join acknowledgement is useful only if
+   its contract covers the actual executor and all descendants; absence of a
+   join handle is not proof. For executors that can outlive their waiter,
+   including blocking tasks, retain and observe the actual executor or leave
+   C false. Unknown external effects remain B after local completion.
+
+The coordinator must not hold its mutex across blocking I/O, signer calls,
+network sends or joins: reserve an owned in-flight permit under it, release
+it, perform the effect, then account for completion under it. A stalled
+worker can therefore stall C indefinitely rather than deadlocking the
+coordinator, though an external call or leaked child can still prevent
+quiescence indefinitely. Permit release must not be automatic merely because
+a waiter is cancelled or unwinds; termination and ownership of the actual
+executor and descendants must be established. Diagnostics, counters and
+unresolved-record writes are not a substitute for these observations.
+
+For comparison, a single local actor could serialize admission, revocation
+and **all** effects in one executor, with a tracked barrier behind all
+already admitted work. It avoids shared-memory races only if every descendant
+and final effect truly runs within that actor or is tracked through a
+handoff; network writers, blocking snapshot tasks and external signers break
+that assumption unless integrated. Waiting inside an actor for a callback
+that requires that same actor can deadlock. A mutex held across a final
+blocking/external call also serializes revocation, but can block revocation
+forever and introduces reentrancy/deadlock risks; it does not cancel external
+effects. The permit-plus-ledger protocol above is the recommended bounded
+local design for review, not a selection of a persistence backend or a claim
+that present source already provides this serialization.
+
+### Source boundaries, ordering and remaining dependencies
+
+The pinned [B:3124-3306](https://github.com/olivexo28/QBIND/blob/0d1b56515c52abe2862064027d1a9f103fef5a0c/crates/qbind-node/src/binary_consensus_loop.rs#L3124-L3306)
+and [B:3373-3454](https://github.com/olivexo28/QBIND/blob/0d1b56515c52abe2862064027d1a9f103fef5a0c/crates/qbind-node/src/binary_consensus_loop.rs#L3373-L3454)
+show both select/tick paths. [B:9239-9254](https://github.com/olivexo28/QBIND/blob/0d1b56515c52abe2862064027d1a9f103fef5a0c/crates/qbind-node/src/binary_consensus_loop.rs#L9239-L9254)
+spawns a fire-and-forget periodic task and an inner `spawn_blocking`;
+[M:9255-9355](https://github.com/olivexo28/QBIND/blob/0d1b56515c52abe2862064027d1a9f103fef5a0c/crates/qbind-node/src/main.rs#L9255-L9355)
+has a separate signal snapshot path. A future owner must track the actual
+blocking executor and publication, not just its async waiter.
+[TCP:3000-3017](https://github.com/olivexo28/QBIND/blob/0d1b56515c52abe2862064027d1a9f103fef5a0c/crates/qbind-node/src/p2p_tcp.rs#L3000-L3017)
+enqueues per peer via `try_send`; [TCP:2324-2399](https://github.com/olivexo28/QBIND/blob/0d1b56515c52abe2862064027d1a9f103fef5a0c/crates/qbind-node/src/p2p_tcp.rs#L2324-L2399)
+has separate writers which dequeue and send. Queue acceptance is not
+physical send completion. Inventories and handoffs must cover transport,
+snapshot, cached re-emission, local engine mutations, epoch persistence and
+all Proposal/Vote/Timeout signer and publication routes. Existing
+`ValidatorSigner` is a shared trait with synchronous signer methods
+([validator_signer.rs:144-200](https://github.com/olivexo28/QBIND/blob/0d1b56515c52abe2862064027d1a9f103fef5a0c/crates/qbind-node/src/validator_signer.rs#L144-L200));
+the interface does not establish external cancellation or exclusivity. An
+already invoked call returning late must update its retained outcome, never
+re-enable a stale result for broadcast. A local executor's verified
+termination can establish C locally even if an external call's outcome
+remains B, but only when no covered local continuation can still publish.
+It cannot establish global signer quiescence.
+
+For assessed normal data-directory startup: acquire the destination lock,
+then classify the catch-up record **before** canonical consensus storage
+open, requested restore materialization, services, signer-capable work or
+participation ([M:2503-2552](https://github.com/olivexo28/QBIND/blob/0d1b56515c52abe2862064027d1a9f103fef5a0c/crates/qbind-node/src/main.rs#L2503-L2552),
+[M:2617-2630](https://github.com/olivexo28/QBIND/blob/0d1b56515c52abe2862064027d1a9f103fef5a0c/crates/qbind-node/src/main.rs#L2617-L2630)).
+For the distinct reset path, classify after its own lock and before reset
+effects ([M:2215-2247](https://github.com/olivexo28/QBIND/blob/0d1b56515c52abe2862064027d1a9f103fef5a0c/crates/qbind-node/src/main.rs#L2215-L2247)).
+The existing lock acquisition can create the directory/lock file; the
+proposed order is not a claim of zero filesystem setup effects before
+classification. Other early CLI exits and stateless/no-data-dir operation are
+not fully assessed: enumerate and gate or refuse them before claiming
+coverage. Current early RTR checks and its COMPLETE state are not catch-up
+classification.
+
+During an explicitly authorized local attempt, acquire/retain ownership,
+close admission A, durably publish sticky intent, and establish C before
+any future catch-up mutation could be considered. In this slice the importer
+remains disabled even after C. Intent failure or uncertain durability closes
+the current process, but cannot by itself prove a durable marker exists after
+a crash; a fresh startup must refuse if safe classification cannot be
+established. Empty/non-empty response dispatch remains ignore/refuse and
+cannot create the marker. Unknown, owner loss, missing child accounting,
+unproven quiescence or ambiguous classification require continued refusal.
+No automatic clear or resume exists.
+
+Before implementation, separately decide bounded schema/read and ledger
+limits, supported durable barriers and uncertain writes, destination identity,
+legacy provisioning/migration and absent-record classification, crash ownership
+and all CLI/stateless paths. Establish separately any cross-process/host or
+HSM exclusivity, copied-store protection, anti-rollback and external outcome
+reconciliation; neither the local `restore.lock` nor the journal's
+per-backend domain ([signing_reservation_journal.rs:1329-1345](https://github.com/olivexo28/QBIND/blob/0d1b56515c52abe2862064027d1a9f103fef5a0c/crates/qbind-node/src/signing_reservation_journal.rs#L1329-L1345))
+provides these properties. No recovery authority, storage backend or
+clearance policy is selected. Previously accepted P1 provider/lease and
+composition controls cited above are single-threaded test-only precedents,
+not enforcement of this local concurrent protocol or production currentness.
+
+### Focused acceptance controls — FUTURE / NOT EXECUTED
+
+Each control must assert authoritative owner/worker and protected-effect
+state separately from diagnostic text and counters. Use real boundary
+entrypoints, deterministic barriers and recording fakes, not timing alone:
+
+| Interleaving | Required observation and bounded proof |
+|---|---|
+| Admitted worker paused; close admission | A true, worker owned/outstanding, C false; new admission refused. Release the worker and observe actual termination before C. Proves admission closure is not worker cancellation, not global fencing. |
+| Check G, revoke, attempt final effect | Pause after a preliminary check; revoke wins coordinator; effect permit refused and recording sink unchanged. Reverse order: permit wins, revoke closes A but C stays false until owned effect and child finish. Proves local serialization, not rollback of an earlier effect. |
+| Signer invoked, late/unknown result | Pause inside an invoked signer; A true and C false while its local executor can still act. On late return record actual result and reject stale publication; if executor terminates with outcome unknown, assert C only after all local continuations terminate and B remains. Proves no stale local publication, not external no-signature or HSM cancellation. |
+| Unknown recorded while worker runs | Assert B true and A true while the live ledger/permit keeps C false; closing channel or dropping waiter alone does not change this. Proves refusal accounting is not a barrier. |
+| Local completion, external effect unknown | Positively observe actual executor and descendants terminated; assert A and C true, B still true, unresolved record and participation refusal retained. Proves local liveness/effect-outcome separation, not external resolution. |
+| Quiescent with no new admission | Account for every queued/dequeued child, final permit and executor; assert C only after all discharge, and reject all later admissions/stale callbacks. Exercise transport and blocking snapshot handoffs. Proves only inventoried local coverage, not recall of sent bytes or global signer fencing. |
+| Owner loss and restart | Kill/restart around close, intent write/ack and effect handoffs under a fresh owner; an absent unprovisioned, corrupt, unreadable or ambiguous classification refuses before assessed storage/restore/reset/participation effects. Distinguish known pre-effect from uncertain publication; no inferred rollback. Proves tested process-crash ordering only, not power-loss durability or anti-rollback. |
+| Sensitivity | Deliberately omit the final permit barrier and separately omit tracking a previously admitted child; the same oracle must observe post-revoke effect or premature C and fail. Restore correct paths and assert non-vacuous positives. Proves the controls detect those mutants, not all possible bypasses. |
+
+No Rust tests or builds were rerun, no node or operational signer was run,
+and no source/test, Cargo file, audit register or prior evidence bytes were
+changed. This continuation performs only source/ref inspection, documentation
+checks and branch publication. All controls above are **FUTURE / NOT
+EXECUTED**. Transport, A17-F1 / RS1-F7, RS1 and A33-F1 / E27 remain
+**OPEN**; activation **DISABLED**; public DevNet **NO-GO**.
