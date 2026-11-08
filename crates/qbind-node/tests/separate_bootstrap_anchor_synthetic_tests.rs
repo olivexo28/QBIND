@@ -757,6 +757,45 @@ fn invalid_signature_wrong_purpose_version_and_suite_refuse_sensitively() {
         "suite-policy bypass mutation did not break its negative control"
     );
 
+    let mut tampered_suite_header = valid.clone();
+    tampered_suite_header.association_suite = 999;
+    assert_eq!(
+        verify(
+            &tampered_suite_header,
+            &fixture.anchor,
+            &fixture.policy,
+            VerifyBypass::default()
+        ),
+        Authenticity::Refused(VerifyFailure::UnsupportedSuite)
+    );
+    assert_eq!(
+        verify(
+            &tampered_suite_header,
+            &fixture.anchor,
+            &fixture.policy,
+            VerifyBypass {
+                suite_policy: true,
+                ..VerifyBypass::default()
+            }
+        ),
+        Authenticity::Refused(VerifyFailure::InvalidSignature),
+        "association suite metadata was not covered by the signed bytes"
+    );
+    assert_eq!(
+        verify(
+            &tampered_suite_header,
+            &fixture.anchor,
+            &fixture.policy,
+            VerifyBypass {
+                suite_policy: true,
+                signature: true,
+                ..VerifyBypass::default()
+            }
+        ),
+        Authenticity::Verified,
+        "suite/signature bypass mutant did not break its negative control"
+    );
+
     let mut wrong_suite_anchor = fixture.anchor.clone();
     wrong_suite_anchor.key_suite = 999;
     assert_eq!(
