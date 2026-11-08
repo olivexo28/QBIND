@@ -1,0 +1,69 @@
+command: cargo test -p qbind-net --test transport_frame_decoder_baseline_tests --test transport_frame_tests --test framed_io_tests
+working_directory: /workspaces/QBIND/olivexo28/QBIND
+mode: debug
+source_test_tree: c5769df7bf916852293bbff1306aa15e27414dde
+host/target: x86_64-unknown-linux-gnu
+rustc: rustc 1.99.1 (58cf8f9c3 2026-10-13)
+cargo: cargo 1.99.1 (5f94df478 2026-08-27)
+
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+   Compiling qbind-net v0.1.0 (/workspaces/QBIND/olivexo28/QBIND/crates/qbind-net)
+    Finished `test` profile [unoptimized] target(s) in 0.84s
+     Running tests/framed_io_tests.rs (target/debug/deps/framed_io_tests-5f36d9180db0a191)
+
+running 22 tests
+test test_handshake_empty_payload ... ok
+test test_handshake_length_exceeds_max ... ok
+test test_handshake_max_valid_payload ... ok
+test test_handshake_read_with_fragmented_stream_chunk_1 ... ok
+test test_handshake_read_with_fragmented_stream_chunk_2 ... ok
+test test_handshake_roundtrip ... ok
+test test_handshake_roundtrip_with_cursor ... ok
+test test_multiple_handshake_packets_sequential ... ok
+test test_multiple_transport_frames_sequential ... ok
+test test_transport_empty_ciphertext ... ok
+test test_transport_length_exceeds_max ... ok
+test test_transport_read_with_fragmented_stream_chunk_1 ... ok
+test test_transport_read_with_fragmented_stream_chunk_2 ... ok
+test test_transport_roundtrip ... ok
+test test_transport_roundtrip_with_cursor ... ok
+test test_truncated_handshake_header_1_byte ... ok
+test test_truncated_handshake_header_2_bytes ... ok
+test test_truncated_handshake_payload ... ok
+test test_truncated_transport_header_1_byte ... ok
+test test_truncated_transport_header_4_bytes ... ok
+test test_truncated_transport_payload ... ok
+test test_transport_large_ciphertext ... ok
+
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/transport_frame_decoder_baseline_tests.rs (target/debug/deps/transport_frame_decoder_baseline_tests-f3da239e3030fabf)
+
+running 5 tests
+test header_only_boundary_lengths_return_truncation_when_endpoint_is_representable ... ok
+test short_headers_return_the_existing_error ... ok
+test trailing_bytes_after_declared_payload_are_ignored ... ok
+test truncated_payload_returns_the_existing_error ... ok
+test valid_frame_round_trips_through_the_public_decoder ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/transport_frame_tests.rs (target/debug/deps/transport_frame_tests-93b48d93c23984c2)
+
+running 10 tests
+test decode_empty_buffer_returns_error ... ok
+test decode_roundtrip_with_various_sizes ... ok
+test decode_truncated_header_returns_error ... ok
+test decode_truncated_payload_returns_error ... ok
+test decrypt_unexpected_msg_type_returns_error ... ok
+test encode_too_large_ciphertext_length_check_is_wired ... ok
+test roundtrip_both_directions_have_independent_counters ... ok
+test encode_max_u32_ciphertext_length_succeeds ... ok
+test roundtrip_s2c_direction ... ok
+test roundtrip_c2s_direction ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+exit_code=0
