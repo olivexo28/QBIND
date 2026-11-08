@@ -1,0 +1,116 @@
+# A33-F1 — test-only public identity comparison evidence
+
+**ISOLATED TEST-ONLY SLICE.** This evidence does not establish a production
+identity authority or authorize startup, signing, participation, recovery or
+restart. Activation remains **DISABLED**; public DevNet remains **NO-GO**.
+A33-F1 / E27 and other recorded obligations remain **OPEN**.
+
+## Source and evidence provenance
+
+The test/build inputs are source commit
+`8794b8b1f45ee3518de6ec30335fa03570c11a72`, tree
+`b61e532cd5633a3a85d06f6c2de825b83f81b935`, parent
+`e9e92b29c128daeaeb7dd11477f9661146e6aa27`. The complete focused-test
+output, including command, source commit/tree, test count, exit code and
+compiler warnings, is retained in
+[`a33-f1-public-identity-comparison-focused-output-20261108.txt`](a33-f1-public-identity-comparison-focused-output-20261108.txt).
+The complete compile-only output and exit code are retained in
+[`a33-f1-public-identity-comparison-compile-output-20261108.txt`](a33-f1-public-identity-comparison-compile-output-20261108.txt).
+
+The evidence-only commit is a child of the source commit. Its only changes
+are this evidence note and the two captured output files; the test source,
+crate manifests, lockfile and other build inputs are unchanged from the
+identified source commit. The resulting evidence commit/tree are recorded by
+Git metadata, not substituted for the source revision used in the runs.
+
+## Helpers and synthetic boundary
+
+The integration test is
+[`crates/qbind-node/tests/public_first_identity_comparison_tests.rs`](../../../crates/qbind-node/tests/public_first_identity_comparison_tests.rs).
+It calls these existing read-only source helpers from pinned main commit
+[`810a6759ef1e3ddb42c9a0f09f78502dc4655276`](https://github.com/olivexo28/QBIND/tree/810a6759ef1e3ddb42c9a0f09f78502dc4655276):
+
+- `DestinationId::canonicalize` at
+  [`restore_completion.rs:153-179`](https://github.com/olivexo28/QBIND/blob/810a6759ef1e3ddb42c9a0f09f78502dc4655276/crates/qbind-node/src/restore_completion.rs#L153-L179)
+  supplies the observed canonicalized UTF-8 destination path. The path and
+  expected value are disposable synthetic fixtures; this helper does not
+  establish filesystem-incarnation identity or race resistance.
+- `compute_canonical_genesis_hash` at
+  [`genesis.rs:1576-1621`](https://github.com/olivexo28/QBIND/blob/810a6759ef1e3ddb42c9a0f09f78502dc4655276/crates/qbind-ledger/src/genesis.rs#L1576-L1621)
+  and `verify_boot_time_genesis` at
+  [`genesis.rs:1797-1855`](https://github.com/olivexo28/QBIND/blob/810a6759ef1e3ddb42c9a0f09f78502dc4655276/crates/qbind-ledger/src/genesis.rs#L1797-L1855)
+  operate on one owned parse in the fixture. The test compares the full hash
+  with its synthetic retained boot hash and refuses a missing or mismatched
+  retained value. This is a test-profile choice only; it does not select a
+  production policy for `None` or embedded genesis.
+
+The expected association and its “authenticated” status are explicit
+**synthetic fixtures**. The test-only comparator and all seven public-key
+bytes are synthetic; it does not create or inspect founder credentials, trust
+roots, provisioning, a signer or signing history. No operational key is
+accessed and no production node is run.
+
+Temporary fixture creation is outside the comparison path: `tempfile::TempDir`
+creates disposable directories, test setup writes/reads synthetic genesis
+JSON and a malformed JSON fixture, and RAII cleanup removes them. A missing
+genesis path exercises the actual read-error branch. Ambiguous source
+resolution is simulated because the existing helpers do not return an
+ambiguous-association category.
+
+## Controls exercised
+
+- Matching synthetic association returns only the test comparator’s `Match`
+  enum; there are no startup, signer, participation, recovery or restart
+  capability values.
+- Each of environment, numeric chain ID, full genesis hash, destination,
+  validator ID, suite ID and complete public key is varied independently for
+  missing, unavailable and mismatch evidence.
+- The full-key negative control changes a byte after the shared first four
+  bytes, demonstrating equal short display prefixes but unequal full key
+  bytes.
+- Absent and explicitly untrusted expected associations refuse. A test-only
+  bypass of the expected-association trust guard makes the untrusted case
+  match, invalidating that negative control.
+- Actual missing-path and malformed-JSON helper errors are refused before the
+  comparator. Ambiguous acquisition is an explicitly simulated error. A
+  test-only bypass of the acquisition guard makes each negative case match.
+- Per-field bypass controls demonstrate that bypassing each field’s missing,
+  unavailable or equality check changes its corresponding negative case to
+  `Match`. A separate positive control prevents an always-refuse comparator
+  from passing.
+- Missing retained external-genesis hash and hash mismatch refuse in this
+  synthetic test profile. The genesis fields/hash derive from one owned parse.
+
+There is no orchestration-order claim, so there are no protected-effect
+callbacks in this test. It does not test CLI startup ordering or claim refusal
+blocks real startup effects. Any future orchestration claim requires observable
+protected-effect callbacks and a sensitive bypass control.
+
+## Checks
+
+Commands run at source commit
+`8794b8b1f45ee3518de6ec30335fa03570c11a72`, tree
+`b61e532cd5633a3a85d06f6c2de825b83f81b935`:
+
+| Command | Result |
+|---|---|
+| `cargo test -p qbind-node --test public_first_identity_comparison_tests -- --nocapture` | Exit 0; **8 passed, 0 failed**. Complete output retained in the focused output file. |
+| `cargo test -p qbind-node --test public_first_identity_comparison_tests --no-run` | Exit 0; test executable compiled. Complete output retained in the compile output file. |
+| `rustfmt --edition 2021 --check crates/qbind-node/tests/public_first_identity_comparison_tests.rs` | Exit 0. |
+| `git diff --check` | Exit 0. |
+
+The initial focused compile attempt failed before reaching this test because
+the environment lacked `libclang` required by `zstd-sys`; after installing
+that build dependency, the focused test and compile-only check above passed.
+Warnings in the retained successful logs are existing unused-code warnings in
+workspace crates, not test failures.
+
+## Limitations
+
+The result does not prove authenticated real provisioning, production CLI
+ordering/enforcement, namespace-race resistance, filesystem-incarnation
+identity, durable intent, signing-history currentness, signer fencing or
+exclusivity, recovery authority, restart safety, or any permission to proceed
+or sign. It does not modify signed formats, production source, manifests or
+historical raw logs. Prior scoped acceptances and the closed PR #11 transfer
+investigation remain unchanged.
