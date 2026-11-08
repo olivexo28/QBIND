@@ -61,6 +61,31 @@ outputs above. The output-transfer investigation is CLOSED. This record
 does not request or reconstruct the earlier ZIP, and this correction does
 not rerun those earlier final-tree checks.
 
+## PR #11 follow-up controls
+
+The PR #11 model corrections were tested from source commit
+`d22e308793c4d301cebbb621c6a11fa36ac8e444`, tree
+`3d7653eb6add23d3cc052e9912d7fb8d1e307c10`. The retained focused output
+`a33-f1-startup-route-model-package-pr11-focused-output.txt` records
+`cargo test -p qbind-node --test a33_f1_startup_route_classification_model
+-- --nocapture`, 16 passed, 0 failed, exit code 0. The retained compile
+output `a33-f1-startup-route-model-package-pr11-compile-output.txt` records
+`cargo test -p qbind-node --test a33_f1_startup_route_classification_model
+--no-run`, successful executable generation, exit code 0. Both records
+include the Rust/Cargo versions and target. These output files and this
+paragraph are evidence-only additions after the tested source commit; the
+test file, manifests, lockfile and build configuration are unchanged.
+
+The added same-checker controls reject nonterminal and duplicate Exit,
+require a metrics-task event before consensus storage only for the modeled
+ordinary normal route, and verify admission refusals for each nontrusted
+identity field/value using the synthetic positive record fixture. A
+test-only guard bypass makes the assertion for
+`IdentityCannotSupportAdmission` fail. Restore ordering remains separately
+modeled. No production path, identity authority, startup permission or
+restart policy is established. Earlier SRM/TDI/TSL raw logs remain
+byte-for-byte unchanged.
+
 ## Historical attribution and TDI-1 boundary
 
 The earlier SRM-1/2 report records a final 11/11 focused run and an
