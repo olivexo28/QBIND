@@ -76,12 +76,20 @@ fn header_only_boundary_lengths_return_truncation_when_endpoint_is_representable
 
 #[cfg(target_pointer_width = "32")]
 #[test]
-#[ignore = "BASELINE SAFETY WITNESS: expected to expose unchecked endpoint overflow; not a passing fix"]
-fn ignored_baseline_witness_unrepresentable_endpoint_is_rejected_without_panic() {
-    let bytes = header(0x41, u32::MAX);
-
+fn unrepresentable_payload_endpoints_return_exact_errors_without_panicking() {
+    let representable_endpoint = header(0x41, u32::MAX - 5);
     assert!(matches!(
-        TransportFrame::decode(&bytes),
+        TransportFrame::decode(&representable_endpoint),
         Err(NetError::Protocol("transport frame payload truncated"))
     ));
+
+    for declared_len in [u32::MAX - 4, u32::MAX] {
+        let bytes = header(0x41, declared_len);
+        assert!(matches!(
+            TransportFrame::decode(&bytes),
+            Err(NetError::Protocol(
+                "transport frame payload length overflow"
+            ))
+        ));
+    }
 }

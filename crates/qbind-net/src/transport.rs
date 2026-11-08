@@ -53,13 +53,18 @@ impl TransportFrame {
 
         let msg_type = buf[0];
 
-        let len = u32::from_be_bytes([buf[1], buf[2], buf[3], buf[4]]) as usize;
+        let wire_len = u32::from_be_bytes([buf[1], buf[2], buf[3], buf[4]]);
+        let len = usize::try_from(wire_len)
+            .map_err(|_| NetError::Protocol("transport frame payload length not representable"))?;
+        let payload_end = 5usize.checked_add(len).ok_or(NetError::Protocol(
+            "transport frame payload length overflow",
+        ))?;
 
-        if buf.len() < 5 + len {
+        if buf.len() < payload_end {
             return Err(NetError::Protocol("transport frame payload truncated"));
         }
 
-        let ciphertext = buf[5..5 + len].to_vec();
+        let ciphertext = buf[5..payload_end].to_vec();
 
         Ok(TransportFrame {
             msg_type,
