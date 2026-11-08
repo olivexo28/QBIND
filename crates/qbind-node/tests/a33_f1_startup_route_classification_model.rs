@@ -303,22 +303,27 @@ fn check_trace(route: Route, events: &[Event]) -> Vec<Violation> {
 
     match route {
         Route::RequestedRestore => {
-            let restore_order = [
-                Event::ConsensusStorageOpened,
-                Event::RestoreRecordChecked,
-                Event::RestoreIntentPublished,
-                Event::AccountStateMaterialized,
-                Event::SnapshotEpochPersisted,
-                Event::RestoreCompletePublished,
-            ];
-            let indices: Vec<Option<usize>> = restore_order
-                .iter()
-                .map(|event| position(events, *event))
-                .collect();
-            if indices.iter().any(Option::is_none)
-                || indices.windows(2).any(|pair| pair[0] >= pair[1])
-            {
-                violations.push(Violation::RestoreEffectsOutOfOrder);
+            if matches!(
+                classification,
+                Some((_, _, _, ClassificationDecision::AdmitSyntheticTrace))
+            ) {
+                let restore_order = [
+                    Event::ConsensusStorageOpened,
+                    Event::RestoreRecordChecked,
+                    Event::RestoreIntentPublished,
+                    Event::AccountStateMaterialized,
+                    Event::SnapshotEpochPersisted,
+                    Event::RestoreCompletePublished,
+                ];
+                let indices: Vec<Option<usize>> = restore_order
+                    .iter()
+                    .map(|event| position(events, *event))
+                    .collect();
+                if indices.iter().any(Option::is_none)
+                    || indices.windows(2).any(|pair| pair[0] >= pair[1])
+                {
+                    violations.push(Violation::RestoreEffectsOutOfOrder);
+                }
             }
         }
         Route::Reset => {
@@ -564,6 +569,87 @@ fn record_refusal_observations_cannot_be_forced_into_admission() {
             "protected effect accepted after refusal for {record:?}"
         );
     }
+}
+
+#[test]
+fn restore_refusal_observations_exit_before_protected_effects() {
+    for record in [
+        RecordObservation::Absent,
+        RecordObservation::CorruptOrInvalid,
+        RecordObservation::Unreadable,
+        RecordObservation::ForeignOrAmbiguous,
+        RecordObservation::Unresolved,
+    ] {
+        let refusal = [
+            Event::DataDirectoryCreated,
+            Event::NormalDestinationOwned,
+            refused(record, IdentityClaims::synthetic_trusted()),
+            Event::Exit,
+        ];
+        assert!(
+            check_trace(Route::RequestedRestore, &refusal).is_empty(),
+            "restore refusal trace rejected for {record:?}"
+        );
+
+        let protected_effect_after_refusal = [
+            Event::DataDirectoryCreated,
+            Event::NormalDestinationOwned,
+            refused(record, IdentityClaims::synthetic_trusted()),
+            Event::RestoreRecordChecked,
+            Event::Exit,
+        ];
+        assert!(
+            check_trace(Route::RequestedRestore, &protected_effect_after_refusal)
+                .contains(&Violation::ProtectedEffectAfterRefusal),
+            "restore effect accepted after {record:?} refusal"
+        );
+
+        let protected_effect_before_classification = [
+            Event::DataDirectoryCreated,
+            Event::NormalDestinationOwned,
+            Event::ConsensusStorageOpened,
+            refused(record, IdentityClaims::synthetic_trusted()),
+            Event::Exit,
+        ];
+        assert!(
+            check_trace(
+                Route::RequestedRestore,
+                &protected_effect_before_classification
+            )
+            .contains(&Violation::ProtectedEffectBeforeClassification),
+            "restore effect accepted before {record:?} classification"
+        );
+    }
+}
+
+#[test]
+fn continuing_synthetic_restore_requires_all_effects_in_order() {
+    let missing_effect = [
+        Event::DataDirectoryCreated,
+        Event::NormalDestinationOwned,
+        admitted(IdentityClaims::synthetic_trusted()),
+        Event::ConsensusStorageOpened,
+        Event::RestoreRecordChecked,
+        Event::RestoreIntentPublished,
+        Event::AccountStateMaterialized,
+        Event::SnapshotEpochPersisted,
+    ];
+    assert!(check_trace(Route::RequestedRestore, &missing_effect)
+        .contains(&Violation::RestoreEffectsOutOfOrder));
+
+    let misordered_effect = [
+        Event::DataDirectoryCreated,
+        Event::NormalDestinationOwned,
+        admitted(IdentityClaims::synthetic_trusted()),
+        Event::ConsensusStorageOpened,
+        Event::RestoreIntentPublished,
+        Event::RestoreRecordChecked,
+        Event::AccountStateMaterialized,
+        Event::SnapshotEpochPersisted,
+        Event::RestoreCompletePublished,
+    ];
+    assert!(check_trace(Route::RequestedRestore, &misordered_effect)
+        .contains(&Violation::RestoreEffectsOutOfOrder));
 }
 
 #[test]
