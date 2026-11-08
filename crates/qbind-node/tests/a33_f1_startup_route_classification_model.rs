@@ -118,6 +118,7 @@ enum Violation {
     RecordObservationCannotAdmit,
     ProtectedEffectAfterRefusal,
     NormalMetricsStorageOrder,
+    DuplicateExit,
 }
 
 fn is_protected_effect(event: Event) -> bool {
@@ -144,7 +145,26 @@ fn position(events: &[Event], wanted: Event) -> Option<usize> {
 }
 
 fn check_trace(route: Route, events: &[Event]) -> Vec<Violation> {
+    check_trace_with_identity_guard(route, events, true)
+}
+
+fn check_trace_with_identity_guard(
+    route: Route,
+    events: &[Event],
+    enforce_identity_guard: bool,
+) -> Vec<Violation> {
     let mut violations = Vec::new();
+    let exit_count = events.iter().filter(|event| **event == Event::Exit).count();
+    if exit_count > 1 {
+        violations.push(Violation::DuplicateExit);
+    }
+    if events
+        .iter()
+        .position(|event| *event == Event::Exit)
+        .is_some_and(|exit| exit + 1 < events.len())
+    {
+        violations.push(Violation::ExitNotLast);
+    }
     let directory = position(events, Event::DataDirectoryCreated);
     let normal_owner = position(events, Event::NormalDestinationOwned);
     let reset_owner = position(events, Event::ResetDestinationOwned);
@@ -248,7 +268,7 @@ fn check_trace(route: Route, events: &[Event]) -> Vec<Violation> {
         let identity_trusted = identity.can_admit_synthetic_trace();
         match decision {
             ClassificationDecision::AdmitSyntheticTrace => {
-                if !identity_trusted {
+                if enforce_identity_guard && !identity_trusted {
                     violations.push(Violation::IdentityCannotSupportAdmission);
                 }
                 if record != RecordObservation::SyntheticPositiveFixture {
@@ -349,11 +369,10 @@ fn check_trace(route: Route, events: &[Event]) -> Vec<Violation> {
             }
         }
         Route::NormalWithDataDir => {
-            if let (Some(metrics), Some(storage)) = (
-                position(events, Event::MetricsTaskSpawned),
-                position(events, Event::ConsensusStorageOpened),
-            ) {
-                if metrics >= storage {
+            if let Some(storage) = position(events, Event::ConsensusStorageOpened) {
+                if position(events, Event::MetricsTaskSpawned)
+                    .is_none_or(|metrics| metrics >= storage)
+                {
                     violations.push(Violation::NormalMetricsStorageOrder);
                 }
             }
@@ -378,6 +397,11 @@ fn refused(record: RecordObservation, identity: IdentityClaims) -> Event {
         identity,
         decision: ClassificationDecision::Refuse,
     }
+}
+
+fn untrusted_admission_guard_assertion(violations: &[Violation]) -> bool {
+    violations.contains(&Violation::IdentityCannotSupportAdmission)
+        && violations.contains(&Violation::ParticipationWithoutAdmission)
 }
 
 #[test]
@@ -518,6 +542,126 @@ fn normal_metrics_task_must_precede_consensus_storage() {
     ];
     let violations = check_trace(Route::NormalWithDataDir, &reversed);
     assert!(violations.contains(&Violation::NormalMetricsStorageOrder));
+}
+
+#[test]
+fn normal_consensus_storage_requires_a_preceding_metrics_task() {
+    let omitted = [
+        Event::DataDirectoryCreated,
+        Event::NormalDestinationOwned,
+        admitted(IdentityClaims::synthetic_trusted()),
+        Event::ConsensusStorageOpened,
+    ];
+    assert!(check_trace(Route::NormalWithDataDir, &omitted)
+        .contains(&Violation::NormalMetricsStorageOrder));
+
+    let valid_refusal = [
+        Event::DataDirectoryCreated,
+        Event::NormalDestinationOwned,
+        refused(
+            RecordObservation::Unresolved,
+            IdentityClaims::synthetic_trusted(),
+        ),
+        Event::Exit,
+    ];
+    assert!(check_trace(Route::NormalWithDataDir, &valid_refusal).is_empty());
+}
+
+#[test]
+fn exits_are_terminal_but_not_required_for_continuing_traces() {
+    let premature_exit = [
+        Event::DataDirectoryCreated,
+        Event::NormalDestinationOwned,
+        admitted(IdentityClaims::synthetic_trusted()),
+        Event::MetricsTaskSpawned,
+        Event::Exit,
+        Event::ConsensusStorageOpened,
+    ];
+    assert!(
+        check_trace(Route::NormalWithDataDir, &premature_exit).contains(&Violation::ExitNotLast)
+    );
+
+    let duplicate_exit = [
+        Event::DataDirectoryCreated,
+        Event::NormalDestinationOwned,
+        admitted(IdentityClaims::synthetic_trusted()),
+        Event::Exit,
+        Event::Exit,
+    ];
+    assert!(
+        check_trace(Route::NormalWithDataDir, &duplicate_exit).contains(&Violation::DuplicateExit)
+    );
+
+    let continuing = [
+        Event::DataDirectoryCreated,
+        Event::NormalDestinationOwned,
+        admitted(IdentityClaims::synthetic_trusted()),
+        Event::MetricsTaskSpawned,
+        Event::ConsensusStorageOpened,
+    ];
+    assert!(check_trace(Route::NormalWithDataDir, &continuing).is_empty());
+
+    let terminal_refusal = [
+        Event::DataDirectoryCreated,
+        Event::NormalDestinationOwned,
+        refused(
+            RecordObservation::Unresolved,
+            IdentityClaims::synthetic_trusted(),
+        ),
+        Event::Exit,
+    ];
+    assert!(check_trace(Route::NormalWithDataDir, &terminal_refusal).is_empty());
+}
+
+#[test]
+fn forced_admission_with_nontrusted_identity_is_rejected_by_identity_guard() {
+    for evidence in [
+        IdentityEvidence::Unavailable,
+        IdentityEvidence::Untrusted,
+        IdentityEvidence::DisplayFingerprintOnly,
+    ] {
+        for field in 0..4 {
+            let mut identity = IdentityClaims::synthetic_trusted();
+            match field {
+                0 => identity.destination = evidence,
+                1 => identity.chain = evidence,
+                2 => identity.genesis = evidence,
+                _ => identity.signer = evidence,
+            }
+            let forced_admission = [
+                Event::DataDirectoryCreated,
+                Event::NormalDestinationOwned,
+                admitted(identity),
+                Event::MetricsTaskSpawned,
+                Event::ConsensusStorageOpened,
+                Event::ParticipationAuthorityProduced,
+            ];
+
+            let guarded =
+                check_trace_with_identity_guard(Route::NormalWithDataDir, &forced_admission, true);
+            assert!(
+                guarded.contains(&Violation::IdentityCannotSupportAdmission),
+                "identity guard violation missing for {field}={evidence:?}"
+            );
+            assert!(
+                guarded.contains(&Violation::ParticipationWithoutAdmission),
+                "participation was accepted for {field}={evidence:?}"
+            );
+            assert!(untrusted_admission_guard_assertion(&guarded));
+
+            let bypassed =
+                check_trace_with_identity_guard(Route::NormalWithDataDir, &forced_admission, false);
+            assert!(!bypassed.contains(&Violation::IdentityCannotSupportAdmission));
+            assert!(
+                bypassed.contains(&Violation::ParticipationWithoutAdmission),
+                "independent participation check should still refuse {field}={evidence:?}"
+            );
+            assert!(
+                !untrusted_admission_guard_assertion(&bypassed),
+                "identity-guard assertion unexpectedly passes when the guard is bypassed"
+            );
+        }
+    }
 }
 
 #[test]

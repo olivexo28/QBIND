@@ -45,16 +45,21 @@ route evidence and SRM-1/2 outputs are included here, rather than being
 available only on the originating branch. The SRM-3 evidence and outputs are
 also included. No raw historical log was edited or regenerated.
 
-The first package checks ran against commit
+The committed author outputs at
 `677284995048d9ec1a6c7ea098f0b934f745d371`, tree
-`f794e424945d4e22b4156d4c83f37593c2d1d27a`. The focused command passed
-13/13; the compile-only command passed with exit code 0. Complete outputs,
-including environment and exit codes, are retained in the two package
-validation output files above. Those output files and this record are
-evidence-only additions after the initial run. The final package commit is
-validated again after those additions; its exact final-run outputs and
-revision are reported with the package endpoint. No test or build input
-changed between the initial and final package checks.
+`f794e424945d4e22b4156d4c83f37593c2d1d27a`, report 13/13 focused tests and
+a successful compile-only check. Those complete committed outputs, including
+their commands, environment and exit codes, are retained in the two package
+validation output files above. Test and build inputs were unchanged through
+the final package endpoint `77b842857fc914474f3d4b1fefa4fddfaa0610cd`.
+
+A separately reported run against that final endpoint, and the exact bytes
+attributed to that run, remain **AUTHOR-REPORTED AND UNVERIFIED**. Earlier
+pasted output text and later-supplied output files had discrepancies; these
+remain evidence limitations and do not supersede the committed author
+outputs above. The output-transfer investigation is CLOSED. This record
+does not request or reconstruct the earlier ZIP, and this correction does
+not rerun those earlier final-tree checks.
 
 ## Historical attribution and TDI-1 boundary
 
