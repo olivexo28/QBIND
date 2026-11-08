@@ -1,0 +1,101 @@
+command: cargo test --release -p qbind-net --test transport_frame_decoder_baseline_tests --test transport_frame_tests --test framed_io_tests
+working_directory: /workspaces/QBIND/olivexo28/QBIND
+mode: release
+   Compiling typenum v1.19.0
+   Compiling version_check v0.9.5
+   Compiling libc v0.2.178
+   Compiling generic-array v0.14.7
+   Compiling cfg-if v1.0.4
+   Compiling getrandom v0.2.16
+   Compiling rand_core v0.6.4
+   Compiling subtle v2.6.1
+   Compiling crypto-common v0.1.7
+   Compiling proc-macro2 v1.0.104
+   Compiling unicode-ident v1.0.22
+   Compiling quote v1.0.42
+   Compiling block-buffer v0.10.4
+   Compiling digest v0.10.7
+   Compiling cpufeatures v0.2.17
+   Compiling syn v2.0.112
+   Compiling keccak v0.1.5
+   Compiling sha3 v0.10.8
+   Compiling inout v0.1.4
+   Compiling sha2 v0.10.9
+   Compiling universal-hash v0.5.1
+   Compiling base64ct v1.8.3
+   Compiling opaque-debug v0.3.1
+   Compiling qbind-types v0.1.0 (/workspaces/QBIND/olivexo28/QBIND/crates/qbind-types)
+   Compiling qbind-wire v0.1.0 (/workspaces/QBIND/olivexo28/QBIND/crates/qbind-wire)
+   Compiling zeroize_derive v1.4.3
+   Compiling zeroize v1.8.2
+   Compiling cipher v0.4.4
+   Compiling poly1305 v0.8.0
+   Compiling chacha20 v0.9.1
+   Compiling password-hash v0.5.0
+   Compiling hmac v0.12.1
+   Compiling aead v0.5.2
+   Compiling chacha20poly1305 v0.10.1
+   Compiling pbkdf2 v0.12.2
+   Compiling fips204 v0.4.6
+   Compiling fips203 v0.4.3
+   Compiling qbind-hash v0.1.0 (/workspaces/QBIND/olivexo28/QBIND/crates/qbind-hash)
+   Compiling qbind-crypto v0.1.0 (/workspaces/QBIND/olivexo28/QBIND/crates/qbind-crypto)
+   Compiling qbind-net v0.1.0 (/workspaces/QBIND/olivexo28/QBIND/crates/qbind-net)
+    Finished `release` profile [optimized] target(s) in 11.08s
+     Running tests/framed_io_tests.rs (target/release/deps/framed_io_tests-87254e823dfa6942)
+
+running 22 tests
+test test_handshake_empty_payload ... ok
+test test_handshake_length_exceeds_max ... ok
+test test_handshake_max_valid_payload ... ok
+test test_handshake_read_with_fragmented_stream_chunk_1 ... ok
+test test_handshake_read_with_fragmented_stream_chunk_2 ... ok
+test test_handshake_roundtrip ... ok
+test test_handshake_roundtrip_with_cursor ... ok
+test test_multiple_handshake_packets_sequential ... ok
+test test_multiple_transport_frames_sequential ... ok
+test test_transport_empty_ciphertext ... ok
+test test_transport_length_exceeds_max ... ok
+test test_transport_read_with_fragmented_stream_chunk_1 ... ok
+test test_transport_read_with_fragmented_stream_chunk_2 ... ok
+test test_transport_roundtrip ... ok
+test test_transport_roundtrip_with_cursor ... ok
+test test_truncated_handshake_header_1_byte ... ok
+test test_truncated_handshake_header_2_bytes ... ok
+test test_truncated_handshake_payload ... ok
+test test_truncated_transport_header_1_byte ... ok
+test test_truncated_transport_header_4_bytes ... ok
+test test_truncated_transport_payload ... ok
+test test_transport_large_ciphertext ... ok
+
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/transport_frame_decoder_baseline_tests.rs (target/release/deps/transport_frame_decoder_baseline_tests-13ea7eb01dec1f97)
+
+running 5 tests
+test header_only_boundary_lengths_return_truncation_when_endpoint_is_representable ... ok
+test short_headers_return_the_existing_error ... ok
+test trailing_bytes_after_declared_payload_are_ignored ... ok
+test truncated_payload_returns_the_existing_error ... ok
+test valid_frame_round_trips_through_the_public_decoder ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/transport_frame_tests.rs (target/release/deps/transport_frame_tests-a7773999a006bd4b)
+
+running 10 tests
+test decode_empty_buffer_returns_error ... ok
+test decode_roundtrip_with_various_sizes ... ok
+test decode_truncated_header_returns_error ... ok
+test decode_truncated_payload_returns_error ... ok
+test decrypt_unexpected_msg_type_returns_error ... ok
+test encode_max_u32_ciphertext_length_succeeds ... ok
+test encode_too_large_ciphertext_length_check_is_wired ... ok
+test roundtrip_both_directions_have_independent_counters ... ok
+test roundtrip_c2s_direction ... ok
+test roundtrip_s2c_direction ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+exit_code=0
