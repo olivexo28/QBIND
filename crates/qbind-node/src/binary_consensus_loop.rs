@@ -26426,7 +26426,11 @@ mod tests {
                             live_children: usize,
                             permits: usize,
                             permit_observed: bool,
+                            any_permit_observed: bool,
                             request_refused_before_effect: bool,
+                            observations_valid: bool,
+                            unresolved_effect_observed: bool,
+                            unpermitted_effect_observed: bool,
                             wrapper_entries: usize,
                             underlying_calls: usize,
                             signature_generated: bool,
@@ -26449,7 +26453,11 @@ mod tests {
                                         live_children: 0,
                                         permits: 0,
                                         permit_observed: false,
+                                        any_permit_observed: false,
                                         request_refused_before_effect: false,
+                                        observations_valid: true,
+                                        unresolved_effect_observed: false,
+                                        unpermitted_effect_observed: false,
                                         wrapper_entries: 0,
                                         underlying_calls: 0,
                                         signature_generated: false,
@@ -26466,6 +26474,8 @@ mod tests {
                                     return false;
                                 }
                                 state.outstanding += 1;
+                                state.permit_observed = false;
+                                state.function_completed = false;
                                 true
                             }
 
@@ -26502,6 +26512,7 @@ mod tests {
                                 }
                                 state.permits = 1;
                                 state.permit_observed = true;
+                                state.any_permit_observed = true;
                                 true
                             }
 
@@ -26514,11 +26525,27 @@ mod tests {
                             }
 
                             fn wrapper_entered(&self) {
-                                self.state.lock().unwrap().wrapper_entries += 1;
+                                let mut state = self.state.lock().unwrap();
+                                if let Some(count) = state.wrapper_entries.checked_add(1) {
+                                    state.wrapper_entries = count;
+                                } else {
+                                    state.observations_valid = false;
+                                }
                             }
 
                             fn signer_invoked(&self) {
-                                self.state.lock().unwrap().underlying_calls += 1;
+                                let mut state = self.state.lock().unwrap();
+                                if let Some(count) = state.underlying_calls.checked_add(1) {
+                                    state.underlying_calls = count;
+                                } else {
+                                    state.observations_valid = false;
+                                }
+                                if state.outstanding != 1 {
+                                    state.observations_valid = false;
+                                }
+                                if !state.permit_observed {
+                                    state.unpermitted_effect_observed = true;
+                                }
                             }
 
                             fn signature_generated(&self) {
@@ -26532,7 +26559,9 @@ mod tests {
                             }
 
                             fn signer_error_after_invocation(&self) {
-                                self.state.lock().unwrap().outcome = EffectOutcome::UnknownAfterInvocation;
+                                let mut state = self.state.lock().unwrap();
+                                state.outcome = EffectOutcome::UnknownAfterInvocation;
+                                state.unresolved_effect_observed = true;
                             }
 
                             fn function_completed(&self) {
@@ -26561,7 +26590,9 @@ mod tests {
                                     && state.outstanding == 0
                                     && state.live_executors == 0
                                     && state.permits == 0
-                                    && (state.underlying_calls == 0 || state.permit_observed)
+                                    && state.observations_valid
+                                    && !state.unpermitted_effect_observed
+                                    && !state.unresolved_effect_observed
                                     && state.outcome != EffectOutcome::UnknownAfterInvocation
                             }
 
@@ -26570,7 +26601,25 @@ mod tests {
                                 if !state.accepting || state.outstanding == 0 || state.permits != 0 {
                                     state.request_refused_before_effect = true;
                                     state.outcome = EffectOutcome::RefusedBeforeEffect;
+                                    state.unresolved_effect_observed = false;
                                 }
+                            }
+
+                            fn overwrite_unknown_with_success_mutant(&self) {
+                                let mut state = self.state.lock().unwrap();
+                                state.outcome = EffectOutcome::SignatureReturned;
+                                state.unresolved_effect_observed = false;
+                            }
+
+                            fn aggregate_permit_association_mutant(&self) -> bool {
+                                let state = self.state.lock().unwrap();
+                                !state.accepting
+                                    && state.outstanding == 0
+                                    && state.live_executors == 0
+                                    && state.permits == 0
+                                    && state.observations_valid
+                                    && state.any_permit_observed
+                                    && !state.unresolved_effect_observed
                             }
                         }
 
@@ -26825,6 +26874,26 @@ mod tests {
                             use_snapshot: bool,
                             facade: &LifecycleFacade,
                         ) -> BinaryConsensusLoopInboundStats {
+                            let stats = run_inline_operation(
+                                fixture,
+                                owner,
+                                physical,
+                                signer,
+                                use_snapshot,
+                                facade,
+                            );
+                            owner.revoke();
+                            stats
+                        }
+
+                        fn run_inline_operation(
+                            fixture: &mut Fixture,
+                            owner: &TimeoutOwner,
+                            physical: &Arc<PhysicalExecutors>,
+                            signer: Arc<LifecycleSigner>,
+                            use_snapshot: bool,
+                            facade: &LifecycleFacade,
+                        ) -> BinaryConsensusLoopInboundStats {
                             assert!(owner.admit(), "bounded operation slot admitted");
                             assert!(owner.worker_started(), "worker ownership recorded");
                             let _physical = physical.enter();
@@ -26844,7 +26913,6 @@ mod tests {
                                 current_auth,
                                 Some(&ctx),
                             );
-                            owner.revoke();
                             owner.function_completed();
                             drop(_physical);
                             owner.worker_terminated();
@@ -27122,6 +27190,228 @@ mod tests {
                             assert!(
                                 mutant_owner.closure_safe(),
                                 "sensitivity mutant reproduces the unsafe Unknown overwrite"
+                            );
+                        }
+
+                        #[test]
+                        fn sequential_success_does_not_clear_unknown_and_detects_overwrite_mutant() {
+                            let owner = TimeoutOwner::new();
+                            let physical = Arc::new(PhysicalExecutors::default());
+                            let mut failed = make_f7_fixture();
+                            failed
+                                .engine
+                                .state_mut()
+                                .set_locked_qc(failed.logical_qc.clone());
+                            assert!(owner.admit());
+                            let (signer, _, _) = LifecycleSigner::new(
+                                &failed,
+                                owner.clone(),
+                                SignMode::ErrorAfterInvocation,
+                                None,
+                            );
+                            let (handle, completed_rx, terminated_rx, release_tx) = spawn_paused(
+                                failed,
+                                owner.clone(),
+                                physical.clone(),
+                                signer,
+                                LifecycleFacade::default(),
+                            );
+                            completed_rx
+                                .recv_timeout(TEST_WAIT)
+                                .expect("first actual Timeout function completed");
+                            terminated_rx
+                                .recv_timeout(TEST_WAIT)
+                                .expect("first worker reached termination barrier");
+                            assert!(owner.admission_is_open());
+                            assert_eq!(owner.state.lock().unwrap().outstanding, 1);
+                            assert_eq!(physical.count(), 1);
+                            release_tx.send(()).unwrap();
+                            handle.join().unwrap();
+                            owner.worker_terminated();
+                            {
+                                let state = owner.state.lock().unwrap();
+                                assert_eq!(state.outstanding, 0);
+                                assert_eq!(state.underlying_calls, 1);
+                                assert!(state.unresolved_effect_observed);
+                                assert_eq!(state.outcome, EffectOutcome::UnknownAfterInvocation);
+                            }
+                            assert!(owner.admission_is_open());
+
+                            let mut succeeded = make_f7_fixture();
+                            succeeded
+                                .engine
+                                .state_mut()
+                                .set_locked_qc(succeeded.logical_qc.clone());
+                            assert!(owner.admit(), "same owner admits the next operation");
+                            let (signer, _, _) = LifecycleSigner::new(
+                                &succeeded,
+                                owner.clone(),
+                                SignMode::Return,
+                                None,
+                            );
+                            let (handle, completed_rx, terminated_rx, release_tx) = spawn_paused(
+                                succeeded,
+                                owner.clone(),
+                                physical.clone(),
+                                signer,
+                                LifecycleFacade::default(),
+                            );
+                            completed_rx
+                                .recv_timeout(TEST_WAIT)
+                                .expect("second actual Timeout function completed");
+                            terminated_rx
+                                .recv_timeout(TEST_WAIT)
+                                .expect("second worker reached termination barrier");
+                            assert!(owner.admission_is_open());
+                            assert_eq!(physical.count(), 1);
+                            release_tx.send(()).unwrap();
+                            handle.join().unwrap();
+                            owner.worker_terminated();
+                            {
+                                let state = owner.state.lock().unwrap();
+                                assert_eq!(state.outstanding, 0);
+                                assert_eq!(state.underlying_calls, 2);
+                                assert!(state.permit_observed);
+                                assert!(state.unresolved_effect_observed);
+                                assert_eq!(state.outcome, EffectOutcome::SignatureReturned);
+                            }
+                            owner.revoke();
+                            assert!(!owner.closure_safe());
+
+                            let mutant_owner = TimeoutOwner::new();
+                            let physical = Arc::new(PhysicalExecutors::default());
+                            let mut failed = make_f7_fixture();
+                            failed
+                                .engine
+                                .state_mut()
+                                .set_locked_qc(failed.logical_qc.clone());
+                            assert!(mutant_owner.admit());
+                            let (signer, _, _) = LifecycleSigner::new(
+                                &failed,
+                                mutant_owner.clone(),
+                                SignMode::ErrorAfterInvocation,
+                                None,
+                            );
+                            let (handle, completed_rx, terminated_rx, release_tx) = spawn_paused(
+                                failed,
+                                mutant_owner.clone(),
+                                physical.clone(),
+                                signer,
+                                LifecycleFacade::default(),
+                            );
+                            completed_rx.recv_timeout(TEST_WAIT).unwrap();
+                            terminated_rx.recv_timeout(TEST_WAIT).unwrap();
+                            release_tx.send(()).unwrap();
+                            handle.join().unwrap();
+                            mutant_owner.worker_terminated();
+
+                            let mut succeeded = make_f7_fixture();
+                            succeeded
+                                .engine
+                                .state_mut()
+                                .set_locked_qc(succeeded.logical_qc.clone());
+                            assert!(mutant_owner.admit());
+                            let (signer, _, _) = LifecycleSigner::new(
+                                &succeeded,
+                                mutant_owner.clone(),
+                                SignMode::Return,
+                                None,
+                            );
+                            let (handle, completed_rx, terminated_rx, release_tx) = spawn_paused(
+                                succeeded,
+                                mutant_owner.clone(),
+                                physical,
+                                signer,
+                                LifecycleFacade::default(),
+                            );
+                            completed_rx.recv_timeout(TEST_WAIT).unwrap();
+                            terminated_rx.recv_timeout(TEST_WAIT).unwrap();
+                            release_tx.send(()).unwrap();
+                            handle.join().unwrap();
+                            mutant_owner.worker_terminated();
+                            mutant_owner.revoke();
+                            assert!(!mutant_owner.closure_safe());
+                            mutant_owner.overwrite_unknown_with_success_mutant();
+                            assert!(
+                                mutant_owner.closure_safe(),
+                                "same checker detects loss of sticky Unknown under overwrite mutant"
+                            );
+                        }
+
+                        #[test]
+                        fn prior_permit_does_not_authorize_later_effect_and_detects_aggregate_mutant() {
+                            let owner = TimeoutOwner::new();
+                            let physical = Arc::new(PhysicalExecutors::default());
+                            let first = make_f7_fixture();
+                            assert!(owner.admit());
+                            let (signer, _, _) = LifecycleSigner::new(
+                                &first,
+                                owner.clone(),
+                                SignMode::Return,
+                                None,
+                            );
+                            let (handle, completed_rx, terminated_rx, release_tx) = spawn_paused(
+                                first,
+                                owner.clone(),
+                                physical.clone(),
+                                signer,
+                                LifecycleFacade::default(),
+                            );
+                            completed_rx.recv_timeout(TEST_WAIT).unwrap();
+                            terminated_rx.recv_timeout(TEST_WAIT).unwrap();
+                            release_tx.send(()).unwrap();
+                            handle.join().unwrap();
+                            owner.worker_terminated();
+                            {
+                                let state = owner.state.lock().unwrap();
+                                assert!(state.any_permit_observed);
+                                assert!(state.permit_observed);
+                                assert!(!state.unpermitted_effect_observed);
+                            }
+
+                            let mut second = make_f7_fixture();
+                            second
+                                .engine
+                                .state_mut()
+                                .set_locked_qc(second.logical_qc.clone());
+                            assert!(owner.admit());
+                            let (release_signer_tx, release_signer_rx) = mpsc::channel();
+                            let (signer, entry_rx, _) = LifecycleSigner::new(
+                                &second,
+                                owner.clone(),
+                                SignMode::UnsafeCachedAdmission,
+                                Some((PausePoint::BeforePermit, release_signer_rx)),
+                            );
+                            let (handle, completed_rx, terminated_rx, release_worker_tx) = spawn_paused(
+                                second,
+                                owner.clone(),
+                                physical.clone(),
+                                signer,
+                                LifecycleFacade::default(),
+                            );
+                            entry_rx
+                                .recv_timeout(TEST_WAIT)
+                                .expect("second actual Timeout call reached signer");
+                            owner.revoke();
+                            release_signer_tx.send(()).unwrap();
+                            completed_rx.recv_timeout(TEST_WAIT).unwrap();
+                            terminated_rx.recv_timeout(TEST_WAIT).unwrap();
+                            assert_eq!(physical.count(), 1);
+                            release_worker_tx.send(()).unwrap();
+                            handle.join().unwrap();
+                            owner.worker_terminated();
+                            {
+                                let state = owner.state.lock().unwrap();
+                                assert_eq!(state.underlying_calls, 2);
+                                assert!(state.any_permit_observed, "first permit remains historical");
+                                assert!(!state.permit_observed, "current operation acquired no permit");
+                                assert!(state.unpermitted_effect_observed);
+                                assert!(state.signature_returned);
+                            }
+                            assert!(!owner.closure_safe());
+                            assert!(
+                                owner.aggregate_permit_association_mutant(),
+                                "sensitivity mutant incorrectly reuses the first operation's permit"
                             );
                         }
 
