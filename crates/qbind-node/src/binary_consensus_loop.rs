@@ -26426,10 +26426,12 @@ mod tests {
                             live_children: usize,
                             permits: usize,
                             permit_observed: bool,
+                            request_refused_before_effect: bool,
                             wrapper_entries: usize,
                             underlying_calls: usize,
                             signature_generated: bool,
                             signature_returned: bool,
+                            function_completed: bool,
                             outcome: EffectOutcome,
                         }
 
@@ -26447,10 +26449,12 @@ mod tests {
                                         live_children: 0,
                                         permits: 0,
                                         permit_observed: false,
+                                        request_refused_before_effect: false,
                                         wrapper_entries: 0,
                                         underlying_calls: 0,
                                         signature_generated: false,
                                         signature_returned: false,
+                                        function_completed: false,
                                         outcome: EffectOutcome::NotInvoked,
                                     }),
                                 })
@@ -26484,7 +26488,7 @@ mod tests {
                                 true
                             }
 
-                            fn child_finished(&self) {
+                            fn child_terminated(&self) {
                                 let mut state = self.state.lock().unwrap();
                                 state.live_executors -= 1;
                                 state.live_children -= 1;
@@ -26493,7 +26497,7 @@ mod tests {
                             fn acquire_effect_permit(&self) -> bool {
                                 let mut state = self.state.lock().unwrap();
                                 if !state.accepting || state.outstanding == 0 || state.permits != 0 {
-                                    state.outcome = EffectOutcome::RefusedBeforeEffect;
+                                    state.request_refused_before_effect = true;
                                     return false;
                                 }
                                 state.permits = 1;
@@ -26531,31 +26535,42 @@ mod tests {
                                 self.state.lock().unwrap().outcome = EffectOutcome::UnknownAfterInvocation;
                             }
 
-                            fn finish_operation(&self) {
+                            fn function_completed(&self) {
+                                self.state.lock().unwrap().function_completed = true;
+                            }
+
+                            fn worker_terminated(&self) {
                                 let mut state = self.state.lock().unwrap();
+                                assert!(state.function_completed);
                                 state.outstanding -= 1;
                                 state.live_executors -= 1;
                                 state.permits = 0;
                             }
 
-                            fn local_quiescent(&self, physical_executors: usize) -> bool {
+                            fn local_quiescent(&self) -> bool {
                                 let state = self.state.lock().unwrap();
                                 !state.accepting
                                     && state.outstanding == 0
                                     && state.live_executors == 0
                                     && state.permits == 0
-                                    && physical_executors == 0
                             }
 
-                            fn closure_safe(&self, physical_executors: usize) -> bool {
+                            fn closure_safe(&self) -> bool {
                                 let state = self.state.lock().unwrap();
                                 !state.accepting
                                     && state.outstanding == 0
                                     && state.live_executors == 0
                                     && state.permits == 0
-                                    && physical_executors == 0
                                     && (state.underlying_calls == 0 || state.permit_observed)
                                     && state.outcome != EffectOutcome::UnknownAfterInvocation
+                            }
+
+                            fn denied_permit_overwrite_mutant(&self) {
+                                let mut state = self.state.lock().unwrap();
+                                if !state.accepting || state.outstanding == 0 || state.permits != 0 {
+                                    state.request_refused_before_effect = true;
+                                    state.outcome = EffectOutcome::RefusedBeforeEffect;
+                                }
                             }
                         }
 
@@ -26830,8 +26845,9 @@ mod tests {
                                 Some(&ctx),
                             );
                             owner.revoke();
+                            owner.function_completed();
                             drop(_physical);
-                            owner.finish_operation();
+                            owner.worker_terminated();
                             stats
                         }
 
@@ -26841,8 +26857,15 @@ mod tests {
                             physical: Arc<PhysicalExecutors>,
                             signer: Arc<LifecycleSigner>,
                             facade: LifecycleFacade,
-                        ) -> (std::thread::JoinHandle<()>, Receiver<()>) {
+                        ) -> (
+                            std::thread::JoinHandle<()>,
+                            Receiver<()>,
+                            Receiver<()>,
+                            Sender<()>,
+                        ) {
                             let (completed_tx, completed_rx) = mpsc::channel();
+                            let (termination_barrier_tx, termination_barrier_rx) = mpsc::channel();
+                            let (termination_release_tx, termination_release_rx) = mpsc::channel();
                             let handle = std::thread::spawn(move || {
                                 assert!(owner.worker_started());
                                 let physical_lease = physical.enter();
@@ -26862,11 +26885,20 @@ mod tests {
                                     Some(&fixture.snapshot),
                                     Some(&ctx),
                                 );
-                                drop(physical_lease);
-                                owner.finish_operation();
+                                owner.function_completed();
                                 let _ = completed_tx.send(());
+                                let _ = termination_barrier_tx.send(());
+                                termination_release_rx
+                                    .recv_timeout(TEST_WAIT)
+                                    .expect("test observes and releases worker termination barrier");
+                                drop(physical_lease);
                             });
-                            (handle, completed_rx)
+                            (
+                                handle,
+                                completed_rx,
+                                termination_barrier_rx,
+                                termination_release_tx,
+                            )
                         }
 
                         #[test]
@@ -26925,8 +26957,9 @@ mod tests {
                                 .unwrap()
                                 .iter()
                                 .any(|m| matches!(m, ConsensusNetMsg::Timeout(_))));
-                            assert!(owner.local_quiescent(physical.count()));
-                            assert!(owner.closure_safe(physical.count()));
+                            assert_eq!(physical.count(), 0);
+                            assert!(owner.local_quiescent());
+                            assert!(owner.closure_safe());
                         }
 
                         #[test]
@@ -26956,8 +26989,18 @@ mod tests {
                             assert_eq!(state.outcome, EffectOutcome::UnknownAfterInvocation);
                             drop(state);
                             assert_eq!(stats.outbound_timeout_signing_failure, 1);
-                            assert!(owner.local_quiescent(physical.count()));
-                            assert!(!owner.closure_safe(physical.count()));
+                            assert_eq!(physical.count(), 0);
+                            assert!(owner.local_quiescent());
+                            assert!(!owner.closure_safe());
+                            assert!(!owner.acquire_effect_permit());
+                            let state = owner.state.lock().unwrap();
+                            assert!(state.request_refused_before_effect);
+                            assert_eq!(state.underlying_calls, 1);
+                            assert!(state.signature_generated);
+                            assert!(!state.signature_returned);
+                            assert_eq!(state.outcome, EffectOutcome::UnknownAfterInvocation);
+                            drop(state);
+                            assert!(!owner.closure_safe());
 
                             let mut invalid = make_f7_fixture();
                             invalid
@@ -27013,6 +27056,76 @@ mod tests {
                         }
 
                         #[test]
+                        fn denied_permit_preserves_unknown_and_detects_overwrite_mutant() {
+                            let mut fixture = make_f7_fixture();
+                            fixture
+                                .engine
+                                .state_mut()
+                                .set_locked_qc(fixture.logical_qc.clone());
+                            let owner = TimeoutOwner::new();
+                            let physical = Arc::new(PhysicalExecutors::default());
+                            let (signer, _, _) = LifecycleSigner::new(
+                                &fixture,
+                                owner.clone(),
+                                SignMode::ErrorAfterInvocation,
+                                None,
+                            );
+                            run_inline(
+                                &mut fixture,
+                                &owner,
+                                &physical,
+                                signer,
+                                true,
+                                &LifecycleFacade::default(),
+                            );
+                            assert_eq!(
+                                owner.state.lock().unwrap().outcome,
+                                EffectOutcome::UnknownAfterInvocation
+                            );
+                            assert!(!owner.acquire_effect_permit());
+                            let state = owner.state.lock().unwrap();
+                            assert!(state.request_refused_before_effect);
+                            assert_eq!(state.underlying_calls, 1);
+                            assert!(state.signature_generated);
+                            assert!(!state.signature_returned);
+                            assert_eq!(state.outcome, EffectOutcome::UnknownAfterInvocation);
+                            drop(state);
+                            assert!(!owner.closure_safe());
+
+                            let mut mutant_fixture = make_f7_fixture();
+                            mutant_fixture
+                                .engine
+                                .state_mut()
+                                .set_locked_qc(mutant_fixture.logical_qc.clone());
+                            let mutant_owner = TimeoutOwner::new();
+                            let physical = Arc::new(PhysicalExecutors::default());
+                            let (signer, _, _) = LifecycleSigner::new(
+                                &mutant_fixture,
+                                mutant_owner.clone(),
+                                SignMode::ErrorAfterInvocation,
+                                None,
+                            );
+                            run_inline(
+                                &mut mutant_fixture,
+                                &mutant_owner,
+                                &physical,
+                                signer,
+                                true,
+                                &LifecycleFacade::default(),
+                            );
+                            assert!(!mutant_owner.acquire_effect_permit());
+                            mutant_owner.denied_permit_overwrite_mutant();
+                            assert_eq!(
+                                mutant_owner.state.lock().unwrap().outcome,
+                                EffectOutcome::RefusedBeforeEffect
+                            );
+                            assert!(
+                                mutant_owner.closure_safe(),
+                                "sensitivity mutant reproduces the unsafe Unknown overwrite"
+                            );
+                        }
+
+                        #[test]
                         fn revocation_order_and_cancelled_waiter_preserve_worker_ownership() {
                             let fixture = make_f7_fixture();
                             let owner = TimeoutOwner::new();
@@ -27025,7 +27138,7 @@ mod tests {
                                 SignMode::Return,
                                 Some((PausePoint::BeforePermit, release_rx)),
                             );
-                            let (handle, _) = spawn_paused(
+                            let (handle, _waiter_rx, termination_rx, termination_release_tx) = spawn_paused(
                                 fixture,
                                 owner.clone(),
                                 physical.clone(),
@@ -27037,13 +27150,23 @@ mod tests {
                                 .expect("actual path reached signer");
                             owner.revoke();
                             release_tx.send(()).unwrap();
+                            termination_rx
+                                .recv_timeout(TEST_WAIT)
+                                .expect("refused call completed before worker termination");
+                            assert_eq!(physical.count(), 1);
+                            assert!(!owner.local_quiescent());
+                            termination_release_tx.send(()).unwrap();
                             handle.join().unwrap();
+                            owner.worker_terminated();
+                            assert_eq!(physical.count(), 0);
                             let state = owner.state.lock().unwrap();
                             assert_eq!(state.wrapper_entries, 1);
                             assert_eq!(state.underlying_calls, 0);
-                            assert_eq!(state.outcome, EffectOutcome::RefusedBeforeEffect);
+                            assert!(state.request_refused_before_effect);
+                            assert_eq!(state.outcome, EffectOutcome::NotInvoked);
                             drop(state);
-                            assert!(owner.local_quiescent(physical.count()));
+                            assert!(owner.local_quiescent());
+                            assert!(owner.closure_safe());
 
                             let fixture = make_f7_fixture();
                             let owner = TimeoutOwner::new();
@@ -27056,7 +27179,7 @@ mod tests {
                                 SignMode::Return,
                                 Some((PausePoint::AfterPermit, release_rx)),
                             );
-                            let (handle, completion_rx) = spawn_paused(
+                            let (handle, waiter_rx, termination_rx, termination_release_tx) = spawn_paused(
                                 fixture,
                                 owner.clone(),
                                 physical.clone(),
@@ -27067,17 +27190,30 @@ mod tests {
                                 .recv_timeout(TEST_WAIT)
                                 .expect("effect permit acquired before signer call");
                             owner.revoke();
-                            drop(completion_rx); // waiter cancellation is not executor cancellation
-                            assert!(!owner.local_quiescent(physical.count()));
+                            drop(waiter_rx); // waiter cancellation is not executor cancellation
+                            assert!(!owner.local_quiescent());
                             assert_eq!(physical.count(), 1);
                             release_tx.send(()).unwrap();
+                            termination_rx
+                                .recv_timeout(TEST_WAIT)
+                                .expect("Timeout function completed before worker termination");
+                            let state = owner.state.lock().unwrap();
+                            assert!(state.function_completed);
+                            assert_eq!(state.outstanding, 1);
+                            assert_eq!(state.live_executors, 1);
+                            drop(state);
+                            assert!(!owner.local_quiescent());
+                            assert_eq!(physical.count(), 1);
+                            termination_release_tx.send(()).unwrap();
                             handle.join().unwrap();
+                            owner.worker_terminated();
                             let state = owner.state.lock().unwrap();
                             assert_eq!(state.underlying_calls, 1);
                             assert!(state.signature_returned);
                             drop(state);
                             assert_eq!(physical.count(), 0);
-                            assert!(owner.local_quiescent(physical.count()));
+                            assert!(owner.local_quiescent());
+                            assert!(owner.closure_safe());
                         }
 
                         #[test]
@@ -27107,13 +27243,22 @@ mod tests {
                                 .recv_timeout(TEST_WAIT)
                                 .expect("tracked child started");
                             owner.revoke();
-                            owner.finish_operation();
-                            assert!(!owner.local_quiescent(physical.count()));
+                            owner.function_completed();
+                            drop(worker);
+                            owner.worker_terminated();
+                            assert_eq!(physical.count(), 1, "tracked child is the sole live executor");
+                            {
+                                let state = owner.state.lock().unwrap();
+                                assert_eq!(state.outstanding, 0);
+                                assert_eq!(state.live_executors, 1);
+                                assert_eq!(state.live_children, 1);
+                            }
+                            assert!(!owner.local_quiescent());
                             child_release_tx.send(()).unwrap();
                             child_handle.join().unwrap();
-                            owner.child_finished();
-                            drop(worker);
-                            assert!(owner.local_quiescent(physical.count()));
+                            owner.child_terminated();
+                            assert_eq!(physical.count(), 0);
+                            assert!(owner.local_quiescent());
 
                             let owner = TimeoutOwner::new();
                             assert!(owner.admit());
@@ -27134,15 +27279,18 @@ mod tests {
                                 .recv_timeout(TEST_WAIT)
                                 .expect("untracked child started");
                             owner.revoke();
-                            owner.finish_operation();
+                            owner.function_completed();
+                            drop(worker);
+                            owner.worker_terminated();
+                            assert_eq!(physical.count(), 1, "omitted child is sole live executor");
                             assert!(
-                                !owner.local_quiescent(physical.count()),
-                                "independent executor observation detects omitted child handoff"
+                                owner.local_quiescent(),
+                                "sensitivity mutant exposes false quiescence when child handoff is omitted"
                             );
                             child_release_tx.send(()).unwrap();
                             untracked_child.join().unwrap();
-                            drop(worker);
-                            assert!(owner.local_quiescent(physical.count()));
+                            assert_eq!(physical.count(), 0);
+                            assert!(owner.local_quiescent());
 
                             // Sensitivity mutant: cache admission, revoke, then
                             // exercise the real timeout function and local signer
@@ -27162,7 +27310,7 @@ mod tests {
                                 SignMode::UnsafeCachedAdmission,
                                 Some((PausePoint::BeforePermit, release_rx)),
                             );
-                            let (handle, _) = spawn_paused(
+                            let (handle, _waiter_rx, termination_rx, termination_release_tx) = spawn_paused(
                                 fixture,
                                 owner.clone(),
                                 physical.clone(),
@@ -27174,15 +27322,23 @@ mod tests {
                                 .expect("mutant reached actual timeout signer path");
                             owner.revoke();
                             release_tx.send(()).unwrap();
+                            termination_rx
+                                .recv_timeout(TEST_WAIT)
+                                .expect("mutant Timeout function completed");
+                            assert_eq!(physical.count(), 1);
+                            assert!(!owner.local_quiescent());
+                            termination_release_tx.send(()).unwrap();
                             handle.join().unwrap();
+                            owner.worker_terminated();
                             let state = owner.state.lock().unwrap();
                             assert_eq!(state.underlying_calls, 1);
                             assert!(state.signature_generated && state.signature_returned);
                             assert!(!state.permit_observed);
                             drop(state);
-                            assert!(owner.local_quiescent(physical.count()));
+                            assert_eq!(physical.count(), 0);
+                            assert!(owner.local_quiescent());
                             assert!(
-                                !owner.closure_safe(physical.count()),
+                                !owner.closure_safe(),
                                 "sensitivity oracle rejects an unpermitted actual effect"
                             );
 
@@ -27192,8 +27348,9 @@ mod tests {
                             assert!(!owner.acquire_effect_permit());
                             assert_eq!(
                                 owner.state.lock().unwrap().outcome,
-                                EffectOutcome::RefusedBeforeEffect
+                                EffectOutcome::NotInvoked
                             );
+                            assert!(owner.state.lock().unwrap().request_refused_before_effect);
                         }
                     }
                     #[test]
