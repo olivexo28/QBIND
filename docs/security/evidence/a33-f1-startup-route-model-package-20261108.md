@@ -35,6 +35,8 @@ selected from the reviewed endpoint; retained raw logs are copied unchanged.
 | `docs/security/evidence/a33-f1-startup-route-classification-model-srm3-20261108.md` | SRM-3 restore-refusal correction, source anchors, provenance and limitations. |
 | `docs/security/evidence/a33-f1-startup-route-classification-model-srm3-focused-output.txt` | Historical SRM-3 focused run and full recorded output. |
 | `docs/security/evidence/a33-f1-startup-route-classification-model-srm3-compile-output.txt` | Historical SRM-3 compile-only output. |
+| `docs/security/evidence/a33-f1-startup-route-model-package-focused-output.txt` | Focused test output from the first extracted-package commit, including command, environment, test count, exit code and source commit/tree. |
+| `docs/security/evidence/a33-f1-startup-route-model-package-compile-output.txt` | Compile-only output from the first extracted-package commit, including command, environment, exit code and source commit/tree. |
 | `docs/security/evidence/a33-f1-startup-route-model-package-20261108.md` | This package manifest and provenance assessment. |
 
 All retained source/evidence blobs, including the original raw logs, have
@@ -42,6 +44,17 @@ their exact Git identities available in the package commit tree. The original
 route evidence and SRM-1/2 outputs are included here, rather than being
 available only on the originating branch. The SRM-3 evidence and outputs are
 also included. No raw historical log was edited or regenerated.
+
+The first package checks ran against commit
+`677284995048d9ec1a6c7ea098f0b934f745d371`, tree
+`f794e424945d4e22b4156d4c83f37593c2d1d27a`. The focused command passed
+13/13; the compile-only command passed with exit code 0. Complete outputs,
+including environment and exit codes, are retained in the two package
+validation output files above. Those output files and this record are
+evidence-only additions after the initial run. The final package commit is
+validated again after those additions; its exact final-run outputs and
+revision are reported with the package endpoint. No test or build input
+changed between the initial and final package checks.
 
 ## Historical attribution and TDI-1 boundary
 
