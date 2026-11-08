@@ -15,10 +15,14 @@ remains NO-GO.
 | Reviewed model endpoint | `f851d94fc1c9683b2886f828acc23292478a7cf9` | `8ff770ff5f643f49305288787af6c445503f10ab` |
 | Reviewed final model source producer | `22d5cb21f9b804bf6f4109842ea9c0f89b836a9b` | `f11c8edc7d55c1d11178f76b536b5904f130811b` |
 
-The required model test file is mode `100644`, blob
-`99753735d8e0f3a514e870ccf4b4fc7187947216` at both the endpoint and source
-producer. The package preserves that file's bytes. Its source contains only
-synthetic test-model code; it does not call production startup.
+The model has two relevant blob identities. Historical model blob
+`99753735d8e0f3a514e870ccf4b4fc7187947216` was preserved in the earlier
+extracted package at `77b842857fc914474f3d4b1fefa4fddfaa0610cd`. The
+corrected current model blob is
+`7d5c8de785cb1d077590a8c1cf2f148325b789fc`, present at source producer
+`d22e308793c4d301cebbb621c6a11fa36ac8e444` and the starting PR head
+`8add60bb86504ea852820c30ad6466b7540da0a7`. The corrected source contains
+only synthetic test-model code; it does not call production startup.
 
 ## Complete package paths and purpose
 
@@ -38,6 +42,8 @@ selected from the reviewed endpoint; retained raw logs are copied unchanged.
 | `docs/security/evidence/a33-f1-startup-route-model-package-focused-output.txt` | Focused test output from the first extracted-package commit, including command, environment, test count, exit code and source commit/tree. |
 | `docs/security/evidence/a33-f1-startup-route-model-package-compile-output.txt` | Compile-only output from the first extracted-package commit, including command, environment, exit code and source commit/tree. |
 | `docs/security/evidence/a33-f1-startup-route-model-package-20261108.md` | This package manifest and provenance assessment. |
+| `docs/security/evidence/a33-f1-startup-route-model-package-pr11-focused-output.txt` | Retained PR #11 follow-up focused author-run output, attributed to source commit `d22e308793c4d301cebbb621c6a11fa36ac8e444`. |
+| `docs/security/evidence/a33-f1-startup-route-model-package-pr11-compile-output.txt` | Retained PR #11 follow-up compile-only author-run output, attributed to source commit `d22e308793c4d301cebbb621c6a11fa36ac8e444`. |
 
 All retained source/evidence blobs, including the original raw logs, have
 their exact Git identities available in the package commit tree. The original
