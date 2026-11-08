@@ -10,6 +10,7 @@
 //! - `restore_completion.rs:148-179` (`DestinationId::canonicalize`)
 //! - `genesis.rs:1576-1621` (`compute_canonical_genesis_hash`)
 //! - `genesis.rs:1797-1855` (`verify_boot_time_genesis`)
+//! - `primitives.rs:105-123` (`NetworkEnvironment::chain_id`)
 //! - `main.rs:2404-2449` (retained boot hash can be `None`)
 //!
 //! Temporary directories/files are created only by fixture helpers and are
@@ -56,6 +57,9 @@ enum ExpectedSource {
     Missing,
     Untrusted(ExpectedAssociation),
 }
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LocalRecordFixture(PublicIdentity);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MissingKind {
@@ -113,6 +117,24 @@ fn synthetic_expected() -> ExpectedAssociation {
 
 fn compare(observed: &PublicIdentity, expected: ExpectedSource) -> Comparison {
     compare_with_test_bypass(observed, expected, None, false)
+}
+
+/// Same comparison checker with a test-only source-selection mutation seam.
+/// The ordinary path never treats the record as expected authority.
+fn compare_with_local_record(
+    observed: &PublicIdentity,
+    expected: ExpectedSource,
+    local_record: Option<LocalRecordFixture>,
+    bypass_record_authority_guard: bool,
+) -> Comparison {
+    match (expected, local_record, bypass_record_authority_guard) {
+        (ExpectedSource::Missing, Some(record), true)
+        | (ExpectedSource::Untrusted(_), Some(record), true) => compare(
+            observed,
+            ExpectedSource::SyntheticAuthenticated(ExpectedAssociation(record.0)),
+        ),
+        (expected, _, _) => compare(observed, expected),
+    }
 }
 
 /// Test-only mutation seam: bypassing one selected equality or the synthetic
@@ -259,6 +281,95 @@ fn synthetic_observed_from_helpers(root: &Path) -> (PublicIdentity, GenesisHash)
     )
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct AcquiredIdentity {
+    identity: PublicIdentity,
+    parsed_genesis_chain_name: String,
+    canonical_genesis_hash: GenesisHash,
+}
+
+fn acquire_identity_from_helpers(
+    destination_path: &Path,
+    genesis_path: &Path,
+    retained_boot_hash: Option<&GenesisHash>,
+) -> Result<AcquiredIdentity, AcquisitionFailure> {
+    let retained = retained_boot_hash.ok_or(AcquisitionFailure::MissingRetainedBootHash)?;
+    let destination_id = DestinationId::canonicalize(destination_path)
+        .map_err(|_| AcquisitionFailure::Unreadable)?;
+    let bytes = std::fs::read(genesis_path).map_err(|_| AcquisitionFailure::Unreadable)?;
+    let parsed: GenesisConfig =
+        serde_json::from_slice(&bytes).map_err(|_| AcquisitionFailure::Malformed)?;
+    let policy = NetworkEnvironmentPolicy::Devnet;
+    let actual_hash = compute_canonical_genesis_hash(&parsed, policy);
+    if &actual_hash != retained {
+        return Err(AcquisitionFailure::RetainedBootHashMismatch);
+    }
+    let verified = verify_boot_time_genesis(policy, &parsed, Some(retained))
+        .map_err(|_| AcquisitionFailure::RetainedBootHashMismatch)?;
+    if verified.canonical_hash != actual_hash {
+        return Err(AcquisitionFailure::RetainedBootHashMismatch);
+    }
+
+    // Environment and numeric chain are explicit synthetic runtime inputs.
+    // The numeric value uses the source-defined NetworkEnvironment mapping;
+    // it is not inferred from parsed_genesis_chain_name.
+    let environment = NetworkEnvironment::Devnet;
+    let numeric_chain_id = environment.chain_id().as_u64();
+    Ok(AcquiredIdentity {
+        identity: PublicIdentity {
+            environment: Evidence::Present(environment),
+            numeric_chain_id: Evidence::Present(numeric_chain_id),
+            genesis_hash: Evidence::Present(actual_hash),
+            destination_id: Evidence::Present(destination_id.as_str().to_string()),
+            validator_id: Evidence::Present(SYNTHETIC_VALIDATOR_ID),
+            suite_id: Evidence::Present(SYNTHETIC_SUITE),
+            signer_public_key: Evidence::Present(SYNTHETIC_PUBLIC_KEY.to_vec()),
+        },
+        parsed_genesis_chain_name: parsed.chain_id,
+        canonical_genesis_hash: actual_hash,
+    })
+}
+
+fn acquire_against_expected(
+    acquired: Result<AcquiredIdentity, AcquisitionFailure>,
+    expected: &ExpectedAssociation,
+    discard_acquired_values: bool,
+) -> Comparison {
+    let acquired = match acquired {
+        Ok(acquired) => acquired,
+        Err(failure) => return Comparison::Refuse(Refusal::Acquisition(failure)),
+    };
+    if discard_acquired_values {
+        return compare(
+            &expected.0,
+            ExpectedSource::SyntheticAuthenticated(expected.clone()),
+        );
+    }
+    compare(
+        &acquired.identity,
+        ExpectedSource::SyntheticAuthenticated(expected.clone()),
+    )
+}
+
+fn fixed_synthetic_association(
+    expected_destination: &Path,
+    expected_genesis: &GenesisConfig,
+) -> ExpectedAssociation {
+    let destination_id =
+        DestinationId::canonicalize(expected_destination).expect("canonicalize fixed fixture");
+    let genesis_hash =
+        compute_canonical_genesis_hash(expected_genesis, NetworkEnvironmentPolicy::Devnet);
+    ExpectedAssociation(PublicIdentity {
+        environment: Evidence::Present(NetworkEnvironment::Devnet),
+        numeric_chain_id: Evidence::Present(NetworkEnvironment::Devnet.chain_id().as_u64()),
+        genesis_hash: Evidence::Present(genesis_hash),
+        destination_id: Evidence::Present(destination_id.as_str().to_string()),
+        validator_id: Evidence::Present(SYNTHETIC_VALIDATOR_ID),
+        suite_id: Evidence::Present(SYNTHETIC_SUITE),
+        signer_public_key: Evidence::Present(SYNTHETIC_PUBLIC_KEY.to_vec()),
+    })
+}
+
 fn external_genesis_observation(
     path: &Path,
     retained_boot_hash: Option<&GenesisHash>,
@@ -272,6 +383,7 @@ fn external_genesis_observation(
     if &actual != retained {
         return Err(AcquisitionFailure::RetainedBootHashMismatch);
     }
+
     let verified = verify_boot_time_genesis(policy, &parsed, Some(retained))
         .map_err(|_| AcquisitionFailure::RetainedBootHashMismatch)?;
     if verified.canonical_hash != actual {
@@ -507,6 +619,158 @@ fn absent_and_untrusted_expected_associations_never_match() {
         ),
         Comparison::Match,
         "bypassing expected-association authentication must invalidate the negative control"
+    );
+}
+
+#[test]
+fn matching_local_record_cannot_replace_expected_association() {
+    let temp = tempfile::tempdir().expect("temporary fixture directory");
+    let (observed, _) = synthetic_observed_from_helpers(temp.path());
+    let local_record = Some(LocalRecordFixture(observed.clone()));
+
+    assert_eq!(
+        compare_with_local_record(
+            &observed,
+            ExpectedSource::Missing,
+            local_record.clone(),
+            false,
+        ),
+        Comparison::Refuse(Refusal::MissingExpectedAssociation)
+    );
+    assert_eq!(
+        compare_with_local_record(
+            &observed,
+            ExpectedSource::Untrusted(synthetic_expected()),
+            local_record.clone(),
+            false,
+        ),
+        Comparison::Refuse(Refusal::UntrustedExpectedAssociation)
+    );
+
+    // Sensitive fallback mutation: accepting the matching local record as
+    // authority turns both negative assertions into Match.
+    for expected in [
+        ExpectedSource::Missing,
+        ExpectedSource::Untrusted(synthetic_expected()),
+    ] {
+        assert_eq!(
+            compare_with_local_record(&observed, expected, local_record.clone(), true),
+            Comparison::Match,
+            "improper local-record authority fallback must invalidate the negative assertion"
+        );
+    }
+}
+
+#[test]
+fn actual_acquired_helper_results_compare_to_fixed_synthetic_expectation() {
+    let temp = tempfile::tempdir().expect("temporary fixture directory");
+    let expected_destination = temp.path().join("expected-destination");
+    std::fs::create_dir(&expected_destination).expect("create expected fixture destination");
+    let expected_genesis_path = temp.path().join("expected-genesis.json");
+    let expected_genesis = synthetic_devnet_genesis();
+    std::fs::write(
+        &expected_genesis_path,
+        serde_json::to_vec(&expected_genesis).expect("serialize expected genesis"),
+    )
+    .expect("write expected genesis");
+    let retained_expected_hash =
+        compute_canonical_genesis_hash(&expected_genesis, NetworkEnvironmentPolicy::Devnet);
+    let expected = fixed_synthetic_association(&expected_destination, &expected_genesis);
+
+    let matching = acquire_identity_from_helpers(
+        &expected_destination,
+        &expected_genesis_path,
+        Some(&retained_expected_hash),
+    )
+    .expect("actual helper acquisition for matching fixture");
+    assert_eq!(
+        matching.parsed_genesis_chain_name, expected_genesis.chain_id,
+        "textual chain name comes from the same owned parse as the hash"
+    );
+    assert_eq!(matching.canonical_genesis_hash, retained_expected_hash);
+    assert_eq!(
+        acquire_against_expected(Ok(matching.clone()), &expected, false),
+        Comparison::Match,
+        "positive control: helper-derived values match independently fixed fixture values"
+    );
+
+    let varied_destination = temp.path().join("other-valid-destination");
+    std::fs::create_dir(&varied_destination).expect("create varied destination");
+    let destination_observation = acquire_identity_from_helpers(
+        &varied_destination,
+        &expected_genesis_path,
+        Some(&retained_expected_hash),
+    )
+    .expect("actual helper acquisition for varied destination");
+    assert_eq!(
+        compare(
+            &destination_observation.identity,
+            ExpectedSource::SyntheticAuthenticated(expected.clone()),
+        ),
+        Comparison::Refuse(Refusal::Mismatch(IdentityField::DestinationId))
+    );
+    assert_eq!(
+        acquire_against_expected(Ok(destination_observation), &expected, true),
+        Comparison::Match,
+        "discarding acquired destination and substituting expectation invalidates negative control"
+    );
+
+    let varied_genesis_path = temp.path().join("other-valid-genesis.json");
+    let mut varied_genesis = expected_genesis.clone();
+    varied_genesis.genesis_time_unix_ms += 1;
+    std::fs::write(
+        &varied_genesis_path,
+        serde_json::to_vec(&varied_genesis).expect("serialize varied genesis"),
+    )
+    .expect("write varied genesis");
+    let varied_retained_hash =
+        compute_canonical_genesis_hash(&varied_genesis, NetworkEnvironmentPolicy::Devnet);
+    assert_ne!(varied_retained_hash, retained_expected_hash);
+
+    let varied_genesis_observation = acquire_identity_from_helpers(
+        &expected_destination,
+        &varied_genesis_path,
+        Some(&varied_retained_hash),
+    )
+    .expect("changed genesis passes validation against its own retained boot hash");
+    assert_eq!(
+        varied_genesis_observation.parsed_genesis_chain_name, expected_genesis.chain_id,
+        "genesis chain name remains from the owned parse; numeric chain stays explicit"
+    );
+    assert_eq!(
+        compare(
+            &varied_genesis_observation.identity,
+            ExpectedSource::SyntheticAuthenticated(expected.clone()),
+        ),
+        Comparison::Refuse(Refusal::Mismatch(IdentityField::GenesisHash)),
+        "valid changed genesis is rejected by the fixed expected association comparison"
+    );
+    assert_eq!(
+        acquire_against_expected(Ok(varied_genesis_observation.clone()), &expected, true),
+        Comparison::Match,
+        "discarding acquired genesis identity invalidates comparison negative control"
+    );
+    assert_eq!(
+        compare_with_test_bypass(
+            &varied_genesis_observation.identity,
+            ExpectedSource::SyntheticAuthenticated(expected),
+            Some(IdentityField::GenesisHash),
+            false,
+        ),
+        Comparison::Match,
+        "bypassing acquired full-genesis-hash comparison invalidates negative control"
+    );
+
+    // Using the original retained hash rejects at boot-hash validation,
+    // before comparator execution; this is distinct from the fixed-authority
+    // mismatch above, which used the changed fixture's own retained hash.
+    assert_eq!(
+        acquire_identity_from_helpers(
+            &expected_destination,
+            &varied_genesis_path,
+            Some(&retained_expected_hash),
+        ),
+        Err(AcquisitionFailure::RetainedBootHashMismatch)
     );
 }
 
