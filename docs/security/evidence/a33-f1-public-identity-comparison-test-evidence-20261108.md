@@ -31,6 +31,18 @@ test source, manifests, lockfile and other build inputs are unchanged from
 the follow-up source commit. The evidence commit/tree are recorded by Git
 metadata, not substituted for the source revision used in the runs.
 
+The wrapper-sensitivity correction test/build inputs are source commit
+`8df5c5be68ef14fc690d08b4d315b6146ad2d4e2`, tree
+`eb561ae5dca1a287f375ccabba873334f8898c28`, parent
+`754dde408d2dd15750b4d404c9ccee786fb14118`. Complete focused and compile-only
+outputs, including commands, source provenance, test count, exit codes and
+compiler warnings, are retained in
+[`a33-f1-public-identity-comparison-wrapper-focused-output-20261108.txt`](a33-f1-public-identity-comparison-wrapper-focused-output-20261108.txt)
+and
+[`a33-f1-public-identity-comparison-wrapper-compile-output-20261108.txt`](a33-f1-public-identity-comparison-wrapper-compile-output-20261108.txt).
+This evidence update changes only this note and those two output files; test
+source and build inputs remain unchanged from the correction source commit.
+
 ## Helpers and synthetic boundary
 
 The integration test is
@@ -95,8 +107,11 @@ ambiguous-association category.
   compared against a fixed synthetic expected association. A matching fixture
   is positive; a separately canonicalized destination and a separately
   parsed, valid genesis (verified against its own retained hash) mismatch the
-  unchanged expected tuple. Discarding acquired values or bypassing the
-  genesis-hash equality makes those negative controls match.
+  unchanged expected tuple through `acquire_against_expected(..., false)`,
+  returning the specific `DestinationId` and `GenesisHash` mismatches.
+  Calling that same wrapper with `bypass=true` on each same changed observation
+  discards the acquired identity and returns `Match`, making each negative
+  assertion sensitive to the wrapper improperly discarding acquired values.
 - The runtime environment and numeric chain ID are explicit synthetic inputs;
   numeric chain ID uses `NetworkEnvironment::chain_id()`, not inference from
   the genesis textual chain name.
@@ -132,6 +147,17 @@ Follow-up commands run at source commit
 
 The earlier source commit's **8 passed** focused run and compile-only check
 remain documented above and their historical raw output files are unchanged.
+
+For the wrapper-sensitivity correction, at source commit
+`8df5c5be68ef14fc690d08b4d315b6146ad2d4e2`, tree
+`eb561ae5dca1a287f375ccabba873334f8898c28`:
+
+| Command | Result |
+|---|---|
+| `cargo test -p qbind-node --test public_first_identity_comparison_tests -- --nocapture` | Exit 0; **10 passed, 0 failed**. Complete output retained in the wrapper focused output file. |
+| `cargo test -p qbind-node --test public_first_identity_comparison_tests --no-run` | Exit 0; test executable compiled. Complete output retained in the wrapper compile output file. |
+| `rustfmt --edition 2021 --check crates/qbind-node/tests/public_first_identity_comparison_tests.rs` | Exit 0. |
+| `git diff --check` | Exit 0. |
 
 The initial focused compile attempt failed before reaching this test because
 the environment lacked `libclang` required by `zstd-sys`; after installing
