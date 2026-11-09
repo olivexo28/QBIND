@@ -1,8 +1,13 @@
 # Gas-disabled checked-arithmetic oracle: test-only red baseline
 
-**Conformance tests against the owner-approved test contract; no production
+**Conformance tests against proposed test assumptions; no production
 correction. Both focused test commands FAIL.** Expected nonconformance is not
 reclassified as a passing characterization.
+
+No traceable prior scoped approval for these exact expectations is substantiated
+here. Their existence or review does not establish approval. A test-contract
+decision does not authorize production behavior, a ruleset transition,
+activation or deployment.
 
 ## Verified basis and executed source
 
@@ -16,7 +21,13 @@ was created from that endpoint.
 Executed source commit: `08f72bff797d6a8692967e921a5c7b9d8e6c8679`.
 Tree: `4e1d61d347886cfb69862e5c85a490bdbaa6274c`.
 Parent: `b123a4e3757eec0d1a615c5001904b42ad2d4879`.
-The evidence-only successor does not change executed code.
+The original evidence-only successor,
+`88c306caac8e425a8eae212a9d9c5d25be0be752`, did not change executed code.
+This subsequent wording correction changes the test-source blob and diagnostic
+text, but not assertions, fixtures, expected results or oracle logic. No tests
+were rerun. The historical logs were produced by the original source commit
+and blobs below, **not by the corrected source**; they have not been rewritten
+to match its comments or labels.
 
 | Executed file | Git blob | SHA-256 |
 |---|---|---|
@@ -36,6 +47,8 @@ precedence. After those checks, it requires
 would fail. It rejects every panic and every success on arithmetic-refusal
 fixtures. It requires unchanged account values/membership and zero transaction
 updater calls where those calls are directly observable.
+The result oracle compares only `success` and `error`; it does **not** compare
+gas or fee fields, even though those fields appear in printed results.
 
 Successful transfers require the original two-call debit/credit shape,
 including self-transfers: sufficient funding remains required, nonce increases
@@ -132,17 +145,23 @@ wrong success/states without a public call-count observation.
 ### Sensitivity scope
 
 The same `oracle` function rejects synthetic observations representing:
-unchecked-success bypass, write-then-restore despite unchanged final state,
+unchecked-success bypass, a single recorded write with unchanged final state,
 recipient-before-nonce arithmetic precedence, arithmetic-before-balance
 validation precedence, single-write self-transfer and omitted zero-recipient
 materialization. A compliant synthetic observation first passes that same
 oracle, avoiding a reject-everything sensitivity control.
+The nonempty-write control supplies exactly one recorded write; it demonstrates
+rejection of a nonempty trace, not a two-write change-and-restore sequence.
 
-These are explicitly **test-only observation mutations**, not production
-branch patches or evidence that a corrected engine exists. Only the sensitivity
+These are explicitly **synthetic altered observations**, not mutations of the
+real engine, production branch patches or evidence that a corrected engine
+exists. Only the sensitivity
 control's assertion that bad observations are rejected passes. It does not turn
 the nine actual engine conformance failures into passes. Real engine bypass
 mutation testing after a future correction would be additional evidence.
+The false-overflow self-transfer mutant (incorrectly checking the original
+balance plus amount) remains **FUTURE / NOT EXECUTED**. The passing real
+maximum-balance self-transfer test is not execution of that mutant.
 
 ### Default discovery and unexercised service boundary
 
@@ -165,6 +184,8 @@ Stage B selection with a multi-transaction block and directly record snapshot
 publication calls, including refused-transaction entries, cache/backend outcomes
 and bounded worker completion. One transaction or unchanged final values would
 not prove selection or zero service writes.
+The one-transaction public Stage B test does not establish zero setter calls.
+Adapter route and publication controls remain unexecuted.
 
 ## Commands, environment and complete retained output
 
@@ -223,6 +244,31 @@ release `target/release/deps/qbind_ledger-5162086cd07c177b` (before cleanup):
 `9afecf143163a3bc9ee72f4055461ce4f1c3c854bea516ac7b93a53f4179fd98`.
 
 ## Delivery scope and limits
+
+The wording correction relative to
+`88c306caac8e425a8eae212a9d9c5d25be0be752` modifies only this evidence note
+and `crates/qbind-ledger/src/checked_arithmetic_oracle_tests.rs`. The complete
+branch scope relative to main remains **40 paths**, including inherited
+unaccepted production work. The original baseline slice described below is
+historical, not the two-path correction slice.
+
+The exact test-source changes are limited to:
+
+```diff
+-//! Owner-approved test oracle; current production arithmetic is intentionally not corrected.
++//! Proposed test assumptions; current production arithmetic is intentionally not corrected.
++//! A test-contract decision does not authorize production behavior, transition, activation or deployment.
+-        "write-then-restore escaped"
++        "single-write nonempty trace with unchanged final state escaped"
+-    println!("synthetic same-oracle controls rejected: unchecked success, write-then-restore, arithmetic/validation reordering, one-write alias, missing materialization");
++    println!("synthetic same-oracle controls rejected: unchecked success, single-write nonempty trace with unchanged final state, arithmetic/validation reordering, one-write alias, missing materialization");
+```
+
+Only opening documentation, an assertion's diagnostic string and a printed
+diagnostic label change. The assertion condition, single-write observation,
+fixture, expected result and oracle are unchanged. The nine failures in each
+recorded build remain ordinary red tests, not passing expected-failure tests;
+default discovery is unchanged.
 
 Relative to reviewed `b123a4e3757eec0d1a615c5001904b42ad2d4879`, the slice
 is six paths: one new test module, the test-configured `parallel_exec.rs`

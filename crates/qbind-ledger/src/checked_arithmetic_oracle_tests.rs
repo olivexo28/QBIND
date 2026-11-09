@@ -1,4 +1,5 @@
-//! Owner-approved test oracle; current production arithmetic is intentionally not corrected.
+//! Proposed test assumptions; current production arithmetic is intentionally not corrected.
+//! A test-contract decision does not authorize production behavior, transition, activation or deployment.
 
 use super::{execute_block_stage_b, execute_tx_on_stage_b_state, StageBPerAccountState};
 use crate::{
@@ -426,7 +427,7 @@ fn same_oracle_rejects_synthetic_bypass_and_reordering_controls() {
     changed.writes = Some(vec![(A, case.sender.clone())]);
     assert!(
         oracle(&case, &changed, true).is_err(),
-        "write-then-restore escaped"
+        "single-write nonempty trace with unchanged final state escaped"
     );
     let both = Case {
         recipient: Some(AccountState::new(9, u128::MAX)),
@@ -473,5 +474,5 @@ fn same_oracle_rejects_synthetic_bypass_and_reordering_controls() {
         oracle(&zero, &changed, true).is_err(),
         "missing materialization escaped"
     );
-    println!("synthetic same-oracle controls rejected: unchecked success, write-then-restore, arithmetic/validation reordering, one-write alias, missing materialization");
+    println!("synthetic same-oracle controls rejected: unchecked success, single-write nonempty trace with unchanged final state, arithmetic/validation reordering, one-write alias, missing materialization");
 }
