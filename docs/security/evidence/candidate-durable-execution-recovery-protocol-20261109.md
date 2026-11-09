@@ -87,18 +87,61 @@ atomicity questions; no format is selected.
 
 ## 3. Bind execution to an authoritative finalized decision
 
-### 3.1 Proposed operation identity
+### 3.1 Proposed operation identity and finality evidence
 
-Before effects, construct a domain-separated `ExecutionOperationId` from a
-canonical encoding of at least:
+The candidate needs a stable `ExecutionOperationId` for the decision being
+executed. It must not assume that hashing the bytes of a valid finality proof
+produces a stable identity: if two valid proof representations for one
+operation are possible and yield different IDs, an exact retry could be
+misclassified as a same-position conflict. This is a conditional design risk,
+not an observed bug. No applicable QBIND production route with multiple
+accepted authenticated proofs for one decision has been established here, and
+the inspected source does not prove globally unique proofs. No randomized
+ML-DSA signing behavior is established for the relevant finality route.
+
+Two directions remain open; neither is selected:
+
+**A. Unique authoritative evidence representation or equivalence/selection
+rule.** Define one authoritative proof representation for a decision, or a
+verified equivalence rule and deterministic selection rule that maps
+alternative valid proofs to one identity. The rule needs a safety argument:
+it must preserve the relevant finality threshold/meaning, signer-set and
+domain constraints, prevent weakening or substitution, and be deterministic
+under the accepted policy. Canonical encoding only makes a given object
+unambiguous; it does not select uniquely among different sufficient signer
+sets or proof objects. Consensus redesign is not assumed to be the only way
+to establish such a rule.
+
+**B. Stable decision identity with separately verified and bound finality
+evidence.** Derive the operation identity from a stable, authenticated subject
+for the decision and bind a separately verified finality proof to that
+subject. Excluding proof bytes from the identity does not itself establish
+finality, stable identity, subject equivalence, or any other required
+binding; those must be independently verified and recorded.
+
+The future design must state whether finality evidence is external to the
+proposal, embedded in its QC, or both. The signed canonical proposal body
+includes the embedded QC bytes and the ordered, length-prefixed transaction
+bytes (`crates/qbind-wire/src/consensus.rs:915-950` at the supplemental
+endpoint). An external proof is not thereby covered by that proposal
+signature. Conversely, different embedded QCs change the signed body; do not
+assume proposals carrying different QCs represent the same subject. The
+design must answer how an authenticated proposal maps to a stable decision
+subject; which header and parent fields define that subject; whether a QC
+must be embedded, external, or both; which proof objects may finalize it;
+how proof validity and policy are checked; and how alternate proof
+representations are selected or shown equivalent.
+
+Before effects, an operation identity must bind or reference at least:
 
 - a unique deployment identity and backend/state-instance identity;
 - the wire chain ID, consensus epoch, finalized block height and round;
 - the full parent block ID and the prior committed operation/position;
-- the digest of the complete finalized consensus proposal and its
-  authenticated finalization evidence;
-- the exact ordered transaction byte strings to be executed, including their
-  count and unambiguous length boundaries;
+- the stable decision subject; finality evidence is verified and bound to
+  that subject under direction A or B, but proof bytes are not automatically
+  an operation-identity input;
+- the exact ordered transaction byte strings actually to be executed,
+  including their count and unambiguous length boundaries;
 - the applicable execution profile/ruleset identifier and version;
 - any transition metadata that changes interpretation of the block; and
 - an identifier for the required state schema and canonical account-key
@@ -108,9 +151,26 @@ The candidate additionally computes a deterministic digest of the complete
 candidate post-state (sorted account keys, explicit presence/absence semantics,
 and canonical values) and places that digest in the commit metadata. This is
 for consistency checking, not by itself proof that the state is correct or
-authentic. Hash algorithm, domain encoding, collision assumptions, signing
-scheme, and whether a post-quantum construction is required are unresolved.
-No cryptographic assumption here is implicitly post-quantum.
+authentic. Hash algorithm, domain encoding, collision assumptions, proof
+selection/equivalence rules, and the relationship between proposal subject
+and external evidence remain open.
+
+The native trust path must meet the project's post-quantum protection
+requirement. Its actual constructions, parameters, trust roots, security
+assumptions, transition process, and demonstrated end-to-end properties
+remain OPEN. Any classical dependency used to authenticate consensus
+finality/history, deployment association, currentness, recovery evidence, or
+integrity digests must be explicitly isolated and reviewed as a classical
+dependency; it cannot be treated as satisfying the native post-quantum
+requirement. A named algorithm or digest alone does not establish an
+end-to-end post-quantum trust path.
+
+The proposal's `suite_id`-selected signature and any consensus/QC/finality
+verification are dependencies whose post-quantum properties are not
+established by this protocol. Any such component that is classical or not
+demonstrated to meet the native requirement must be explicitly isolated and
+reviewed as a classical or unqualified dependency, not silently counted as
+post-quantum protection.
 
 Height plus payload hash is insufficient as a unique execution identity.
 Distinct parents, transaction ordering, rulesets, deployments, or prior
@@ -125,37 +185,46 @@ header fields, QC bytes, and ordered length-prefixed transactions
 canonical signed proposal is not, without further checks, proof of
 finalization, a correct execution, or deployment currentness.
 
-### 3.2 Required verified bindings versus identity fields
+### 3.2 Six required verified bindings versus identity fields
 
 The identity fields above are proposed data, not verified bindings. Before
 the candidate may proceed, a later implementation and review would need to
 establish all of the following:
 
-1. **Finality:** independently verify evidence that the exact proposal was
-   finalized under the authorized consensus history. A proposal signature or
-   QC-shaped object alone must not be treated as finality unless the
-   applicable consensus contract proves that implication.
-2. **Exact inputs:** validate the proposal's full canonical encoding and
+1. **Authenticated finality (OPEN):** independently verify evidence that the
+   exact stable decision subject was finalized under the authorized consensus
+   history. A proposal signature or QC-shaped object alone must not be
+   treated as finality unless the applicable consensus contract proves that
+   implication. Define the proof source, validation policy, subject mapping,
+   alternate-proof handling, and evidence retention.
+2. **Exact ordered inputs actually executed (OPEN):** validate the proposal's
+   full canonical encoding and
    bind the transaction bytes actually decoded/executed, in order, to that
    finalized proposal. Verify transaction count and every relevant payload
    commitment; refuse missing, conflicting, malformed, or non-canonical
    evidence. Do not substitute locally supplied transactions for committed
    bytes.
-3. **Position continuity:** verify that the finalized decision extends the
+3. **Authoritative position and predecessor continuity (OPEN):** verify that
+   the finalized decision extends the
    exact prior committed position, with contiguous/order rules required by
    the applicable consensus history. A same-height conflict, parent mismatch,
    missing prior position, or non-identical duplicate is a refusal.
-4. **Deployment and backend:** authenticate the association between the
-   finalized history, chain/deployment identity, backend instance, and
+4. **Independently authenticated deployment/backend association (OPEN):**
+   authenticate the association between the finalized history,
+   chain/deployment identity, backend instance, and
    configured path/namespace. Locally editable configuration alone cannot
    establish this binding.
-5. **Ruleset:** obtain the execution ruleset/version from an independently
-   authorized transition/history, not merely a command-line flag or local
+5. **Authorized ruleset and applicable transition history (OPEN):** obtain
+   the execution ruleset/version from an independently authorized
+   transition/history, not merely a command-line flag or local
    configuration. Verify that the exact ruleset is permitted at this
-   position and that the binary supports it.
-6. **Commit identity:** place the operation ID and prior/new positions in the
-   same atomic commit boundary as the state. Verify its relation to the exact
-   prepared operation before acknowledging completion.
+   position, account for mixed-version and replay rules, and establish that
+   the binary supports it.
+6. **Binding to durable commit and completion (OPEN):** place the stable
+   operation identity and prior/new positions in the same atomic commit
+   boundary as the state, and bind the required completion result to that
+   operation, state, and authoritative position. Verify its relation to the
+   exact prepared operation before acknowledging completion.
 
 No inspected interface currently supplies this complete verified binding.
 The consensus block ID is not a suitable substitute, and the async service
@@ -163,17 +232,36 @@ accepts a `QbindBlock` and reports queue admission rather than a verified,
 durable execution result (`execution_adapter.rs:475, 1492-1518` at the
 supplemental endpoint).
 
+For alternate finality evidence, a later design must specify whether each
+alternate proof is independently reverified, or whether an earlier accepted
+verification can be reused. Reuse is permissible only if a durable,
+authenticated verification record binds the exact stable subject, proof
+representation or approved equivalence class, verifier/policy version,
+deployment and applicable context, and if required currentness is re-established.
+The design must define how that record is protected against substitution,
+revocation, policy changes, and replay. If proof equivalence, accepted
+verification, required evidence, or currentness cannot be established, refuse
+execution and keep the backend gated. This is a requirement and design
+question, not an implemented cache or verification behavior.
+
 ### 3.3 Duplicate work and uncertain predecessor
 
-- If an exact operation ID is already committed and its authenticated commit
-  record and state digest verify, return the recorded completion result
-  without re-executing.
+- If an operation is already committed, identify it by the stable decision
+  identity under the selected proof direction, not by an unexamined proof
+  byte string. Return a completion only after independently establishing the
+  required result and its binding to that operation, state, and authoritative
+  position. Section 4.2.1 defines the retention-or-reconstruction
+  alternatives; neither is implemented or selected.
 - If an operation ID is present as prepared, pending, quarantined, or has an
   uncertain prior commit, do not rerun it. Gate service and resolve it using
   recovery evidence.
-- If the same position is presented with different input, parent, ruleset,
-  deployment association, or operation ID, refuse and quarantine as a
-  conflict.
+- If the same position maps to a different stable decision subject, ordered
+  input, parent, authorized ruleset, deployment association, or predecessor,
+  refuse and quarantine as a conflict. Alternative finality evidence for an
+  already identified subject is not automatically a conflict: independently
+  reverify it or reuse prior accepted verification only under the criteria in
+  Section 3.2 and Section 4.2.1. If equivalence, identity, or currentness is
+  uncertain, refuse.
 - If no authoritative prior position can be established, do not infer one
   from a directory, account balances, current height in memory, or a missing
   database key. Require authenticated enrollment or recovery evidence.
@@ -231,11 +319,50 @@ be presented as committed before this boundary.
 6. **Confirm before acknowledge.** Establish that commit is durable according
    to the chosen contract, update or invalidate caches, then publish the
    block-correlated completion acknowledgement and success metrics. Queue
-   admission remains a separate response. If completion delivery is lost
-   after commit, a retry reads the exact committed operation record and does
-   not re-execute.
+   admission remains a separate response.
 7. **Release gate.** Only after commit resolution and cache/publication
    consistency checks may the backend return to `READY`.
+
+### 4.2.1 Retry after lost or uncertain completion
+
+A retry must not infer that a prior request failed merely because its caller
+did not receive a response. The minimum caller-facing completion contract
+must identify the stable operation/decision subject, the resulting
+authoritative position and predecessor, the disposition (committed,
+rejected-before-effects, definite storage failure, unknown, or unavailable),
+and the binding to the committed state identity/digest. If callers rely on
+per-transaction outcomes, the result must also preserve the transaction order
+and each promised result field (for example success/refusal and the
+contractually exposed gas/fee or receipt fields). The owner must define the
+exact response schema and which values are required to retry safely.
+
+There are two possible ways to make a committed completion available:
+
+- **Atomically retain it.** Include the required completion/result data, or
+  an authenticated durable reference sufficient to retrieve it, in the same
+  state-plus-position commit boundary. This makes the retry return the
+  original recorded result rather than re-execute.
+- **Reconstruct it under a justified rule.** Recompute the result only from
+  independently justified, authenticated and durable inputs and ruleset,
+  with a deterministic reconstruction procedure bound to the exact operation,
+  committed state, and authoritative position. The reconstruction contract
+  must establish that it returns the same caller-relevant result; identical
+  balances alone are insufficient.
+
+Neither strategy is selected or established. If the commit outcome or any
+required caller result cannot be established, report outcome **unknown** or
+**unavailable**, keep execution/reuse gated, and require recovery assessment.
+Do not fabricate success, infer success from a later flush or matching
+balances, acknowledge a different operation's result, or blindly re-execute.
+An alternative finality proof on retry must follow the independent
+verification/reuse requirements in Section 3.2; it must not change the
+stable operation identity merely because its representation differs.
+
+Atomic state-plus-position publication, durable pre-effect preparation,
+effective fencing, currentness evidence, and recovery authority remain
+feasibility blockers. Retry completion is not safe unless those blockers and
+the selected result-retention or reconstruction rule are independently
+resolved.
 
 ### 4.3 Candidate primitive and feasibility blocker
 
@@ -271,7 +398,7 @@ implemented as though the blocker were solved.
 | Crash during atomic publication | Restart remains gated. If the storage primitive proves all-or-none durable commit and authoritative evidence identifies the result, resolve as committed or uncommitted. If not, feasibility blocker: no inference. |
 | Commit returns error, times out, or response is lost | Treat as unknown, not failure. Do not retry execution, acknowledge success, advance service position, or release fence until commit identity and state are independently reconciled. |
 | Commit returns success but durability barrier fails | Success is not acknowledged as durable. Gate and quarantine; a later flush cannot retroactively establish the original boundary without a specified recovery proof. |
-| Crash after durable commit but before cache update/acknowledgement | On restart, revalidate commit identity, position, state digest and external finalized history; rebuild cache only after checks. Retry returns the stored completion, not a second execution. |
+| Crash after durable commit but before cache update/acknowledgement | On restart, revalidate commit identity, position, state digest and external finalized history; rebuild cache only after checks. Retry returns an atomically retained result or a result reconstructed under the justified rule in Section 4.2.1; if neither can be established, return unknown/unavailable and do not re-execute. |
 | Cache publication fails or differs | Keep service gated; durable state may be committed, but cache is not authoritative. Rebuild only from verified committed state and report completion according to the owner-approved contract. |
 | Metrics or receipt delivery fails | Do not roll back committed state. Reconstruct only from durable commit metadata if that output is part of the specified contract; otherwise report delivery as separate and possibly unknown. |
 
@@ -489,8 +616,8 @@ filesystem, power-loss, or operational behavior.
 | Control | FUTURE / NOT EXECUTED target | Evidence class and limit |
 |---|---|---|
 | Identity-binding sensitivity | Mutate deployment, chain, epoch, height, parent, QC/finality evidence, transaction order/bytes, ruleset, prior position, and state ID independently; require rejection. | Synthetic canonical-input controls do not establish the external finality or authority. |
-| Duplicate/replay sensitivity | Replay exact committed operation, exact prepared operation, stale prior transition, same-height conflict, altered transaction order, and missing history. | Must verify duplicate returns stored outcome without re-execution; replay tests do not establish production currentness. |
-| Arithmetic/error propagation | Once a production candidate is separately authorized, assert test-only arithmetic expectations and storage-error precedence at sequential and Stage B boundaries. | Owner-approved arithmetic expectations are test-only. Retained author-run debug and release baselines each report 38 passed / 9 failed / exit 101. The isolated-result self-transfer control remains FUTURE / NOT EXECUTED; the oracle is not treated as trusted. |
+| Duplicate/replay and retry-result sensitivity | Replay exact committed operation, exact prepared operation, stale prior transition, same-height conflict, altered transaction order, and missing history; lose the original completion response and retry. Compare operation/position binding, disposition, transaction-order results and every caller-required gas/fee/receipt field. | Must verify exact retained completion or justified deterministic reconstruction without re-execution; replay tests do not establish production currentness. |
+| Arithmetic/error propagation | Once a production candidate is separately authorized, assert test-only arithmetic expectations and storage-error precedence at sequential and Stage B boundaries. | Owner-approved arithmetic expectations are **TEST-ONLY**. Retained author-run debug and release baselines each report 38 passed / 9 failed / exit 101. The isolated-result sensitivity control remains FUTURE / NOT EXECUTED; the oracle is not treated as trusted. |
 | Worker-write sensitivity | Inject failure before effect, after possible effect, between account updates, during prepared write, commit, and durability barrier; assert typed result and gate state. | Injection is not a real backend failure or proof of crash durability. |
 | Stage B observation | Record values and membership before/after absent sender/recipient reads, Stage B execution, adapter route and publication, and durable reopen. | The absent-sender materialization example is source-derived and has not been executed. Direct Stage B does not prove adapter route or backend publication. |
 | Concurrency/fencing | Race two services/processes, stale handles, shutdown/recovery, path aliases, maintenance tools, and a writer that ignores advisory locking. | Requires the actual selected fencing primitive and environment; a same-process mutex test is insufficient. |
@@ -517,9 +644,12 @@ Before implementation, the owner and independent reviewers must decide:
    identity, current ruleset, execution position, and recovery authorization?
 2. What finality evidence must be verified, and how is complete historical
    continuity established after pruning, restore, conflict, or outage?
-3. What identity encoding, hash/signature suite, trust roots, currentness and
-   replay protections are acceptable? Which are classical assumptions and
-   whether post-quantum properties are required remain explicit decisions.
+3. What identity encoding, actual post-quantum constructions and parameters,
+   trust roots, currentness and replay protections are acceptable? The native
+   trust path's post-quantum protection requirement is fixed; its realization
+   and demonstrated properties remain open. Which components are classical
+   dependencies, how they are isolated, and their separate review are also
+   open.
 4. Which database/transaction primitive and failure model provide atomic,
    durable account-plus-position publication and inspectable unknown outcomes?
 5. How are account presence, default-valued entries, deletion, and Stage B
@@ -537,9 +667,10 @@ Before implementation, the owner and independent reviewers must decide:
 10. Which validator signing, proposal/vote participation, bundle signing,
     and signer-continuity gates remain separate from VM recovery?
 
-The owner-approved arithmetic expectations remain test-only. The retained
+The owner-approved arithmetic expectations remain **TEST-ONLY**. The retained
 test baseline remains author-run evidence, not a production contract. The
-isolated-result self-transfer control remains unexecuted. Worker-write
+isolated-result self-transfer sensitivity gap remains future work and
+unexecuted. Worker-write
 propagation, durable atomicity, recovery authority, authenticated history,
 mixed-version/replay behavior, and route coverage remain OPEN.
 
