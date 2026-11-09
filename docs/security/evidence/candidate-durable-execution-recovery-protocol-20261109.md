@@ -208,7 +208,11 @@ establish all of the following:
    the finalized decision extends the
    exact prior committed position, with contiguous/order rules required by
    the applicable consensus history. A same-height conflict, parent mismatch,
-   missing prior position, or non-identical duplicate is a refusal.
+   or missing prior position is a refusal. A **non-identical duplicate**
+   means evidence of a different semantic operation or failure of a required
+   binding at that position (for example different ordered inputs, subject,
+   predecessor, deployment association, or authorized ruleset); different
+   finality-proof bytes alone do not make a conflicting operation.
 4. **Independently authenticated deployment/backend association (OPEN):**
    authenticate the association between the finalized history,
    chain/deployment identity, backend instance, and
@@ -615,7 +619,7 @@ filesystem, power-loss, or operational behavior.
 
 | Control | FUTURE / NOT EXECUTED target | Evidence class and limit |
 |---|---|---|
-| Identity-binding sensitivity | Mutate deployment, chain, epoch, height, parent, QC/finality evidence, transaction order/bytes, ruleset, prior position, and state ID independently; require rejection. | Synthetic canonical-input controls do not establish the external finality or authority. |
+| Identity-binding and proof-policy sensitivity | For a valid, policy-authorized alternative proof of the same stable subject, independently verify it or apply the future approved equivalence/reuse policy; do not automatically classify it as a conflicting operation. Separately test invalid, malformed, unauthorized, wrong-subject, non-equivalent, stale, conflicting, or unavailable evidence and assert the refusal or unavailable outcome required by the future policy. Add same-checker sensitivity controls that bypass subject binding, proof verification/equivalence, and required currentness, and require the checker to reject those altered observations. | FUTURE / NOT EXECUTED. These controls do not assert that a current QBIND route accepts alternative proofs, select an identity/equivalence/recovery mechanism, or establish external finality or authority. Synthetic controls are not production proof. |
 | Duplicate/replay and retry-result sensitivity | Replay exact committed operation, exact prepared operation, stale prior transition, same-height conflict, altered transaction order, and missing history; lose the original completion response and retry. Compare operation/position binding, disposition, transaction-order results and every caller-required gas/fee/receipt field. | Must verify exact retained completion or justified deterministic reconstruction without re-execution; replay tests do not establish production currentness. |
 | Arithmetic/error propagation | Once a production candidate is separately authorized, assert test-only arithmetic expectations and storage-error precedence at sequential and Stage B boundaries. | Owner-approved arithmetic expectations are **TEST-ONLY**. Retained author-run debug and release baselines each report 38 passed / 9 failed / exit 101. The isolated-result sensitivity control remains FUTURE / NOT EXECUTED; the oracle is not treated as trusted. |
 | Worker-write sensitivity | Inject failure before effect, after possible effect, between account updates, during prepared write, commit, and durability barrier; assert typed result and gate state. | Injection is not a real backend failure or proof of crash durability. |
@@ -676,7 +680,9 @@ mixed-version/replay behavior, and route coverage remain OPEN.
 
 Prior ATOM-1/M18, CB-1, CB-FIXTURE-1, no-replacement-database,
 consensus-oracle, and RPC dispositions retain only their reviewed scopes.
-This document changes none of them. The required-persistence candidate
+DER-2 and DER-3 remain passed within their documentation scopes; this
+correction does not establish their implementation. This document changes
+none of those dispositions. The required-persistence candidate
 remains NOT ACCEPTED / NOT INTEGRATION-READY; recipient overflow, A23-F1,
 and A33-F1 / E27 remain OPEN; activation remains DISABLED; public DevNet
 remains NO-GO.
