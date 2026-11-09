@@ -32,9 +32,13 @@ The test-only event carries an initialization ID and worker ID. The test
 helper allocates both from a process-local monotonic atomic counter and
 installs a thread-local observer in the worker thread. Every event is
 delivered over that initialization's private channel with both IDs
-attached. Tests run successful and failing persistent opens concurrently,
-assert the identifiers differ, and verify each receiver sees only its
-own open result and backend selection.
+attached. The two-initialization test launches both workers before joining
+either, asserts their test-assigned initialization and worker IDs differ,
+then reads the expected ordered event prefix from each private receiver.
+It does not assert that the two actual open calls overlap. It also does not
+drain either channel after join or establish that no additional events
+were sent; the observed prefixes are not exhaustive channel-isolation
+proof.
 
 At `execution_adapter.rs:934-988`, the observer records:
 
@@ -43,7 +47,8 @@ At `execution_adapter.rs:934-988`, the observer records:
 - success or failure from the actual `Result` match arm; and
 - the backend branch selected by that same worker: persistent on success,
   in-memory on failure, or in-memory with no open attempt when memory was
-  explicitly configured.
+  explicitly configured. The selection event occurs at the selection
+  branch before constructing the persistent or in-memory state wrapper.
 
 The four new tests at `execution_adapter.rs:1415-1510` establish:
 
@@ -52,7 +57,7 @@ The four new tests at `execution_adapter.rs:1415-1510` establish:
 | Valid temporary persistent path | Worker started; actual open attempted and succeeded; persistent backend selected; worker subsequently joined normally. |
 | Temporary file used as parent of a persistent path | Worker started; actual open attempted and failed; in-memory fallback selected; worker subsequently joined normally. This is current behavior characterization, not desired conformance. |
 | Explicit `vm_v0()` memory configuration | Worker started; in-memory backend selected with no persistent-open event; worker subsequently joined normally. |
-| Two simultaneous initializations | Different initialization and worker IDs; each channel reports only its own real open result and selected backend. |
+| Two initialization workers started before either is joined | Distinct test-assigned initialization and worker IDs; each receiver yields the expected ordered prefix for its own actual open result and selected backend. The test does not assert overlapping open calls or drain channels after join. |
 
 No submission is needed to observe these initialization branches. These
 tests do not establish service readiness or availability ordering through
@@ -85,10 +90,15 @@ the configured receiver and values, rather than calling
 `SingleThreadExecutionService::with_config`, which discards its join
 handle. Thus this evidence exercises the actual worker and open path, but
 not the public constructor's lifecycle or service-availability boundary.
-The test helper's private event-channel sends add scheduling points around
-the open result and backend branch. They do not replace the opener or
-alter the selection branch, but this test-only schedule is not evidence
-about release-build timing.
+In the valid-path test, the sender remains held through an unresolved
+`is_finished` deadline observation; the test then closes the sender and
+obtains a normal join. The two-worker test starts both workers and reads
+each expected prefix before joining either, but does not prove that the
+workers' open calls or lifetimes overlap. The test helper's private
+event-channel sends add scheduling points around the open result and
+backend branch. They do not replace the opener or alter the selection
+branch, but this test-only schedule is not evidence about release-build
+timing.
 
 All event definitions, the thread-local observer, instrumentation calls,
 helper, and tests are under `cfg(test)`. The source diff against the
@@ -137,3 +147,9 @@ Environment: Linux `x86_64`, kernel `6.12.8+`; `rustc 1.99.1
 `70aec07f6e1eb8ea3e98634acefdd92bf9f9ea03929d2821e3cc04c75bb1baaf`.
 The library check emitted existing dead-code warnings; no dependency
 manifest or lockfile changed.
+
+These are retained author-run results, not an independent rerun and not
+release-build enforcement evidence. The test-only instrumentation is
+compiled out of the library check and non-test builds; neither the
+author-run tests nor the source comparison proves release-build adapter
+behavior.
