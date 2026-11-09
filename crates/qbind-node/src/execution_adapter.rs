@@ -504,7 +504,45 @@ pub struct PersistentVmV0State {
     operation: Arc<Mutex<()>>,
     worker_claimed: Arc<AtomicBool>,
     #[cfg(test)]
-    fail_next_public_put: Arc<AtomicBool>,
+    test_hooks: Arc<ExecutionAdapterTestHooks>,
+}
+
+#[cfg(test)]
+struct WorkerBlockGate {
+    entered: Sender<()>,
+    release: Mutex<Receiver<()>>,
+}
+
+#[cfg(test)]
+#[derive(Default)]
+struct ExecutionAdapterTestHooks {
+    worker_block_gate: Mutex<Option<Arc<WorkerBlockGate>>>,
+    fail_next_public_put: AtomicBool,
+    fail_worker_puts: AtomicBool,
+    panic_after_worker_put: AtomicBool,
+    bypass_public_operation_lock: AtomicBool,
+    public_lock_attempt: Mutex<Option<Sender<bool>>>,
+    drop_join_started: Mutex<Option<Sender<()>>>,
+    join_result: Mutex<Option<Sender<bool>>>,
+}
+
+#[cfg(test)]
+impl ExecutionAdapterTestHooks {
+    fn before_worker_block(&self) {
+        if let Some(gate) = self.worker_block_gate.lock().take() {
+            let _ = gate.entered.send(());
+            gate.release
+                .lock()
+                .recv_timeout(std::time::Duration::from_secs(10))
+                .expect("test must release the paused execution worker");
+        }
+    }
+
+    fn report_public_lock_attempt(&self, blocked: bool) {
+        if let Some(sender) = self.public_lock_attempt.lock().take() {
+            let _ = sender.send(blocked);
+        }
+    }
 }
 
 impl PersistentVmV0State {
@@ -519,12 +557,28 @@ impl PersistentVmV0State {
             operation: Arc::new(Mutex::new(())),
             worker_claimed: Arc::new(AtomicBool::new(false)),
             #[cfg(test)]
-            fail_next_public_put: Arc::new(AtomicBool::new(false)),
+            test_hooks: Arc::new(ExecutionAdapterTestHooks::default()),
         })
     }
 
     /// Read one account from the shared persistent state.
     pub fn get_account_state(&self, account: &AccountId) -> AccountState {
+        #[cfg(test)]
+        let _operation = if self
+            .test_hooks
+            .bypass_public_operation_lock
+            .load(Ordering::SeqCst)
+        {
+            self.test_hooks.report_public_lock_attempt(false);
+            None
+        } else {
+            let probe = self.operation.try_lock();
+            let blocked = probe.is_none();
+            drop(probe);
+            self.test_hooks.report_public_lock_attempt(blocked);
+            Some(self.operation.lock())
+        };
+        #[cfg(not(test))]
         let _operation = self.operation.lock();
         self.get_account_state_locked(account)
     }
@@ -546,15 +600,46 @@ impl PersistentVmV0State {
         state: AccountState,
     ) -> Result<(), StorageError> {
         let _operation = self.operation.lock();
+        let put_result = self.state.put_account_state(account, &state);
         #[cfg(test)]
-        if self.fail_next_public_put.swap(false, Ordering::SeqCst) {
-            return Err(StorageError::Io(
-                "injected persistent account put failure".to_owned(),
-            ));
-        }
-        self.state.put_account_state(account, &state)?;
+        let put_result = if self
+            .test_hooks
+            .fail_next_public_put
+            .swap(false, Ordering::SeqCst)
+        {
+            Err(StorageError::Io(
+                "injected public put-result error".to_owned(),
+            ))
+        } else {
+            put_result
+        };
+        put_result?;
         self.cache.lock().set_account_state(account, state);
         Ok(())
+    }
+
+    fn put_worker_account_state(
+        &self,
+        account: &AccountId,
+        state: &AccountState,
+    ) -> Result<(), StorageError> {
+        #[cfg(test)]
+        if self.test_hooks.fail_worker_puts.load(Ordering::SeqCst) {
+            return Err(StorageError::Io(
+                "injected execution-worker put-result error".to_owned(),
+            ));
+        }
+        let result = self.state.put_account_state(account, state);
+        #[cfg(test)]
+        if result.is_ok()
+            && self
+                .test_hooks
+                .panic_after_worker_put
+                .swap(false, Ordering::SeqCst)
+        {
+            panic!("injected execution worker panic after persistent put");
+        }
+        result
     }
 
     /// Flush the shared persistent state.
@@ -581,7 +666,7 @@ impl AccountStateView for PersistentWorkerState {
 
 impl AccountStateUpdater for PersistentWorkerState {
     fn set_account_state(&mut self, account: &AccountId, state: AccountState) {
-        if self.0.state.put_account_state(account, &state).is_ok() {
+        if self.0.put_worker_account_state(account, &state).is_ok() {
             self.0.cache.lock().set_account_state(account, state);
         }
     }
@@ -796,6 +881,8 @@ pub struct SingleThreadExecutionService {
     worker_restarts: Arc<AtomicU64>,
     worker: Mutex<Option<thread::JoinHandle<()>>>,
     worker_claimed: Option<Arc<AtomicBool>>,
+    #[cfg(test)]
+    test_hooks: Option<Arc<ExecutionAdapterTestHooks>>,
 }
 
 impl SingleThreadExecutionService {
@@ -880,6 +967,12 @@ impl SingleThreadExecutionService {
         metrics: Option<Arc<ExecutionMetrics>>,
         vm_v0_backend: Option<VmV0StateBackend>,
     ) -> Result<Self, ExecutionServiceInitError> {
+        #[cfg(test)]
+        let test_hooks = match &vm_v0_backend {
+            Some(VmV0StateBackend::Persistent(state)) => Some(Arc::clone(&state.0.test_hooks)),
+            _ => None,
+        };
+
         let claimed_state = match &vm_v0_backend {
             Some(VmV0StateBackend::Persistent(state)) => {
                 state.0.claim_worker()?;
@@ -935,6 +1028,8 @@ impl SingleThreadExecutionService {
             worker_restarts,
             worker: Mutex::new(Some(worker)),
             worker_claimed: claimed_state,
+            #[cfg(test)]
+            test_hooks,
         })
     }
     /// - `VmV0`: Uses sequential VM v0 execution with account balances (T163)
@@ -1131,6 +1226,8 @@ impl SingleThreadExecutionService {
             VmV0StateBackend::Persistent(mut state) => {
                 eprintln!("[T164] VM v0 using initialized persistent state");
                 let operation_lock = Arc::clone(&state.0.operation);
+                #[cfg(test)]
+                let test_hooks = Arc::clone(&state.0.test_hooks);
                 Self::run_vm_v0_loop(
                     &engine,
                     &mut state,
@@ -1142,6 +1239,8 @@ impl SingleThreadExecutionService {
                     true,
                     stage_b_enabled,
                     Some(operation_lock),
+                    #[cfg(test)]
+                    Some(test_hooks),
                 );
             }
             VmV0StateBackend::InMemory(mut state) => {
@@ -1156,6 +1255,8 @@ impl SingleThreadExecutionService {
                     current_height,
                     false, // not persistent
                     stage_b_enabled,
+                    None,
+                    #[cfg(test)]
                     None,
                 );
             }
@@ -1186,6 +1287,7 @@ impl SingleThreadExecutionService {
         is_persistent: bool,
         stage_b_enabled: bool,
         operation_lock: Option<Arc<Mutex<()>>>,
+        #[cfg(test)] test_hooks: Option<Arc<ExecutionAdapterTestHooks>>,
     ) {
         // T187: Set Stage B enabled metric at startup
         if let Some(ref m) = metrics {
@@ -1202,6 +1304,10 @@ impl SingleThreadExecutionService {
             match receiver.recv_timeout(std::time::Duration::from_millis(25)) {
                 Ok(task) => {
                     let _operation_guard = operation_lock.as_ref().map(|lock| lock.lock());
+                    #[cfg(test)]
+                    if let Some(test_hooks) = &test_hooks {
+                        test_hooks.before_worker_block();
+                    }
                     // Update queue length
                     let len = receiver.len();
                     queue_len.store(len as u64, Ordering::Relaxed);
@@ -1435,7 +1541,20 @@ impl Drop for SingleThreadExecutionService {
     fn drop(&mut self) {
         self.shutdown.store(true, Ordering::SeqCst);
         if let Some(worker) = self.worker.get_mut().take() {
-            if worker.join().is_err() {
+            #[cfg(test)]
+            if let Some(test_hooks) = &self.test_hooks {
+                if let Some(sender) = test_hooks.drop_join_started.lock().take() {
+                    let _ = sender.send(());
+                }
+            }
+            let join_result = worker.join();
+            #[cfg(test)]
+            if let Some(test_hooks) = &self.test_hooks {
+                if let Some(sender) = test_hooks.join_result.lock().take() {
+                    let _ = sender.send(join_result.is_ok());
+                }
+            }
+            if join_result.is_err() {
                 eprintln!("[T163] Execution worker panicked before termination");
             }
         }
@@ -1871,23 +1990,320 @@ mod tests {
     }
 
     #[test]
-    fn failed_public_put_returns_error_and_does_not_update_cache() {
+    fn injected_public_put_result_error_is_propagated_without_cache_update() {
         let dir = tempfile::tempdir().unwrap();
         let state = PersistentVmV0State::open(dir.path().join("state")).unwrap();
         let account = test_account_id(0x72);
         let initial = qbind_ledger::AccountState::new(0, 30);
         state.set_account_state(&account, initial.clone()).unwrap();
 
-        state.fail_next_public_put.store(true, Ordering::SeqCst);
+        state
+            .test_hooks
+            .fail_next_public_put
+            .store(true, Ordering::SeqCst);
         let error = state
             .set_account_state(&account, qbind_ledger::AccountState::new(1, 25))
             .unwrap_err();
 
         assert!(error
             .to_string()
-            .contains("injected persistent account put failure"));
+            .contains("injected public put-result error"));
         assert_eq!(state.get_account_state(&account), initial);
-        assert_eq!(state.state.get_account_state(&account), initial);
+        assert_eq!(
+            state.state.get_account_state(&account),
+            qbind_ledger::AccountState::new(1, 25),
+            "the injection overrides the result after the actual RocksDB put succeeds"
+        );
+    }
+
+    fn install_worker_block_gate(state: &PersistentVmV0State) -> (Receiver<()>, Sender<()>) {
+        let (entered_sender, entered_receiver) = crossbeam_channel::bounded(1);
+        let (release_sender, release_receiver) = crossbeam_channel::bounded(1);
+        *state.test_hooks.worker_block_gate.lock() = Some(Arc::new(WorkerBlockGate {
+            entered: entered_sender,
+            release: Mutex::new(release_receiver),
+        }));
+        (entered_receiver, release_sender)
+    }
+
+    #[test]
+    fn public_read_waits_for_the_real_worker_block_operation() {
+        let dir = tempfile::tempdir().unwrap();
+        let state_path = dir.path().join("state");
+        let state = PersistentVmV0State::open(&state_path).unwrap();
+        let (worker_entered, release_worker) = install_worker_block_gate(&state);
+        let (attempt_sender, attempt_receiver) = crossbeam_channel::bounded(1);
+        *state.test_hooks.public_lock_attempt.lock() = Some(attempt_sender);
+        let service = SingleThreadExecutionService::with_config_and_persistent_state(
+            NonceExecutionEngine::new(),
+            SingleThreadExecutionServiceConfig::vm_v0_persistent(&state_path),
+            None,
+            state.clone(),
+        )
+        .unwrap();
+        service
+            .submit_block(QbindBlock::empty(make_test_proposal(1)))
+            .unwrap();
+        worker_entered
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("worker should pause after acquiring the operation lock");
+
+        let read_state = state.clone();
+        let (read_done_sender, read_done_receiver) = crossbeam_channel::bounded(1);
+        let reader = thread::spawn(move || {
+            let result = read_state.get_account_state(&test_account_id(0x73));
+            let _ = read_done_sender.send(result);
+        });
+        let blocked = attempt_receiver
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("public read should report its observed lock state");
+        let read_was_pending = read_done_receiver.try_recv().is_err();
+
+        release_worker.send(()).unwrap();
+        let read_result = read_done_receiver
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("public read should proceed after the worker releases the lock");
+        reader.join().unwrap();
+        drop(service);
+
+        assert!(blocked, "the public read observed the worker-held lock");
+        assert!(read_was_pending);
+        assert_eq!(read_result, qbind_ledger::AccountState::default());
+    }
+
+    #[test]
+    fn bypass_sensitivity_control_reads_while_worker_holds_operation_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let state_path = dir.path().join("state");
+        let state = PersistentVmV0State::open(&state_path).unwrap();
+        let (worker_entered, release_worker) = install_worker_block_gate(&state);
+        let (attempt_sender, attempt_receiver) = crossbeam_channel::bounded(1);
+        *state.test_hooks.public_lock_attempt.lock() = Some(attempt_sender);
+        state
+            .test_hooks
+            .bypass_public_operation_lock
+            .store(true, Ordering::SeqCst);
+        let service = SingleThreadExecutionService::with_config_and_persistent_state(
+            NonceExecutionEngine::new(),
+            SingleThreadExecutionServiceConfig::vm_v0_persistent(&state_path),
+            None,
+            state.clone(),
+        )
+        .unwrap();
+        service
+            .submit_block(QbindBlock::empty(make_test_proposal(1)))
+            .unwrap();
+        worker_entered
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("worker should pause after acquiring the operation lock");
+
+        let read_state = state.clone();
+        let (read_done_sender, read_done_receiver) = crossbeam_channel::bounded(1);
+        let reader = thread::spawn(move || {
+            let result = read_state.get_account_state(&test_account_id(0x74));
+            let _ = read_done_sender.send(result);
+        });
+        let lock_was_blocked = attempt_receiver
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("bypassed public read should report its lock state");
+        let read_result = read_done_receiver
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("sensitivity control should finish without the operation lock");
+
+        release_worker.send(()).unwrap();
+        reader.join().unwrap();
+        drop(service);
+
+        assert!(!lock_was_blocked);
+        assert_eq!(read_result, qbind_ledger::AccountState::default());
+    }
+
+    #[test]
+    fn drop_keeps_backend_claim_until_worker_join_completes() {
+        let dir = tempfile::tempdir().unwrap();
+        let state_path = dir.path().join("state");
+        let state = PersistentVmV0State::open(&state_path).unwrap();
+        let (worker_entered, release_worker) = install_worker_block_gate(&state);
+        let (join_started_sender, join_started_receiver) = crossbeam_channel::bounded(1);
+        let (join_result_sender, join_result_receiver) = crossbeam_channel::bounded(1);
+        state
+            .test_hooks
+            .drop_join_started
+            .lock()
+            .replace(join_started_sender);
+        state
+            .test_hooks
+            .join_result
+            .lock()
+            .replace(join_result_sender);
+        let config = SingleThreadExecutionServiceConfig::vm_v0_persistent(&state_path);
+        let service = SingleThreadExecutionService::with_config_and_persistent_state(
+            NonceExecutionEngine::new(),
+            config.clone(),
+            None,
+            state.clone(),
+        )
+        .unwrap();
+        service
+            .submit_block(QbindBlock::empty(make_test_proposal(1)))
+            .unwrap();
+        worker_entered
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("worker should pause before the drop/join attempt");
+
+        let (drop_done_sender, drop_done_receiver) = crossbeam_channel::bounded(1);
+        let dropper = thread::spawn(move || {
+            drop(service);
+            let _ = drop_done_sender.send(());
+        });
+        join_started_receiver
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("service drop should reach the actual join call");
+        let competing_claim = SingleThreadExecutionService::with_config_and_persistent_state(
+            NonceExecutionEngine::new(),
+            config.clone(),
+            None,
+            state.clone(),
+        );
+
+        release_worker.send(()).unwrap();
+        drop_done_receiver
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("drop should finish after the worker is released and joined");
+        dropper.join().unwrap();
+        let joined_normally = join_result_receiver
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("drop should report the real JoinHandle result");
+        let reacquired = SingleThreadExecutionService::with_config_and_persistent_state(
+            NonceExecutionEngine::new(),
+            config,
+            None,
+            state,
+        );
+
+        assert!(matches!(
+            competing_claim,
+            Err(ExecutionServiceInitError::BackendAlreadyOwned)
+        ));
+        assert!(joined_normally);
+        assert!(reacquired.is_ok());
+        drop(reacquired);
+    }
+
+    #[test]
+    fn worker_put_result_error_is_suppressed_and_execution_still_reports_success() {
+        let dir = tempfile::tempdir().unwrap();
+        let state_path = dir.path().join("state");
+        let state = PersistentVmV0State::open(&state_path).unwrap();
+        let sender = test_account_id(0x75);
+        let recipient = test_account_id(0x76);
+        let initial = qbind_ledger::AccountState::new(0, 100);
+        state.set_account_state(&sender, initial.clone()).unwrap();
+
+        state
+            .test_hooks
+            .fail_worker_puts
+            .store(true, Ordering::SeqCst);
+        let metrics = Arc::new(ExecutionMetrics::new());
+        let service = SingleThreadExecutionService::with_config_and_persistent_state(
+            NonceExecutionEngine::new(),
+            SingleThreadExecutionServiceConfig::vm_v0_persistent(&state_path),
+            Some(metrics.clone()),
+            state.clone(),
+        )
+        .unwrap();
+        let tx = QbindTransaction::new(sender, 0, TransferPayload::new(recipient, 7).encode());
+        service
+            .submit_block(QbindBlock::new(make_test_proposal(1), vec![tx]))
+            .unwrap();
+        wait_for_blocks(&metrics, 1);
+        state
+            .test_hooks
+            .fail_worker_puts
+            .store(false, Ordering::SeqCst);
+
+        let database_sender = state.state.get_account_state(&sender);
+        let database_recipient = state.state.get_account_state(&recipient);
+        let cached_sender = state.get_account_state(&sender);
+        drop(service);
+
+        assert_eq!(database_sender, initial);
+        assert_eq!(database_recipient, qbind_ledger::AccountState::default());
+        assert_eq!(cached_sender, initial);
+        assert_eq!(metrics.txs_applied_total(), 1);
+        assert_eq!(metrics.blocks_applied_total(), 1);
+    }
+
+    #[test]
+    fn worker_panic_after_a_put_leaves_partial_state_and_releases_claim() {
+        let dir = tempfile::tempdir().unwrap();
+        let state_path = dir.path().join("state");
+        let state = PersistentVmV0State::open(&state_path).unwrap();
+        let (worker_entered, release_worker) = install_worker_block_gate(&state);
+        let (join_result_sender, join_result_receiver) = crossbeam_channel::bounded(1);
+        state
+            .test_hooks
+            .join_result
+            .lock()
+            .replace(join_result_sender);
+        let sender = test_account_id(0x77);
+        let recipient = test_account_id(0x78);
+        let initial = qbind_ledger::AccountState::new(0, 100);
+        state.set_account_state(&sender, initial.clone()).unwrap();
+        state
+            .test_hooks
+            .panic_after_worker_put
+            .store(true, Ordering::SeqCst);
+        let config = SingleThreadExecutionServiceConfig::vm_v0_persistent(&state_path);
+        let service = SingleThreadExecutionService::with_config_and_persistent_state(
+            NonceExecutionEngine::new(),
+            config.clone(),
+            None,
+            state.clone(),
+        )
+        .unwrap();
+        service
+            .submit_block(QbindBlock::new(
+                make_test_proposal(1),
+                vec![QbindTransaction::new(
+                    sender,
+                    0,
+                    TransferPayload::new(recipient, 7).encode(),
+                )],
+            ))
+            .unwrap();
+        worker_entered
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("worker should reach the controlled block operation");
+
+        release_worker.send(()).unwrap();
+        drop(service);
+        let joined_normally = join_result_receiver
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("drop should retain and report the worker join result");
+        let reacquired = SingleThreadExecutionService::with_config_and_persistent_state(
+            NonceExecutionEngine::new(),
+            config,
+            None,
+            state.clone(),
+        );
+        let database_sender = state.state.get_account_state(&sender);
+        let cached_sender = state.get_account_state(&sender);
+        let database_recipient = state.state.get_account_state(&recipient);
+
+        assert!(!joined_normally, "the worker thread should have panicked");
+        assert_eq!(
+            database_sender,
+            qbind_ledger::AccountState::new(1, 93),
+            "the first real RocksDB put completed before the injected panic"
+        );
+        assert_eq!(cached_sender, initial);
+        assert_eq!(database_recipient, qbind_ledger::AccountState::default());
+        assert!(
+            reacquired.is_ok(),
+            "current code releases the claim after joining a panicked worker"
+        );
+        drop(reacquired);
     }
 
     #[test]
