@@ -384,6 +384,8 @@ pub struct StageBExecStats {
 /// The scheduler guarantees no two transactions in the same level touch
 /// the same account, so write conflicts should not occur in practice.
 pub struct StageBPerAccountState {
+    #[cfg(test)]
+    oracle_writes: std::sync::Mutex<Vec<(AccountId, crate::AccountState)>>,
     accounts: std::sync::Arc<
         std::sync::RwLock<
             std::collections::HashMap<
@@ -398,6 +400,8 @@ impl StageBPerAccountState {
     /// Create a new per-account state.
     pub fn new() -> Self {
         Self {
+            #[cfg(test)]
+            oracle_writes: std::sync::Mutex::new(Vec::new()),
             accounts: std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
         }
     }
@@ -412,6 +416,8 @@ impl StageBPerAccountState {
             );
         }
         Self {
+            #[cfg(test)]
+            oracle_writes: std::sync::Mutex::new(Vec::new()),
             accounts: std::sync::Arc::new(std::sync::RwLock::new(accounts)),
         }
     }
@@ -448,6 +454,11 @@ impl StageBPerAccountState {
 
     /// Set account state (write).
     pub fn set(&self, account: &AccountId, state: crate::AccountState) {
+        #[cfg(test)]
+        self.oracle_writes
+            .lock()
+            .unwrap()
+            .push((*account, state.clone()));
         let lock = self.get_account_lock(account);
         let mut guard = lock.write().unwrap();
         *guard = state;
@@ -465,6 +476,10 @@ impl StageBPerAccountState {
         state
     }
 }
+
+#[cfg(test)]
+#[path = "checked_arithmetic_oracle_tests.rs"]
+mod checked_arithmetic_oracle;
 
 impl Default for StageBPerAccountState {
     fn default() -> Self {
