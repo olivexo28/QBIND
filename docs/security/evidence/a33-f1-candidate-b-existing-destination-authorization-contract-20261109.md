@@ -15,6 +15,7 @@ or claim that Candidate B currently protects any startup effect.
 | QBIND main source | `aa382fa28b2d3e97e6203d47fa8231b5f2269741`, tree `f1a7d40993bfefbe18635bd637a100ad5527d875` |
 | Reviewed pre-existing destination threat model | `docs/candidate-b-preexisting-destination-threat-model`, commit `b125f24bf3ad467cbfadc0f29ee80c42bf50efca`, tree `da8de91fcf630aaab095c5b283cbeab4eb0df6fc` |
 | Reviewed pre-ownership specification | `docs/candidate-b-pre-ownership-gate-spec`, commit `b13762c790e25ef9d29071d4a12de5369f3ef02f`, tree `a160d82321cf8a9479a023309f4baca863d17ae8` |
+| Upstream rust-rocksdb source examined for wrapper behavior | `v0.22.0` source at commit `e523ca4a13a7bf364abd0743149d0b3cd40856c0` (`src/db.rs`, `src/ffi_util.rs`) |
 
 The approved proposed protected-effect boundary includes data-directory
 and lock-file creation, metrics task creation, consensus/account database
@@ -183,6 +184,40 @@ admission and opens it after the consensus lifecycle
 likewise do not prove that the original open was rooted in the
 gate-authenticated object.
 
+### Source qualifications: existing-only open and path encoding
+
+The account `RocksDbAccountState::open_existing` sets
+`create_if_missing(false)` before calling `rocksdb::DB::open`
+(`crates/qbind-ledger/src/execution.rs:1423-1445`). This prevents
+initialization of a replacement RocksDB database when the database is
+missing, within the accepted no-replacement-database finding and its
+previously reviewed scope. It does not imply that the wrapper performs no
+filesystem effects before RocksDB decides whether the database can be opened.
+
+In the examined rust-rocksdb v0.22.0 source, the shared open implementation
+forms a C path and then calls `fs::create_dir_all(&path)` before invoking
+the RocksDB open (`src/db.rs:599-615`); `to_cpath` constructs the C path using
+`path.as_ref().to_string_lossy()` (`src/ffi_util.rs:53-59`). Therefore, if
+this wrapper is reached with a missing account-database path and permissions
+allow, it can create directory components even though
+`create_if_missing(false)` refuses to initialize the missing database.
+`create_dir_all` may also leave partial directory effects if a later
+component fails. This is a source-derived possibility, not evidence that a
+specific QBIND startup route reaches `open_existing` with a missing path;
+earlier route guards may refuse first. It does not reopen or broaden the
+accepted no-replacement-database findings.
+
+The wrapper uses the original Rust `Path` for `create_dir_all`, while the
+RocksDB C call receives the `to_string_lossy()`-derived path. A future
+contract must define whether non-UTF-8 paths are supported or refused and
+must establish that all relevant operations—including directory creation
+and the backend open—address the intended object. This is a source
+observation requiring platform-specific review, not an observed attack or
+an established reachable route. The reviewer did not independently verify
+the published crate archive byte-for-byte against the cited upstream commit
+or inspect the author's local Cargo registry; the cited evidence is the
+upstream source at the pinned commit, not archive-provenance evidence.
+
 Current interfaces therefore do not accept or propagate a gate-authenticated
 destination-object binding into lock acquisition or consensus/account
 openers. They remain path-based at these boundaries. Current interface
@@ -195,6 +230,9 @@ At minimum, a later implementation review would require:
 - authoritative documentation for each supported OS and filesystem
   describing the object/handle, rename, unlink, symlink, parent, mount and
   namespace semantics relied upon;
+- a reviewed path-encoding contract, including explicit non-UTF-8 handling,
+  and evidence that path-based directory creation and backend opens resolve
+  to the same intended object under each supported platform configuration;
 - separately reviewed tests for the exact supported configurations and
   backend versions, including whether every database operation and auxiliary
   filesystem operation remains rooted in the bound object;
