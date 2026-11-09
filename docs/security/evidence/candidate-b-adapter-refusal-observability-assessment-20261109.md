@@ -38,10 +38,13 @@ test and baseline evidence are cited at the reviewed test endpoint.
 VM-v0 with `state_dir: None` (main `crates/qbind-node/src/execution_adapter.rs:449-596`).
 `SingleThreadExecutionService::with_config` returns a service directly,
 without a `Result`; it spawns a worker thread and discards the `JoinHandle`
-(main `execution_adapter.rs:639-692`). The worker performs the persistent
-open asynchronously after construction returns (main `execution_adapter.rs:879-928`).
-Consequently, a returned service handle establishes neither successful
-backend initialization nor that the worker remains live.
+(main `execution_adapter.rs:639-692`). The worker is independently
+scheduled, and its VM-v0 path attempts the persistent open
+(`main execution_adapter.rs:856-880`). There is no readiness handshake
+establishing whether that open attempt occurs before or after
+`with_config` returns. Consequently, a returned service handle establishes
+neither successful backend initialization nor that the worker remains
+live.
 
 For `Some(path)`, the current worker catches `RocksDbAccountState::open`
 failure, logs the error, and enters the VM-v0 loop with
