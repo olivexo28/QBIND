@@ -29,9 +29,13 @@ The first-attempt complete output is retained, but its shell exit code was
 not captured in the session record; the final attempts and their exit codes
 are recorded below.
 
-Only the new integration test and these evidence files are added relative to
-the reviewed endpoint and expected main. The previously accepted tests and
-historical findings were not modified or rerun.
+Compared with the earlier reviewed endpoint, the current reviewed head is
+three commits ahead and adds six paths: the new integration test and five
+evidence files. Compared with pinned main, the current reviewed head is 23
+commits ahead and changes 32 paths, including inherited specifications,
+tests, and evidence. The six-path endpoint-to-head slice is not the entire
+main-relative package. Previously accepted tests and historical findings
+were not modified or rerun for this task.
 
 The test exercises the actual guard at
 `crates/qbind-node/src/restore_completion.rs:988` and its `ProceedComplete`,
@@ -102,8 +106,9 @@ The UTF-8 positive control returned `ProceedComplete` and read its marker.
 The foreign-record control returned `RefuseForeign`; missing and empty
 required-state controls returned `RefuseMissingState`. In all three
 refusal cases, the harness asserted that its conditional storage closure
-was not called. These controls characterize the guard's decision and this
-test harness, not a node startup route.
+was not called. These controls demonstrate the harness's conditional
+behavior and characterize the guard's decision; they do not establish
+production startup orchestration or a node startup route.
 
 The focused command reported 2 tests passed, 0 failed. That count is
 separate from the observations above and is not their evidentiary basis.
