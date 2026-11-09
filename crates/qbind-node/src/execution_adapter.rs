@@ -68,7 +68,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
 
-use crossbeam_channel::{bounded, Receiver, Sender, TrySendError};
+use crossbeam_channel::{bounded, Receiver, RecvTimeoutError, Sender, TrySendError};
 use parking_lot::Mutex;
 use qbind_ledger::{
     execute_block_stage_b, AccountState, AccountStateUpdater, AccountStateView,
@@ -396,6 +396,8 @@ pub enum ExecutionServiceInitError {
     InvalidConfiguration(&'static str),
     /// The requested VM-v0 persistent backend could not be opened.
     PersistentOpen(StorageError),
+    /// Another execution worker already claimed the opened persistent backend.
+    BackendAlreadyOwned,
     /// The worker thread could not be created after backend initialization.
     WorkerSpawn(io::Error),
 }
@@ -409,6 +411,9 @@ impl std::fmt::Display for ExecutionServiceInitError {
             Self::PersistentOpen(error) => {
                 write!(f, "failed to open requested persistent state: {error}")
             }
+            Self::BackendAlreadyOwned => {
+                write!(f, "persistent state already has an execution worker owner")
+            }
             Self::WorkerSpawn(error) => write!(f, "failed to spawn execution worker: {error}"),
         }
     }
@@ -419,6 +424,7 @@ impl std::error::Error for ExecutionServiceInitError {
         match self {
             Self::InvalidConfiguration(_) => None,
             Self::PersistentOpen(error) => Some(error),
+            Self::BackendAlreadyOwned => None,
             Self::WorkerSpawn(error) => Some(error),
         }
     }
@@ -486,13 +492,19 @@ struct ExecTask {
 
 /// Shared handle to an opened persistent VM-v0 database.
 ///
-/// Clones refer to the same RocksDB instance and account cache, allowing a caller
-/// to initialize or inspect state while the execution worker uses it.
+/// Clones refer to the same RocksDB instance. Public reads, writes, flushes, and
+/// complete worker block operations are serialized. Only one worker may claim
+/// this backend. The claim is released only after the service joins its worker
+/// during drop; `shutdown` alone does not release ownership.
 #[derive(Clone)]
 pub struct PersistentVmV0State {
     path: PathBuf,
     state: Arc<RocksDbAccountState>,
     cache: Arc<Mutex<InMemoryAccountState>>,
+    operation: Arc<Mutex<()>>,
+    worker_claimed: Arc<AtomicBool>,
+    #[cfg(test)]
+    fail_next_public_put: Arc<AtomicBool>,
 }
 
 impl PersistentVmV0State {
@@ -504,11 +516,20 @@ impl PersistentVmV0State {
             path,
             state: Arc::new(backend),
             cache: Arc::new(Mutex::new(InMemoryAccountState::new())),
+            operation: Arc::new(Mutex::new(())),
+            worker_claimed: Arc::new(AtomicBool::new(false)),
+            #[cfg(test)]
+            fail_next_public_put: Arc::new(AtomicBool::new(false)),
         })
     }
 
     /// Read one account from the shared persistent state.
     pub fn get_account_state(&self, account: &AccountId) -> AccountState {
+        let _operation = self.operation.lock();
+        self.get_account_state_locked(account)
+    }
+
+    fn get_account_state_locked(&self, account: &AccountId) -> AccountState {
         let cached = self.cache.lock().get_account_state(account);
         if cached != AccountState::default() {
             return cached;
@@ -516,38 +537,64 @@ impl PersistentVmV0State {
         self.state.get_account_state(account)
     }
 
-    /// Write one account to the shared persistent state.
-    pub fn set_account_state(&self, account: &AccountId, state: AccountState) {
-        self.cache.lock().set_account_state(account, state.clone());
-        let _ = self.state.put_account_state(account, &state);
+    /// Write one account to persistent state without hiding storage errors.
+    ///
+    /// The cache is updated only after the database put succeeds.
+    pub fn set_account_state(
+        &self,
+        account: &AccountId,
+        state: AccountState,
+    ) -> Result<(), StorageError> {
+        let _operation = self.operation.lock();
+        #[cfg(test)]
+        if self.fail_next_public_put.swap(false, Ordering::SeqCst) {
+            return Err(StorageError::Io(
+                "injected persistent account put failure".to_owned(),
+            ));
+        }
+        self.state.put_account_state(account, &state)?;
+        self.cache.lock().set_account_state(account, state);
+        Ok(())
     }
 
     /// Flush the shared persistent state.
     pub fn flush(&self) -> Result<(), StorageError> {
+        let _operation = self.operation.lock();
         self.state.flush()
     }
+
+    fn claim_worker(&self) -> Result<(), ExecutionServiceInitError> {
+        self.worker_claimed
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .map(|_| ())
+            .map_err(|_| ExecutionServiceInitError::BackendAlreadyOwned)
+    }
 }
 
-impl AccountStateView for PersistentVmV0State {
+struct PersistentWorkerState(PersistentVmV0State);
+
+impl AccountStateView for PersistentWorkerState {
     fn get_account_state(&self, account: &AccountId) -> AccountState {
-        PersistentVmV0State::get_account_state(self, account)
+        self.0.get_account_state_locked(account)
     }
 }
 
-impl AccountStateUpdater for PersistentVmV0State {
+impl AccountStateUpdater for PersistentWorkerState {
     fn set_account_state(&mut self, account: &AccountId, state: AccountState) {
-        PersistentVmV0State::set_account_state(self, account, state);
+        if self.0.state.put_account_state(account, &state).is_ok() {
+            self.0.cache.lock().set_account_state(account, state);
+        }
     }
 }
 
-impl FlushableState for PersistentVmV0State {
+impl FlushableState for PersistentWorkerState {
     fn flush_state(&self) -> Result<(), StorageError> {
-        self.flush()
+        self.0.state.flush()
     }
 }
 
 enum VmV0StateBackend {
-    Persistent(PersistentVmV0State),
+    Persistent(PersistentWorkerState),
     InMemory(InMemoryAccountState),
 }
 
@@ -747,6 +794,8 @@ pub struct SingleThreadExecutionService {
     queue_full_count: Arc<AtomicU64>,
     /// Worker restart counter (for metrics).
     worker_restarts: Arc<AtomicU64>,
+    worker: Mutex<Option<thread::JoinHandle<()>>>,
+    worker_claimed: Option<Arc<AtomicBool>>,
 }
 
 impl SingleThreadExecutionService {
@@ -784,10 +833,12 @@ impl SingleThreadExecutionService {
                 ));
             }
             (ExecutionProfile::NonceOnly, None) => None,
-            (ExecutionProfile::VmV0, Some(path)) => Some(VmV0StateBackend::Persistent(
-                PersistentVmV0State::open(path)
-                    .map_err(ExecutionServiceInitError::PersistentOpen)?,
-            )),
+            (ExecutionProfile::VmV0, Some(path)) => {
+                Some(VmV0StateBackend::Persistent(PersistentWorkerState(
+                    PersistentVmV0State::open(path)
+                        .map_err(ExecutionServiceInitError::PersistentOpen)?,
+                )))
+            }
             (ExecutionProfile::VmV0, None) => {
                 Some(VmV0StateBackend::InMemory(InMemoryAccountState::new()))
             }
@@ -819,7 +870,7 @@ impl SingleThreadExecutionService {
             engine,
             config,
             metrics,
-            Some(VmV0StateBackend::Persistent(state)),
+            Some(VmV0StateBackend::Persistent(PersistentWorkerState(state))),
         )
     }
 
@@ -829,6 +880,14 @@ impl SingleThreadExecutionService {
         metrics: Option<Arc<ExecutionMetrics>>,
         vm_v0_backend: Option<VmV0StateBackend>,
     ) -> Result<Self, ExecutionServiceInitError> {
+        let claimed_state = match &vm_v0_backend {
+            Some(VmV0StateBackend::Persistent(state)) => {
+                state.0.claim_worker()?;
+                Some(Arc::clone(&state.0.worker_claimed))
+            }
+            _ => None,
+        };
+
         let (sender, receiver) = bounded::<ExecTask>(config.queue_capacity);
         let shutdown = Arc::new(AtomicBool::new(false));
         let queue_len = Arc::new(AtomicU64::new(0));
@@ -844,7 +903,7 @@ impl SingleThreadExecutionService {
         let stage_b_enabled = config.stage_b_enabled;
 
         // The opened backend is moved into the worker only after initialization succeeds.
-        spawn_execution_worker(move || {
+        let worker = spawn_execution_worker(move || {
             Self::worker_loop(
                 engine,
                 receiver,
@@ -856,8 +915,16 @@ impl SingleThreadExecutionService {
                 vm_v0_backend,
                 stage_b_enabled,
             );
-        })
-        .map_err(ExecutionServiceInitError::WorkerSpawn)?;
+        });
+        let worker = match worker {
+            Ok(worker) => worker,
+            Err(error) => {
+                if let Some(claimed_state) = claimed_state {
+                    claimed_state.store(false, Ordering::SeqCst);
+                }
+                return Err(ExecutionServiceInitError::WorkerSpawn(error));
+            }
+        };
 
         Ok(Self {
             sender,
@@ -866,6 +933,8 @@ impl SingleThreadExecutionService {
             queue_len,
             queue_full_count,
             worker_restarts,
+            worker: Mutex::new(Some(worker)),
+            worker_claimed: claimed_state,
         })
     }
     /// - `VmV0`: Uses sequential VM v0 execution with account balances (T163)
@@ -935,7 +1004,7 @@ impl SingleThreadExecutionService {
             }
 
             // Receive next task (blocking)
-            match receiver.recv() {
+            match receiver.recv_timeout(std::time::Duration::from_millis(25)) {
                 Ok(task) => {
                     // Update queue length
                     let len = receiver.len();
@@ -1016,10 +1085,11 @@ impl SingleThreadExecutionService {
                         }
                     }
                 }
-                Err(_) => {
+                Err(RecvTimeoutError::Disconnected) => {
                     // Channel closed, exit
                     break;
                 }
+                Err(RecvTimeoutError::Timeout) => continue,
             }
         }
     }
@@ -1060,6 +1130,7 @@ impl SingleThreadExecutionService {
         match backend {
             VmV0StateBackend::Persistent(mut state) => {
                 eprintln!("[T164] VM v0 using initialized persistent state");
+                let operation_lock = Arc::clone(&state.0.operation);
                 Self::run_vm_v0_loop(
                     &engine,
                     &mut state,
@@ -1070,6 +1141,7 @@ impl SingleThreadExecutionService {
                     current_height,
                     true,
                     stage_b_enabled,
+                    Some(operation_lock),
                 );
             }
             VmV0StateBackend::InMemory(mut state) => {
@@ -1084,6 +1156,7 @@ impl SingleThreadExecutionService {
                     current_height,
                     false, // not persistent
                     stage_b_enabled,
+                    None,
                 );
             }
         }
@@ -1112,6 +1185,7 @@ impl SingleThreadExecutionService {
         current_height: &mut u64,
         is_persistent: bool,
         stage_b_enabled: bool,
+        operation_lock: Option<Arc<Mutex<()>>>,
     ) {
         // T187: Set Stage B enabled metric at startup
         if let Some(ref m) = metrics {
@@ -1125,8 +1199,9 @@ impl SingleThreadExecutionService {
             }
 
             // Receive next task (blocking)
-            match receiver.recv() {
+            match receiver.recv_timeout(std::time::Duration::from_millis(25)) {
                 Ok(task) => {
+                    let _operation_guard = operation_lock.as_ref().map(|lock| lock.lock());
                     // Update queue length
                     let len = receiver.len();
                     queue_len.store(len as u64, Ordering::Relaxed);
@@ -1273,10 +1348,11 @@ impl SingleThreadExecutionService {
                         );
                     }
                 }
-                Err(_) => {
+                Err(RecvTimeoutError::Disconnected) => {
                     // Channel closed, exit
                     break;
                 }
+                Err(RecvTimeoutError::Timeout) => continue,
             }
         }
     }
@@ -1293,7 +1369,9 @@ impl SingleThreadExecutionService {
 
     /// Signal the service to shut down.
     ///
-    /// After calling this, `submit_block` will return `ShuttingDown`.
+    /// After calling this, `submit_block` will return `ShuttingDown`. This
+    /// request does not wait for worker termination; dropping the service joins
+    /// the worker before releasing persistent-backend ownership.
     pub fn shutdown(&self) {
         self.shutdown.store(true, Ordering::SeqCst);
     }
@@ -1355,8 +1433,15 @@ impl std::fmt::Debug for SingleThreadExecutionService {
 
 impl Drop for SingleThreadExecutionService {
     fn drop(&mut self) {
-        // Signal shutdown when the service is dropped
         self.shutdown.store(true, Ordering::SeqCst);
+        if let Some(worker) = self.worker.get_mut().take() {
+            if worker.join().is_err() {
+                eprintln!("[T163] Execution worker panicked before termination");
+            }
+        }
+        if let Some(worker_claimed) = &self.worker_claimed {
+            worker_claimed.store(false, Ordering::SeqCst);
+        }
     }
 }
 
@@ -1678,7 +1763,9 @@ mod tests {
         let state = PersistentVmV0State::open(&state_path).unwrap();
         let sender = test_account_id(0x61);
         let recipient = test_account_id(0x62);
-        state.set_account_state(&sender, qbind_ledger::AccountState::new(0, 100));
+        state
+            .set_account_state(&sender, qbind_ledger::AccountState::new(0, 100))
+            .unwrap();
         state.flush().unwrap();
 
         let metrics = Arc::new(ExecutionMetrics::new());
@@ -1754,6 +1841,92 @@ mod tests {
     }
 
     #[test]
+    fn shared_public_writes_keep_database_and_cache_consistent_under_contention() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = PersistentVmV0State::open(dir.path().join("state")).unwrap();
+        let account = test_account_id(0x71);
+        let start = Arc::new(std::sync::Barrier::new(3));
+        let mut writers = Vec::new();
+
+        for balance in [111, 222] {
+            let state = state.clone();
+            let start = Arc::clone(&start);
+            writers.push(thread::spawn(move || {
+                start.wait();
+                state
+                    .set_account_state(&account, qbind_ledger::AccountState::new(1, balance))
+                    .unwrap();
+            }));
+        }
+
+        start.wait();
+        for writer in writers {
+            writer.join().unwrap();
+        }
+
+        let cached_read = state.get_account_state(&account);
+        let database_read = state.state.get_account_state(&account);
+        assert!(matches!(cached_read.balance, 111 | 222));
+        assert_eq!(cached_read, database_read);
+    }
+
+    #[test]
+    fn failed_public_put_returns_error_and_does_not_update_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = PersistentVmV0State::open(dir.path().join("state")).unwrap();
+        let account = test_account_id(0x72);
+        let initial = qbind_ledger::AccountState::new(0, 30);
+        state.set_account_state(&account, initial.clone()).unwrap();
+
+        state.fail_next_public_put.store(true, Ordering::SeqCst);
+        let error = state
+            .set_account_state(&account, qbind_ledger::AccountState::new(1, 25))
+            .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("injected persistent account put failure"));
+        assert_eq!(state.get_account_state(&account), initial);
+        assert_eq!(state.state.get_account_state(&account), initial);
+    }
+
+    #[test]
+    fn persistent_backend_rejects_competing_worker_and_releases_after_join() {
+        let dir = tempfile::tempdir().unwrap();
+        let state_path = dir.path().join("state");
+        let state = PersistentVmV0State::open(&state_path).unwrap();
+        let config = SingleThreadExecutionServiceConfig::vm_v0_persistent(&state_path);
+        let first = SingleThreadExecutionService::with_config_and_persistent_state(
+            NonceExecutionEngine::new(),
+            config.clone(),
+            None,
+            state.clone(),
+        )
+        .unwrap();
+
+        let second = SingleThreadExecutionService::with_config_and_persistent_state(
+            NonceExecutionEngine::new(),
+            config.clone(),
+            None,
+            state.clone(),
+        );
+        assert!(matches!(
+            second,
+            Err(ExecutionServiceInitError::BackendAlreadyOwned)
+        ));
+
+        drop(first);
+        let reacquire = SingleThreadExecutionService::with_config_and_persistent_state(
+            NonceExecutionEngine::new(),
+            config,
+            None,
+            state,
+        )
+        .expect("drop joins the original worker before releasing ownership");
+        drop(reacquire);
+    }
+
+    #[test]
     fn worker_spawn_failure_reports_error_and_releases_opened_backend() {
         let dir = tempfile::tempdir().unwrap();
         let state_path = dir.path().join("state");
@@ -1772,6 +1945,35 @@ mod tests {
         ));
         let _reopened = RocksDbAccountState::open_existing(&state_path)
             .expect("opened backend is released after worker creation failure");
+    }
+
+    #[test]
+    fn worker_spawn_failure_releases_only_the_unstarted_worker_claim() {
+        let dir = tempfile::tempdir().unwrap();
+        let state_path = dir.path().join("state");
+        let state = PersistentVmV0State::open(&state_path).unwrap();
+        let config = SingleThreadExecutionServiceConfig::vm_v0_persistent(&state_path);
+        FAIL_NEXT_EXECUTION_WORKER_SPAWN.with(|fail| fail.set(true));
+
+        let result = SingleThreadExecutionService::with_config_and_persistent_state(
+            NonceExecutionEngine::new(),
+            config.clone(),
+            None,
+            state.clone(),
+        );
+        assert!(matches!(
+            result,
+            Err(ExecutionServiceInitError::WorkerSpawn(_))
+        ));
+
+        let retry = SingleThreadExecutionService::with_config_and_persistent_state(
+            NonceExecutionEngine::new(),
+            config,
+            None,
+            state,
+        )
+        .expect("failed spawn created no worker and released its ownership claim");
+        drop(retry);
     }
 
     #[test]

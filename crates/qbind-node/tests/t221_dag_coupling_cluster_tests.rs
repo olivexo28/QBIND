@@ -51,9 +51,7 @@ use std::time::{Duration, Instant};
 use qbind_consensus::ids::ValidatorId;
 
 use qbind_crypto::{AeadSuite, CryptoError, KemSuite, SignatureSuite, StaticCryptoProvider};
-use qbind_ledger::{
-    AccountState, AccountStateUpdater, NonceExecutionEngine, QbindTransaction, TransferPayload,
-};
+use qbind_ledger::{AccountState, NonceExecutionEngine, QbindTransaction, TransferPayload};
 use qbind_net::{
     ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode,
     ServerConnectionConfig, ServerHandshakeConfig,
@@ -663,7 +661,9 @@ impl DagCouplingClusterHandle {
     /// Initialize account state with a given balance on all nodes.
     pub fn init_account(&mut self, account_id: &AccountId, balance: u128) {
         for backend in &mut self.state_backends {
-            backend.set_account_state(account_id, AccountState::new(0, balance));
+            backend
+                .set_account_state(account_id, AccountState::new(0, balance))
+                .expect("test harness account initialization must persist");
         }
     }
 
