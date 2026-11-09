@@ -235,19 +235,22 @@ fn consensus_nonrepresentable_path_contract_baseline() {
     print_tree("lossy database before", &lossy_db);
 
     let opened = RocksDbConsensusStorage::open(&raw_db);
-    println!(
-        "RocksDbConsensusStorage::open(raw) result: {}",
-        result_kind(&opened)
-    );
-    let observed_epoch = match opened {
+    let open_was_refused = consensus_open_is_refusal(&opened);
+    match opened {
         Ok(db) => {
             let epoch = db.get_current_epoch().expect("read opened consensus epoch");
-            println!("epoch returned by raw-path consensus API: {epoch:?}");
+            println!("RocksDbConsensusStorage::open(raw) result: Ok; epoch={epoch:?}");
+            assert!(
+                epoch.is_none() || epoch == Some(expected_epoch),
+                "raw-path consensus API returned unexpected state instead of the lossy control epoch"
+            );
             drop(db);
-            epoch
         }
-        Err(_) => None,
-    };
+        Err(error) => {
+            println!("RocksDbConsensusStorage::open(raw) result: Err; debug={error:?}");
+            println!("RocksDbConsensusStorage::open(raw) display: {error}");
+        }
+    }
 
     print_tree("raw ancestor after", raw_db.parent().unwrap());
     print_tree("raw database after", &raw_db);
@@ -265,16 +268,32 @@ fn consensus_nonrepresentable_path_contract_baseline() {
         "fixture must contain invalid UTF-8 in an ancestor"
     );
     assert!(
-        observed_epoch.is_none() || observed_epoch == Some(expected_epoch),
-        "raw-path consensus API returned unexpected state instead of the lossy control epoch"
-    );
-    assert!(
-        observed_epoch.is_none()
+        open_was_refused
             && !raw_db.parent().unwrap().exists()
             && !raw_db.exists()
             && before_lossy == after_lossy,
         "BASELINE CONTRACT FAILURE: consensus open did not refuse before observed effects"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn consensus_refusal_oracle_rejects_successful_empty_database() {
+    let fixture = tempdir().expect("create empty consensus sensitivity fixture");
+    let path = fixture.path().join("empty-consensus");
+    let opened = RocksDbConsensusStorage::open(&path);
+    let database = opened
+        .as_ref()
+        .expect("create valid empty consensus database");
+    let epoch = database
+        .get_current_epoch()
+        .expect("read absent epoch from successful empty database");
+    assert_eq!(epoch, None);
+    assert!(
+        !consensus_open_is_refusal(&opened),
+        "oracle sensitivity control must reject every successful open, including empty"
+    );
+    drop(opened);
 }
 
 #[cfg(unix)]
@@ -391,6 +410,37 @@ fn execution_adapter_persistent_failure_falls_back_but_memory_is_explicit() {
 }
 
 #[cfg(unix)]
+#[test]
+fn execution_adapter_requested_persistent_failure_requires_refusal() {
+    let fixture = tempdir().expect("create isolated adapter refusal fixture");
+    let blocker = fixture.path().join("regular-file");
+    fs::write(&blocker, b"not a directory").expect("create adapter path blocker");
+
+    let failed_persistent_path = blocker.join("state_vm_v0");
+    let metrics = Arc::new(ExecutionMetrics::new());
+    let config =
+        SingleThreadExecutionServiceConfig::vm_v0_persistent(&failed_persistent_path);
+    let service = SingleThreadExecutionService::with_config(
+        NonceExecutionEngine::new(),
+        config,
+        Some(Arc::clone(&metrics)),
+    );
+    service
+        .submit_block(adapter_test_block(0x63))
+        .expect("enqueue block with persistent storage requested");
+    let applied = wait_for_applied_transactions(&metrics);
+    println!(
+        "adapter requested-persistent open failure observed applied tx count={applied}"
+    );
+    service.shutdown();
+
+    assert_eq!(
+        applied, 0,
+        "BASELINE CONTRACT FAILURE: requested persistent storage failure must refuse, not execute in memory"
+    );
+}
+
+#[cfg(unix)]
 fn adapter_test_block(sender_byte: u8) -> QbindBlock {
     let sender = [sender_byte; 32];
     let recipient = [sender_byte.wrapping_add(1); 32];
@@ -427,15 +477,25 @@ fn adapter_test_block(sender_byte: u8) -> QbindBlock {
 
 #[cfg(unix)]
 fn wait_for_one_applied_transaction(metrics: &ExecutionMetrics) {
+    assert_eq!(
+        wait_for_applied_transactions(metrics),
+        1,
+        "worker did not apply test transaction"
+    );
+}
+
+#[cfg(unix)]
+fn wait_for_applied_transactions(metrics: &ExecutionMetrics) -> u64 {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
     while metrics.txs_applied_total() == 0 && std::time::Instant::now() < deadline {
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
-    assert_eq!(
-        metrics.txs_applied_total(),
-        1,
-        "worker did not apply test transaction"
-    );
+    metrics.txs_applied_total()
+}
+
+#[cfg(unix)]
+fn consensus_open_is_refusal<T, E>(result: &Result<T, E>) -> bool {
+    matches!(result, Err(_))
 }
 
 fn result_kind<T, E>(result: &Result<T, E>) -> &'static str {
