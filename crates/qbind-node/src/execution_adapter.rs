@@ -80,6 +80,60 @@ use qbind_wire::consensus::BlockProposal;
 use crate::metrics::ExecutionMetrics;
 use crate::node_config::ExecutionProfile;
 
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AdapterTestBackend {
+    Persistent,
+    InMemory,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AdapterTestEventKind {
+    WorkerStarted,
+    PersistentOpenAttempted,
+    PersistentOpenSucceeded,
+    PersistentOpenFailed,
+    BackendSelected(AdapterTestBackend),
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct AdapterTestEvent {
+    initialization_id: u64,
+    worker_id: u64,
+    kind: AdapterTestEventKind,
+}
+
+#[cfg(test)]
+struct AdapterTestObserver {
+    initialization_id: u64,
+    worker_id: u64,
+    sender: std::sync::mpsc::Sender<AdapterTestEvent>,
+}
+
+#[cfg(test)]
+thread_local! {
+    static ADAPTER_TEST_OBSERVER: std::cell::RefCell<Option<AdapterTestObserver>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn observe_adapter_test_event(kind: AdapterTestEventKind) {
+    ADAPTER_TEST_OBSERVER.with(|observer| {
+        if let Some(observer) = observer.borrow().as_ref() {
+            observer
+                .sender
+                .send(AdapterTestEvent {
+                    initialization_id: observer.initialization_id,
+                    worker_id: observer.worker_id,
+                    kind,
+                })
+                .expect("test observer receiver remains connected");
+        }
+    });
+}
+
 // ============================================================================
 // T164: FlushableState Trait
 // ============================================================================
@@ -877,8 +931,16 @@ impl SingleThreadExecutionService {
         match state_dir {
             Some(ref path) => {
                 // Use persistent state
+                #[cfg(test)]
+                observe_adapter_test_event(AdapterTestEventKind::PersistentOpenAttempted);
                 match RocksDbAccountState::open(path) {
                     Ok(persistent) => {
+                        #[cfg(test)]
+                        observe_adapter_test_event(AdapterTestEventKind::PersistentOpenSucceeded);
+                        #[cfg(test)]
+                        observe_adapter_test_event(AdapterTestEventKind::BackendSelected(
+                            AdapterTestBackend::Persistent,
+                        ));
                         eprintln!("[T164] VM v0 using persistent state at {:?}", path);
                         let mut state = CachedPersistentAccountState::new(persistent);
                         Self::run_vm_v0_loop(
@@ -894,6 +956,12 @@ impl SingleThreadExecutionService {
                         );
                     }
                     Err(e) => {
+                        #[cfg(test)]
+                        observe_adapter_test_event(AdapterTestEventKind::PersistentOpenFailed);
+                        #[cfg(test)]
+                        observe_adapter_test_event(AdapterTestEventKind::BackendSelected(
+                            AdapterTestBackend::InMemory,
+                        ));
                         eprintln!(
                             "[T164] Failed to open persistent state at {:?}: {:?}, falling back to in-memory",
                             path, e
@@ -915,6 +983,10 @@ impl SingleThreadExecutionService {
             }
             None => {
                 // Use in-memory state (T163 behavior)
+                #[cfg(test)]
+                observe_adapter_test_event(AdapterTestEventKind::BackendSelected(
+                    AdapterTestBackend::InMemory,
+                ));
                 eprintln!("[T164] VM v0 using in-memory state (no persistence)");
                 let mut state = InMemoryAccountState::new();
                 Self::run_vm_v0_loop(
@@ -1212,6 +1284,228 @@ mod tests {
     use super::*;
     use qbind_ledger::{get_account_nonce, NonceExecutionEngine};
     use qbind_wire::consensus::BlockHeader;
+    use std::sync::atomic::AtomicU64;
+    use std::sync::mpsc::{Receiver, Sender};
+    use std::thread::JoinHandle;
+    use std::time::{Duration, Instant};
+
+    static NEXT_ADAPTER_TEST_ID: AtomicU64 = AtomicU64::new(1);
+
+    #[derive(Debug, Eq, PartialEq)]
+    enum WorkerJoinOutcome {
+        TerminatedNormally,
+        Panicked,
+        UnresolvedAtDeadline,
+    }
+
+    struct ObservedAdapterWorker {
+        initialization_id: u64,
+        worker_id: u64,
+        sender: Option<Sender<ExecTask>>,
+        events: Receiver<AdapterTestEvent>,
+        join: Option<JoinHandle<()>>,
+    }
+
+    impl ObservedAdapterWorker {
+        fn receive_event(&self) -> AdapterTestEvent {
+            self.events
+                .recv_timeout(Duration::from_secs(10))
+                .expect("adapter worker should emit the expected observation")
+        }
+
+        fn assert_events(&self, expected: &[AdapterTestEventKind]) {
+            for kind in expected {
+                assert_eq!(
+                    self.receive_event(),
+                    AdapterTestEvent {
+                        initialization_id: self.initialization_id,
+                        worker_id: self.worker_id,
+                        kind: *kind,
+                    }
+                );
+            }
+        }
+
+        fn observe_join_until(&mut self, timeout: Duration) -> WorkerJoinOutcome {
+            let deadline = Instant::now() + timeout;
+            loop {
+                let join = self.join.as_ref().expect("worker join handle retained");
+                if join.is_finished() {
+                    return self.join_worker();
+                }
+                if Instant::now() >= deadline {
+                    return WorkerJoinOutcome::UnresolvedAtDeadline;
+                }
+                thread::sleep(Duration::from_millis(1));
+            }
+        }
+
+        fn stop_and_join(&mut self) -> WorkerJoinOutcome {
+            self.sender.take();
+            self.join_worker()
+        }
+
+        fn join_worker(&mut self) -> WorkerJoinOutcome {
+            match self
+                .join
+                .take()
+                .expect("worker join handle retained")
+                .join()
+            {
+                Ok(()) => WorkerJoinOutcome::TerminatedNormally,
+                Err(_) => WorkerJoinOutcome::Panicked,
+            }
+        }
+    }
+
+    impl Drop for ObservedAdapterWorker {
+        fn drop(&mut self) {
+            self.sender.take();
+            if let Some(join) = self.join.take() {
+                let _ = join.join();
+            }
+        }
+    }
+
+    fn spawn_observed_adapter_worker(
+        config: SingleThreadExecutionServiceConfig,
+    ) -> ObservedAdapterWorker {
+        let initialization_id = NEXT_ADAPTER_TEST_ID.fetch_add(1, Ordering::Relaxed);
+        let worker_id = NEXT_ADAPTER_TEST_ID.fetch_add(1, Ordering::Relaxed);
+        let (event_sender, events) = std::sync::mpsc::channel();
+        let (sender, receiver) = bounded::<ExecTask>(config.queue_capacity);
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let queue_len = Arc::new(AtomicU64::new(0));
+        let parallel_config = config.parallel_config;
+        let execution_profile = config.execution_profile;
+        let state_dir = config.state_dir;
+        let stage_b_enabled = config.stage_b_enabled;
+        let observer = AdapterTestObserver {
+            initialization_id,
+            worker_id,
+            sender: event_sender,
+        };
+        let join = thread::spawn(move || {
+            ADAPTER_TEST_OBSERVER.with(|slot| *slot.borrow_mut() = Some(observer));
+            observe_adapter_test_event(AdapterTestEventKind::WorkerStarted);
+            SingleThreadExecutionService::worker_loop(
+                NonceExecutionEngine::new(),
+                receiver,
+                shutdown,
+                queue_len,
+                None,
+                parallel_config,
+                execution_profile,
+                state_dir,
+                stage_b_enabled,
+            );
+            ADAPTER_TEST_OBSERVER.with(|slot| *slot.borrow_mut() = None);
+        });
+
+        ObservedAdapterWorker {
+            initialization_id,
+            worker_id,
+            sender: Some(sender),
+            events,
+            join: Some(join),
+        }
+    }
+
+    #[test]
+    fn test_observed_real_worker_opens_valid_persistent_path() {
+        let fixture = tempfile::tempdir().expect("create persistent-state fixture");
+        let path = fixture.path().join("persistent-state");
+        let mut worker = spawn_observed_adapter_worker(
+            SingleThreadExecutionServiceConfig::vm_v0_persistent(path),
+        );
+
+        worker.assert_events(&[
+            AdapterTestEventKind::WorkerStarted,
+            AdapterTestEventKind::PersistentOpenAttempted,
+            AdapterTestEventKind::PersistentOpenSucceeded,
+            AdapterTestEventKind::BackendSelected(AdapterTestBackend::Persistent),
+        ]);
+        assert_eq!(
+            worker.observe_join_until(Duration::from_millis(20)),
+            WorkerJoinOutcome::UnresolvedAtDeadline,
+            "a live worker waiting on its sender is not reported terminated"
+        );
+        assert_eq!(
+            worker.stop_and_join(),
+            WorkerJoinOutcome::TerminatedNormally
+        );
+    }
+
+    #[test]
+    fn test_observed_real_worker_falls_back_after_persistent_open_failure() {
+        let fixture = tempfile::tempdir().expect("create persistent-state fixture");
+        let blocker = fixture.path().join("regular-file");
+        std::fs::write(&blocker, b"not a directory").expect("create path blocker");
+        let path = blocker.join("persistent-state");
+        let mut worker = spawn_observed_adapter_worker(
+            SingleThreadExecutionServiceConfig::vm_v0_persistent(path),
+        );
+
+        worker.assert_events(&[
+            AdapterTestEventKind::WorkerStarted,
+            AdapterTestEventKind::PersistentOpenAttempted,
+            AdapterTestEventKind::PersistentOpenFailed,
+            AdapterTestEventKind::BackendSelected(AdapterTestBackend::InMemory),
+        ]);
+        assert_eq!(
+            worker.stop_and_join(),
+            WorkerJoinOutcome::TerminatedNormally
+        );
+    }
+
+    #[test]
+    fn test_observed_real_worker_selects_explicit_in_memory_without_open() {
+        let mut worker = spawn_observed_adapter_worker(SingleThreadExecutionServiceConfig::vm_v0());
+
+        worker.assert_events(&[
+            AdapterTestEventKind::WorkerStarted,
+            AdapterTestEventKind::BackendSelected(AdapterTestBackend::InMemory),
+        ]);
+        assert_eq!(
+            worker.stop_and_join(),
+            WorkerJoinOutcome::TerminatedNormally
+        );
+    }
+
+    #[test]
+    fn test_observations_are_correlated_to_their_initialization_and_worker() {
+        let fixture = tempfile::tempdir().expect("create adapter fixtures");
+        let valid_path = fixture.path().join("valid-state");
+        let blocker = fixture.path().join("regular-file");
+        std::fs::write(&blocker, b"not a directory").expect("create path blocker");
+        let invalid_path = blocker.join("invalid-state");
+        let mut valid = spawn_observed_adapter_worker(
+            SingleThreadExecutionServiceConfig::vm_v0_persistent(valid_path),
+        );
+        let mut invalid = spawn_observed_adapter_worker(
+            SingleThreadExecutionServiceConfig::vm_v0_persistent(invalid_path),
+        );
+
+        assert_ne!(valid.initialization_id, invalid.initialization_id);
+        assert_ne!(valid.worker_id, invalid.worker_id);
+        valid.assert_events(&[
+            AdapterTestEventKind::WorkerStarted,
+            AdapterTestEventKind::PersistentOpenAttempted,
+            AdapterTestEventKind::PersistentOpenSucceeded,
+            AdapterTestEventKind::BackendSelected(AdapterTestBackend::Persistent),
+        ]);
+        invalid.assert_events(&[
+            AdapterTestEventKind::WorkerStarted,
+            AdapterTestEventKind::PersistentOpenAttempted,
+            AdapterTestEventKind::PersistentOpenFailed,
+            AdapterTestEventKind::BackendSelected(AdapterTestBackend::InMemory),
+        ]);
+        assert_eq!(valid.stop_and_join(), WorkerJoinOutcome::TerminatedNormally);
+        assert_eq!(
+            invalid.stop_and_join(),
+            WorkerJoinOutcome::TerminatedNormally
+        );
+    }
 
     fn test_account_id(byte: u8) -> [u8; 32] {
         let mut id = [0u8; 32];
