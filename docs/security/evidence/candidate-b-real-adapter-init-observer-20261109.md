@@ -101,22 +101,30 @@ runtime timing beyond the absence of the test-only code.
 
 ## Commands, outputs, and environment
 
-Commands ran from the repository root with `CARGO_TARGET_DIR` set to
-`/tmp/qbind-synthetic-checker-correction.8lNhI8/target` and `TMPDIR` set to
-`/tmp/qbind-real-adapter-observer.rqaAzt/tmp`. The full Cargo outputs,
-including warnings and test logs, are retained as separate files:
+Commands ran from the repository root with the following common
+environment:
+
+```text
+CARGO_TARGET_DIR=/tmp/qbind-synthetic-checker-correction.8lNhI8/target
+TMPDIR=/tmp/qbind-real-adapter-observer.rqaAzt/tmp
+```
+
+The full Cargo outputs, including warnings and test logs, are retained as
+separate files:
 
 | Command | Exit | Output file | SHA-256 |
 |---|---:|---|---|
-| `cargo check --locked -p qbind-node --lib` | 0 | [`library check`](candidate-b-real-adapter-init-observer-library-check-20261109.txt) | `4bc86d89984842604136b247d2af3ce1efda64fbf9d0ee162aa0db86d4ae5045` |
-| `cargo test --locked -p qbind-node --lib execution_adapter::tests::test_observ --no-run` | 0 | [`focused compile`](candidate-b-real-adapter-init-observer-compile-20261109.txt) | `2bf9c51415b1dd42553e8d2655fd85413ce96b2608f2e6e64cfceb4102e07d53` |
-| `cargo test --locked -p qbind-node --lib execution_adapter::tests::test_observ -- --nocapture` | 0 | [`focused tests`](candidate-b-real-adapter-init-observer-focused-20261109.txt) | `07027fa59057a1c598752dc475d59f2fafc8079825b0311cfb70764b10d8f4f6` |
+| `CARGO_TARGET_DIR=/tmp/qbind-synthetic-checker-correction.8lNhI8/target TMPDIR=/tmp/qbind-real-adapter-observer.rqaAzt/tmp cargo check --locked -p qbind-node --lib` | 0 | [`library check`](candidate-b-real-adapter-init-observer-library-check-20261109.txt) | `4bc86d89984842604136b247d2af3ce1efda64fbf9d0ee162aa0db86d4ae5045` |
+| `CARGO_TARGET_DIR=/tmp/qbind-synthetic-checker-correction.8lNhI8/target TMPDIR=/tmp/qbind-real-adapter-observer.rqaAzt/tmp cargo test --locked -p qbind-node --lib execution_adapter::tests::test_observ --no-run` | 0 | [`focused compile`](candidate-b-real-adapter-init-observer-compile-20261109.txt) | `2bf9c51415b1dd42553e8d2655fd85413ce96b2608f2e6e64cfceb4102e07d53` |
+| `CARGO_TARGET_DIR=/tmp/qbind-synthetic-checker-correction.8lNhI8/target TMPDIR=/tmp/qbind-real-adapter-observer.rqaAzt/tmp cargo test --locked -p qbind-node --lib execution_adapter::tests::test_observ -- --nocapture` | 0 | [`focused tests`](candidate-b-real-adapter-init-observer-focused-20261109.txt) | `07027fa59057a1c598752dc475d59f2fafc8079825b0311cfb70764b10d8f4f6` |
 
-The focused compile and test command first failed with exit 101 because
-the test helper used the `std::sync::mpsc::Sender` type where the task
-queue requires `crossbeam_channel::Sender`. This was a compile failure,
-not an assertion or infrastructure failure. The type was corrected; the
-failed output is retained at
+The initial focused invocation was
+`CARGO_TARGET_DIR=/tmp/qbind-synthetic-checker-correction.8lNhI8/target TMPDIR=/tmp/qbind-real-adapter-observer.rqaAzt/tmp cargo test --locked -p qbind-node --lib execution_adapter::tests::test_observ -- --nocapture`
+with exit 101. It failed to compile because the test helper used the
+`std::sync::mpsc::Sender` type where the task queue requires
+`crossbeam_channel::Sender`. This was a compile failure, not an assertion
+or infrastructure failure. The type was corrected; the failed output is
+retained at
 [`initial compile failure`](candidate-b-real-adapter-init-observer-initial-compile-failure-20261109.txt),
 SHA-256 `4f1bffd214c16c6a9b38969ae6de8bb8d691d0b7a3fce49ffa9371b1d07228be`.
 The corrected compile-only and focused test commands then passed. Four
