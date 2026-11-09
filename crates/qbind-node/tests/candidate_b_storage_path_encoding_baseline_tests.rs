@@ -1,5 +1,6 @@
 use qbind_ledger::{
-    AccountState, PersistentAccountState, RocksDbAccountState, TransferPayload, VmV0ExecutionEngine,
+    AccountState, NonceExecutionEngine, PersistentAccountState, RocksDbAccountState,
+    TransferPayload,
 };
 use qbind_node::execution_adapter::{
     AsyncExecutionService, QbindBlock, SingleThreadExecutionService,
@@ -353,7 +354,7 @@ fn execution_adapter_persistent_failure_falls_back_but_memory_is_explicit() {
     let persistent_config =
         SingleThreadExecutionServiceConfig::vm_v0_persistent(&failed_persistent_path);
     let persistent_service = SingleThreadExecutionService::with_config(
-        VmV0ExecutionEngine::new(),
+        NonceExecutionEngine::new(),
         persistent_config,
         Some(Arc::clone(&persistent_metrics)),
     );
@@ -370,7 +371,7 @@ fn execution_adapter_persistent_failure_falls_back_but_memory_is_explicit() {
     let memory_metrics = Arc::new(ExecutionMetrics::new());
     let memory_config = SingleThreadExecutionServiceConfig::vm_v0();
     let memory_service = SingleThreadExecutionService::with_config(
-        VmV0ExecutionEngine::new(),
+        NonceExecutionEngine::new(),
         memory_config,
         Some(Arc::clone(&memory_metrics)),
     );
