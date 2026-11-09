@@ -341,6 +341,10 @@ fn representable_paths_and_ordinary_storage_errors_control() {
         "ordinary account existing-only empty-directory control: {}",
         result_kind(&existing_error)
     );
+    if let Err(error) = &existing_error {
+        println!("ordinary account existing-only error debug: {error:?}");
+        println!("ordinary account existing-only error display: {error}");
+    }
     assert!(existing_error.is_err());
 
     let blocker = root.join("regular-file");
@@ -355,6 +359,14 @@ fn representable_paths_and_ordinary_storage_errors_control() {
         "ordinary consensus parent-file control: {}",
         result_kind(&consensus_error)
     );
+    if let Err(error) = &account_create_error {
+        println!("ordinary account-create error debug: {error:?}");
+        println!("ordinary account-create error display: {error}");
+    }
+    if let Err(error) = &consensus_error {
+        println!("ordinary consensus error debug: {error:?}");
+        println!("ordinary consensus error display: {error}");
+    }
     assert!(account_create_error.is_err());
     assert!(consensus_error.is_err());
     println!("representable UTF-8 account/consensus positive controls: passed");
