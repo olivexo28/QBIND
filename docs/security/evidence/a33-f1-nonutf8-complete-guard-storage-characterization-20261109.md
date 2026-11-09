@@ -29,13 +29,19 @@ The first-attempt complete output is retained, but its shell exit code was
 not captured in the session record; the final attempts and their exit codes
 are recorded below.
 
-Compared with the earlier reviewed endpoint, the current reviewed head is
-three commits ahead and adds six paths: the new integration test and five
-evidence files. Compared with pinned main, the current reviewed head is 23
-commits ahead and changes 32 paths, including inherited specifications,
-tests, and evidence. The six-path endpoint-to-head slice is not the entire
-main-relative package. Previously accepted tests and historical findings
-were not modified or rerun for this task.
+At the previously measured head
+`00e0c0d16e63ebd5c437a24b2873e3def5612836`, the comparison from the earlier
+reviewed endpoint `5588d45a0388638d315e32b67dd753cd9f368ecc` was three
+commits and six added paths (the new integration test and five evidence
+files). From pinned main `aa382fa28b2d3e97e6203d47fa8231b5f2269741`, that
+same measured head was 23 commits and 32 changed paths, including inherited
+specifications, tests, and evidence. The six-path endpoint-to-head slice
+was not the entire main-relative package.
+
+A later documentation-only package-scope correction was committed
+separately as `dc4ccd6f7ce7662de010dfd915a2593365271b16`; it does not change
+the historical comparison target or those counts. Previously accepted
+tests and historical findings were not modified or rerun for this task.
 
 The test exercises the actual guard at
 `crates/qbind-node/src/restore_completion.rs:988` and its `ProceedComplete`,
