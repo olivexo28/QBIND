@@ -122,6 +122,39 @@ unresolved caller or field, either preserve it pending the entitlement
 decision or explicitly report it unavailable; never silently omit it.
 Acknowledgement-only sufficiency is not established.
 
+### Owner-approved working caller classification
+
+The owner-approved working classification below records a specification
+direction only. It distinguishes current source behavior from a possible
+future contract; it does not establish entitlement, durable completion,
+production wiring, or approval of a completion mechanism.
+
+| Caller/interface | Current source behavior | Working future direction and unresolved entitlement |
+|---|---|---|
+| Synchronous execution adapter | Preserve the current immediate `Ok(())`-if-all-succeed / first-error return semantics. Do not silently replace a required error with generic success. | A future persistent completion contract is separate from the current immediate return. Durable-result entitlement remains OPEN. |
+| Asynchronous service submitter | `submit_block` reports queue admission, queue-full, or shutdown; it does not report execution or durable completion. | Keep admission distinct from execution and durable completion. The future direction is “a durable block acknowledgement as specified, if and when separately approved.” No durable acknowledgement mechanism is approved or implemented. Outcome entitlement remains OPEN. |
+| `Node::apply_block` | Preserve the current immediate ordered per-transaction results in `BlockApplyOutcome`; they are not durable completion. | Future durable-result entitlement remains OPEN. |
+| `LedgerApply` / `NodeLedgerHarness` | Preserve the inspected in-memory ledger success/error semantics and harness propagation. The current harness does not return a durable acknowledgement. | Do not invent a durable acknowledgement for the current harness. A persistent consumer or contract requires separate identification and decision. |
+| EVM bridge consumer | Preserve the exposed immediate `EvmCommitResult` and `get_commit_result` behavior and reviewed limitations. Snapshot retention is distinct from the separate in-memory `committed_roots` map; that map does not establish durable restart retrieval. | Durable receipt-retrieval entitlement remains OPEN pending identification of an actual consumer and its required fields. |
+
+For any future persistent caller whose entitlement is established, the
+acknowledgement and every entitled outcome must bind to the same reviewed
+atomic consistency unit, operation identity, and exact transaction order and
+count. Unknown or unresolved fields remain explicitly unavailable or
+retained pending the owner's decision; they must not be silently omitted.
+Acknowledgement-only sufficiency for all callers is not established.
+
+This classification is based on a repository-local, non-exhaustive
+inventory. It does not establish caller entitlement, production wiring,
+durable completion, atomic-commit feasibility, or a complete caller set.
+No retention period, wire format, storage mechanism, production ruleset,
+recovery procedure, or operational authority is selected. All future
+durable-result entitlements remain OPEN. CCI-1 and CCI-2 remain CLOSED
+within their reviewed inventory scopes; CCI-3 remains optional and
+non-blocking. CCC-1 and CCC-2 remain within their documentation scopes.
+The six identity bindings remain OPEN, the native post-quantum requirement
+remains fixed, and prior scoped findings are preserved.
+
 ### Smallest proposed completion record
 
 Subject to the caller inventory, propose a versioned, authenticated **block
