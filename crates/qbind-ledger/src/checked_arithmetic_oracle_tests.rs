@@ -1,5 +1,5 @@
-//! Proposed test assumptions; current production arithmetic is intentionally not corrected.
-//! A test-contract decision does not authorize production behavior, transition, activation or deployment.
+//! Owner-supplied test-scope decision in this session; production arithmetic is intentionally not corrected.
+//! This decision does not authorize production behavior, transition, activation or deployment.
 
 use super::{execute_block_stage_b, execute_tx_on_stage_b_state, StageBPerAccountState};
 use crate::{
@@ -205,7 +205,12 @@ fn oracle(case: &Case, actual: &Observation, require_writes: bool) -> Result<(),
     }
     match (&actual.result, &expected.result) {
         (Some(actual), Some(expected))
-            if actual.success == expected.success && actual.error == expected.error => {}
+            if actual.success == expected.success
+                && actual.error == expected.error
+                && actual.gas_used == expected.gas_used
+                && actual.fee_paid == expected.fee_paid
+                && actual.fee_burned == expected.fee_burned
+                && actual.fee_to_proposer == expected.fee_to_proposer => {}
         _ => failures.push("wrong result/error/precedence"),
     }
     if actual.state != expected.state {
@@ -423,6 +428,25 @@ fn same_oracle_rejects_synthetic_bypass_and_reordering_controls() {
         oracle(&case, &changed, true).is_err(),
         "unchecked-success bypass escaped"
     );
+    for (field, mutate) in [
+        ("gas_used", 0u8),
+        ("fee_paid", 1u8),
+        ("fee_burned", 2u8),
+        ("fee_to_proposer", 3u8),
+    ] {
+        let mut changed = case.expected();
+        let result = changed.result.as_mut().unwrap();
+        match mutate {
+            0 => result.gas_used += 1,
+            1 => result.fee_paid += 1,
+            2 => result.fee_burned += 1,
+            _ => result.fee_to_proposer += 1,
+        }
+        assert!(
+            oracle(&case, &changed, true).is_err(),
+            "altered {field} escaped"
+        );
+    }
     let mut changed = case.expected();
     changed.writes = Some(vec![(A, case.sender.clone())]);
     assert!(
@@ -474,5 +498,29 @@ fn same_oracle_rejects_synthetic_bypass_and_reordering_controls() {
         oracle(&zero, &changed, true).is_err(),
         "missing materialization escaped"
     );
-    println!("synthetic same-oracle controls rejected: unchecked success, single-write nonempty trace with unchanged final state, arithmetic/validation reordering, one-write alias, missing materialization");
+    let self_transfer = Case {
+        alias: true,
+        sender: AccountState::new(4, u128::MAX),
+        ..Case::normal()
+    };
+    let compliant = self_transfer.expected();
+    assert!(oracle(&self_transfer, &compliant, true).is_ok());
+    let original_balance_plus_amount = self_transfer
+        .sender
+        .balance
+        .checked_add(self_transfer.amount);
+    assert_eq!(original_balance_plus_amount, None);
+    let false_refusal = Observation {
+        result: Some(VmV0TxResult::failure(VmV0Error::ArithmeticOverflow {
+            operation: "recipient balance increment",
+        })),
+        panic: None,
+        state: Some(entries(&self_transfer.fixture().0)),
+        writes: Some(Vec::new()),
+    };
+    assert!(
+        oracle(&self_transfer, &false_refusal, true).is_err(),
+        "synthetic original-balance-plus-amount false refusal escaped"
+    );
+    println!("synthetic same-oracle controls rejected: unchecked success, altered gas/fee fields, single-write nonempty trace with unchanged final state, arithmetic/validation reordering, one-write alias, missing materialization, original-balance-plus-amount false self-transfer refusal");
 }

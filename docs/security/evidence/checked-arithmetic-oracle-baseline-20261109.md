@@ -4,10 +4,12 @@
 correction. Both focused test commands FAIL.** Expected nonconformance is not
 reclassified as a passing characterization.
 
-No traceable prior scoped approval for these exact expectations is substantiated
-here. Their existence or review does not establish approval. A test-contract
-decision does not authorize production behavior, a ruleset transition,
-activation or deployment.
+At the time of this historical baseline, no traceable approval for the exact
+expectations was substantiated; the tests' existence or review was not treated
+as approval. In a later session follow-up, the owner explicitly supplied a
+scoped decision for the listed **test expectations only**. See
+`checked-arithmetic-owner-test-contract-20261109.md`. That later decision does
+not retroactively change the source or meaning of the historical runs.
 
 ## Verified basis and executed source
 
@@ -40,21 +42,23 @@ are unchanged. Their observations remain historical evidence, not this oracle.
 
 ## Contract and observable boundaries
 
-The oracle preserves malformed-payload, nonce-mismatch and insufficient-balance
-precedence. After those checks, it requires
+The follow-up owner-supplied test decision preserves malformed-payload,
+nonce-mismatch and insufficient-balance precedence. After those checks, it requires
 `ArithmeticOverflow { operation: "nonce increment" }` before
 `ArithmeticOverflow { operation: "recipient balance increment" }` when both
 would fail. It rejects every panic and every success on arithmetic-refusal
 fixtures. It requires unchanged account values/membership and zero transaction
 updater calls where those calls are directly observable.
-The result oracle compares only `success` and `error`; it does **not** compare
-gas or fee fields, even though those fields appear in printed results.
+The historical baseline oracle compared only `success` and `error`; it did not
+compare gas or fee fields. A later follow-up adds the owner-approved gas/fee
+comparisons; see the new note. Historical outputs and hashes are unchanged.
 
-Successful transfers require the original two-call debit/credit shape,
-including self-transfers: sufficient funding remains required, nonce increases
-once, balance is restored. Maximum-balance self-transfer is not tested as
-original-balance-plus-amount. Zero amount retains both calls and absent-recipient
-materialization. An observing wrapper excludes fixture initialization writes.
+For this test contract, successful self-transfers preserve sufficient funding,
+increment nonce once, restore the original balance and retain two observed
+updater calls; that count characterizes current behavior and is not a production
+guarantee. Zero amount and absent recipients retain the observed successful
+write/materialization behavior. An observing wrapper excludes fixture
+initialization writes.
 
 Three independently reported paths run the same cases and result/state oracle:
 
@@ -159,9 +163,9 @@ exists. Only the sensitivity
 control's assertion that bad observations are rejected passes. It does not turn
 the nine actual engine conformance failures into passes. Real engine bypass
 mutation testing after a future correction would be additional evidence.
-The false-overflow self-transfer mutant (incorrectly checking the original
-balance plus amount) remains **FUTURE / NOT EXECUTED**. The passing real
-maximum-balance self-transfer test is not execution of that mutant.
+At the time of this baseline, the false-overflow self-transfer mutant was
+**FUTURE / NOT EXECUTED**. The subsequent follow-up adds only a synthetic
+regression observation, not a real-engine mutation; see the new note.
 
 ### Default discovery and unexercised service boundary
 
