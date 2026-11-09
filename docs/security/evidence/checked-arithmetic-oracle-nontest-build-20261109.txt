@@ -1,0 +1,974 @@
+COMMAND: timeout --signal=TERM --kill-after=15s 600s env CARGO_BUILD_JOBS=2 cargo build -vv -p qbind-ledger --lib
+       Fresh libc v0.2.178
+       Fresh cfg-if v1.0.4
+       Fresh unicode-ident v1.0.22
+       Fresh version_check v0.9.5
+       Fresh proc-macro2 v1.0.104
+       Fresh typenum v1.19.0
+       Fresh quote v1.0.42
+       Fresh generic-array v0.14.7
+warning: unexpected `cfg` condition name: `relaxed_coherence`
+   --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/generic-array-0.14.7/src/impls.rs:136:19
+    |
+136 |               #[cfg(relaxed_coherence)]
+    |                     ^^^^^^^^^^^^^^^^^
+...
+183 | / impl_from! {
+184 | |     1  => ::typenum::U1,
+185 | |     2  => ::typenum::U2,
+186 | |     3  => ::typenum::U3,
+...   |
+215 | |     32 => ::typenum::U32
+216 | | }
+    | |_- in this macro invocation
+    |
+    = help: expected names are: `docsrs`, `feature`, and `test` and 34 more
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(relaxed_coherence)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(relaxed_coherence)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: `#[warn(unexpected_cfgs)]` on by default
+    = note: this warning originates in the macro `impl_from` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unexpected `cfg` condition name: `relaxed_coherence`
+   --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/generic-array-0.14.7/src/impls.rs:158:23
+    |
+158 |               #[cfg(not(relaxed_coherence))]
+    |                         ^^^^^^^^^^^^^^^^^
+...
+183 | / impl_from! {
+184 | |     1  => ::typenum::U1,
+185 | |     2  => ::typenum::U2,
+186 | |     3  => ::typenum::U3,
+...   |
+215 | |     32 => ::typenum::U32
+216 | | }
+    | |_- in this macro invocation
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(relaxed_coherence)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(relaxed_coherence)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: this warning originates in the macro `impl_from` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unexpected `cfg` condition name: `relaxed_coherence`
+   --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/generic-array-0.14.7/src/impls.rs:136:19
+    |
+136 |               #[cfg(relaxed_coherence)]
+    |                     ^^^^^^^^^^^^^^^^^
+...
+219 | / impl_from! {
+220 | |     33 => ::typenum::U33,
+221 | |     34 => ::typenum::U34,
+222 | |     35 => ::typenum::U35,
+...   |
+268 | |     1024 => ::typenum::U1024
+269 | | }
+    | |_- in this macro invocation
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(relaxed_coherence)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(relaxed_coherence)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: this warning originates in the macro `impl_from` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unexpected `cfg` condition name: `relaxed_coherence`
+   --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/generic-array-0.14.7/src/impls.rs:158:23
+    |
+158 |               #[cfg(not(relaxed_coherence))]
+    |                         ^^^^^^^^^^^^^^^^^
+...
+219 | / impl_from! {
+220 | |     33 => ::typenum::U33,
+221 | |     34 => ::typenum::U34,
+222 | |     35 => ::typenum::U35,
+...   |
+268 | |     1024 => ::typenum::U1024
+269 | | }
+    | |_- in this macro invocation
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(relaxed_coherence)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(relaxed_coherence)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: this warning originates in the macro `impl_from` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+   --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/generic-array-0.14.7/src/lib.rs:235:33
+    |
+235 |     pub unsafe fn iter_position(&mut self) -> (slice::IterMut<T>, &mut usize) {
+    |                                 ^^^^^^^^^      ^^^^^^^^^^^^^^^^^  ^^^^^^^^^^ the same lifetime is elided here
+    |                                 |              |
+    |                                 |              the same lifetime is hidden here
+    |                                 the lifetime is elided here
+    |
+    = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+    = note: `#[warn(mismatched_lifetime_syntaxes)]` on by default
+help: use `'_` for type paths
+    |
+235 |     pub unsafe fn iter_position(&mut self) -> (slice::IterMut<'_, T>, &mut usize) {
+    |                                                               +++
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+   --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/generic-array-0.14.7/src/lib.rs:290:33
+    |
+290 |     pub unsafe fn iter_position(&mut self) -> (slice::Iter<T>, &mut usize) {
+    |                                 ^^^^^^^^^      ^^^^^^^^^^^^^^  ^^^^^^^^^^ the same lifetime is elided here
+    |                                 |              |
+    |                                 |              the same lifetime is hidden here
+    |                                 the lifetime is elided here
+    |
+    = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+help: use `'_` for type paths
+    |
+290 |     pub unsafe fn iter_position(&mut self) -> (slice::Iter<'_, T>, &mut usize) {
+    |                                                            +++
+
+       Fresh syn v2.0.112
+warning: `generic-array` (lib) generated 6 warnings
+       Fresh getrandom v0.2.16
+warning: use of deprecated associated function `core::num::<impl usize>::max_value`: replaced by the `MAX` associated constant on this type
+  --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.16/src/use_file.rs:19:33
+   |
+19 | const FD_UNINIT: usize = usize::max_value();
+   |                                 ^^^^^^^^^
+   |
+   = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated associated function `core::num::<impl usize>::max_value`: replaced by the `MAX` associated constant on this type
+  --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.16/src/lazy.rs:29:38
+   |
+29 |     pub const UNINIT: usize = usize::max_value();
+   |                                      ^^^^^^^^^
+
+       Fresh shlex v1.3.0
+warning: `getrandom` (lib) generated 2 warnings
+       Fresh rand_core v0.6.4
+warning: unexpected `cfg` condition name: `doc_cfg`
+  --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rand_core-0.6.4/src/lib.rs:38:13
+   |
+38 | #![cfg_attr(doc_cfg, feature(doc_cfg))]
+   |             ^^^^^^^
+   |
+   = help: expected names are: `docsrs`, `feature`, and `test` and 34 more
+   = help: consider using a Cargo feature instead
+   = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+            [lints.rust]
+            unexpected_cfgs = { level = "warn", check-cfg = ['cfg(doc_cfg)'] }
+   = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(doc_cfg)");` to the top of the `build.rs`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+   = note: `#[warn(unexpected_cfgs)]` on by default
+
+warning: unexpected `cfg` condition name: `doc_cfg`
+  --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rand_core-0.6.4/src/os.rs:46:12
+   |
+46 | #[cfg_attr(doc_cfg, doc(cfg(feature = "getrandom")))]
+   |            ^^^^^^^
+   |
+   = help: consider using a Cargo feature instead
+   = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+            [lints.rust]
+            unexpected_cfgs = { level = "warn", check-cfg = ['cfg(doc_cfg)'] }
+   = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(doc_cfg)");` to the top of the `build.rs`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `doc_cfg`
+   --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rand_core-0.6.4/src/lib.rs:411:16
+    |
+411 |     #[cfg_attr(doc_cfg, doc(cfg(feature = "getrandom")))]
+    |                ^^^^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(doc_cfg)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(doc_cfg)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+       Fresh jobserver v0.1.34
+warning: `rand_core` (lib) generated 3 warnings
+       Fresh find-msvc-tools v0.1.6
+       Fresh crypto-common v0.1.7
+       Fresh cc v1.2.51
+       Fresh subtle v2.6.1
+       Fresh glob v0.3.3
+       Fresh memchr v2.7.6
+       Fresh either v1.15.0
+       Fresh pkg-config v0.3.32
+       Fresh minimal-lexical v0.2.1
+       Fresh regex-syntax v0.8.8
+       Fresh nom v7.1.3
+       Fresh regex-automata v0.4.13
+       Fresh block-buffer v0.10.4
+       Fresh libloading v0.8.9
+       Fresh digest v0.10.7
+       Fresh clang-sys v1.8.1
+       Fresh regex v1.12.2
+       Fresh cexpr v0.6.0
+       Fresh bitflags v2.10.0
+       Fresh itertools v0.13.0
+       Fresh zeroize_derive v1.4.3
+       Fresh cpufeatures v0.2.17
+       Fresh rustc-hash v2.1.1
+       Fresh zeroize v1.8.2
+       Fresh bindgen v0.72.1
+       Fresh vcpkg v0.2.15
+       Fresh keccak v0.1.5
+       Fresh sha3 v0.10.8
+       Fresh itertools v0.12.1
+       Fresh lazycell v1.3.0
+       Fresh rustc-hash v1.1.0
+       Fresh lazy_static v1.5.0
+       Fresh bindgen v0.69.5
+       Fresh crossbeam-utils v0.8.21
+       Fresh inout v0.1.4
+       Fresh qbind-types v0.1.0 (/workspaces/QBIND/olivexo28/QBIND/crates/qbind-types)
+       Fresh cipher v0.4.4
+       Fresh crossbeam-epoch v0.9.18
+       Fresh sha2 v0.10.9
+warning: use of deprecated associated function `core::num::<impl u8>::max_value`: replaced by the `MAX` associated constant on this type
+   --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha2-0.10.9/src/sha256/x86.rs:100:1
+    |
+100 | cpufeatures::new!(shani_cpuid, "sha", "sse2", "ssse3", "sse4.1");
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+    = note: this warning originates in the macro `cpufeatures::new` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: use of deprecated associated function `core::num::<impl u8>::max_value`: replaced by the `MAX` associated constant on this type
+  --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha2-0.10.9/src/sha512/x86.rs:14:1
+   |
+14 | cpufeatures::new!(avx2_cpuid, "avx2");
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this warning originates in the macro `cpufeatures::new` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: `sha2` (lib) generated 2 warnings
+       Fresh universal-hash v0.5.1
+       Fresh base64ct v1.8.3
+       Fresh opaque-debug v0.3.1
+       Fresh password-hash v0.5.0
+warning: use of deprecated unit struct `base64ct::Base64Crypt`: non-standard encoding. Use Base64ShaCrypt for all crypt(3) algorithms
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/password-hash-0.5.0/src/encoding.rs:4:19
+  |
+4 |     Base64Bcrypt, Base64Crypt, Base64Unpadded as B64, Encoding as _, Error as B64Error,
+  |                   ^^^^^^^^^^^
+  |
+  = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated struct `base64ct::Base64Crypt`: non-standard encoding. Use Base64ShaCrypt for all crypt(3) algorithms
+  --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/password-hash-0.5.0/src/encoding.rs:48:28
+   |
+48 |             Self::Crypt => Base64Crypt::decode(src, dst),
+   |                            ^^^^^^^^^^^
+
+warning: use of deprecated struct `base64ct::Base64Crypt`: non-standard encoding. Use Base64ShaCrypt for all crypt(3) algorithms
+  --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/password-hash-0.5.0/src/encoding.rs:60:28
+   |
+60 |             Self::Crypt => Base64Crypt::encode(src, dst),
+   |                            ^^^^^^^^^^^
+
+warning: use of deprecated struct `base64ct::Base64Crypt`: non-standard encoding. Use Base64ShaCrypt for all crypt(3) algorithms
+  --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/password-hash-0.5.0/src/encoding.rs:70:28
+   |
+70 |             Self::Crypt => Base64Crypt::encoded_len(bytes),
+   |                            ^^^^^^^^^^^
+
+warning: `password-hash` (lib) generated 4 warnings
+       Fresh poly1305 v0.8.0
+warning: unexpected `cfg` condition name: `poly1305_force_soft`
+  --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/poly1305-0.8.0/src/lib.rs:67:9
+   |
+67 |     not(poly1305_force_soft),
+   |         ^^^^^^^^^^^^^^^^^^^
+   |
+   = help: expected names are: `docsrs`, `feature`, and `test` and 34 more
+   = help: consider using a Cargo feature instead
+   = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+            [lints.rust]
+            unexpected_cfgs = { level = "warn", check-cfg = ['cfg(poly1305_force_soft)'] }
+   = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(poly1305_force_soft)");` to the top of the `build.rs`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+   = note: `#[warn(unexpected_cfgs)]` on by default
+
+warning: unexpected `cfg` condition name: `fuzzing`
+  --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/poly1305-0.8.0/src/lib.rs:69:9
+   |
+69 |     any(fuzzing, test)
+   |         ^^^^^^^
+   |
+   = help: consider using a Cargo feature instead
+   = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+            [lints.rust]
+            unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] }
+   = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(fuzzing)");` to the top of the `build.rs`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `poly1305_force_soft`
+  --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/poly1305-0.8.0/src/lib.rs:75:9
+   |
+75 |     not(poly1305_force_soft)
+   |         ^^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider using a Cargo feature instead
+   = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+            [lints.rust]
+            unexpected_cfgs = { level = "warn", check-cfg = ['cfg(poly1305_force_soft)'] }
+   = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(poly1305_force_soft)");` to the top of the `build.rs`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `poly1305_force_soft`
+  --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/poly1305-0.8.0/src/lib.rs:81:9
+   |
+81 |     not(poly1305_force_soft)
+   |         ^^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider using a Cargo feature instead
+   = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+            [lints.rust]
+            unexpected_cfgs = { level = "warn", check-cfg = ['cfg(poly1305_force_soft)'] }
+   = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(poly1305_force_soft)");` to the top of the `build.rs`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `poly1305_force_soft`
+   --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/poly1305-0.8.0/src/lib.rs:167:9
+    |
+167 |     not(poly1305_force_soft),
+    |         ^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(poly1305_force_soft)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(poly1305_force_soft)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `fuzzing`
+   --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/poly1305-0.8.0/src/lib.rs:169:9
+    |
+169 |     any(fuzzing, test)
+    |         ^^^^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(fuzzing)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `poly1305_force_soft`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/poly1305-0.8.0/src/backend.rs:5:9
+  |
+5 |     not(poly1305_force_soft)
+  |         ^^^^^^^^^^^^^^^^^^^
+  |
+  = help: consider using a Cargo feature instead
+  = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+           [lints.rust]
+           unexpected_cfgs = { level = "warn", check-cfg = ['cfg(poly1305_force_soft)'] }
+  = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(poly1305_force_soft)");` to the top of the `build.rs`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `poly1305_force_soft`
+  --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/poly1305-0.8.0/src/backend.rs:11:9
+   |
+11 |     not(poly1305_force_soft)
+   |         ^^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider using a Cargo feature instead
+   = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+            [lints.rust]
+            unexpected_cfgs = { level = "warn", check-cfg = ['cfg(poly1305_force_soft)'] }
+   = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(poly1305_force_soft)");` to the top of the `build.rs`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: use of deprecated associated function `core::num::<impl u8>::max_value`: replaced by the `MAX` associated constant on this type
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/poly1305-0.8.0/src/backend/autodetect.rs:9:1
+  |
+9 | cpufeatures::new!(avx2_cpuid, "avx2");
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(deprecated)]` on by default
+  = note: this warning originates in the macro `cpufeatures::new` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: `poly1305` (lib) generated 9 warnings
+warning: librocksdb-sys@0.16.0+8.10.0: snappy/snappy.cc: In instantiation of 'std::pair<const unsigned char*, long int> snappy::DecompressBranchless(const uint8_t*, const uint8_t*, ptrdiff_t, T, ptrdiff_t) [with T = char*; uint8_t = unsigned char; ptrdiff_t = long int]':
+warning: librocksdb-sys@0.16.0+8.10.0: snappy/snappy.cc:1405:35:   required from 'void snappy::SnappyDecompressor::DecompressAllTags(Writer*) [with Writer = snappy::SnappyArrayWriter]'
+warning: librocksdb-sys@0.16.0+8.10.0: snappy/snappy.cc:1600:34:   required from 'bool snappy::InternalUncompressAllTags(SnappyDecompressor*, Writer*, uint32_t, uint32_t) [with Writer = SnappyArrayWriter; uint32_t = unsigned int]'
+warning: librocksdb-sys@0.16.0+8.10.0: snappy/snappy.cc:2415:44:   required from here
+warning: librocksdb-sys@0.16.0+8.10.0: snappy/snappy.cc:1293:37: warning: comparison of integer expressions of different signedness: 'long unsigned int' and 'ptrdiff_t' {aka 'long int'} [-Wsign-compare]
+warning: librocksdb-sys@0.16.0+8.10.0:  1293 |              (op + deferred_length) < op_limit_min_slop);
+warning: librocksdb-sys@0.16.0+8.10.0:       |              ~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~
+warning: librocksdb-sys@0.16.0+8.10.0: snappy/snappy.cc: In instantiation of 'std::pair<const unsigned char*, long int> snappy::DecompressBranchless(const uint8_t*, const uint8_t*, ptrdiff_t, T, ptrdiff_t) [with T = long unsigned int; uint8_t = unsigned char; ptrdiff_t = long int]':
+warning: librocksdb-sys@0.16.0+8.10.0: snappy/snappy.cc:1405:35:   required from 'void snappy::SnappyDecompressor::DecompressAllTags(Writer*) [with Writer = snappy::SnappyDecompressionValidator]'
+warning: librocksdb-sys@0.16.0+8.10.0: snappy/snappy.cc:1600:34:   required from 'bool snappy::InternalUncompressAllTags(SnappyDecompressor*, Writer*, uint32_t, uint32_t) [with Writer = SnappyDecompressionValidator; uint32_t = unsigned int]'
+warning: librocksdb-sys@0.16.0+8.10.0: snappy/snappy.cc:1587:35:   required from 'bool snappy::InternalUncompress(Source*, Writer*) [with Writer = SnappyDecompressionValidator]'
+warning: librocksdb-sys@0.16.0+8.10.0: snappy/snappy.cc:2101:28:   required from here
+warning: librocksdb-sys@0.16.0+8.10.0: snappy/snappy.cc:1293:37: warning: comparison of integer expressions of different signedness: 'long unsigned int' and 'ptrdiff_t' {aka 'long int'} [-Wsign-compare]
+       Fresh serde_core v1.0.228
+       Fresh crossbeam-deque v0.8.6
+       Fresh chacha20 v0.9.1
+warning: unexpected `cfg` condition name: `chacha20_force_soft`
+   --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/chacha20-0.9.1/src/lib.rs:158:14
+    |
+158 |     if #[cfg(chacha20_force_soft)] {
+    |              ^^^^^^^^^^^^^^^^^^^
+    |
+    = help: expected names are: `docsrs`, `feature`, and `test` and 34 more
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(chacha20_force_soft)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(chacha20_force_soft)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: `#[warn(unexpected_cfgs)]` on by default
+
+warning: unexpected `cfg` condition name: `chacha20_force_avx2`
+   --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/chacha20-0.9.1/src/lib.rs:162:22
+    |
+162 |             if #[cfg(chacha20_force_avx2)] {
+    |                      ^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(chacha20_force_avx2)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(chacha20_force_avx2)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `chacha20_force_sse2`
+   --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/chacha20-0.9.1/src/lib.rs:167:29
+    |
+167 |             } else if #[cfg(chacha20_force_sse2)] {
+    |                             ^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(chacha20_force_sse2)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(chacha20_force_sse2)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `chacha20_force_soft`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/chacha20-0.9.1/src/backends.rs:4:14
+  |
+4 |     if #[cfg(chacha20_force_soft)] {
+  |              ^^^^^^^^^^^^^^^^^^^
+  |
+  = help: consider using a Cargo feature instead
+  = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+           [lints.rust]
+           unexpected_cfgs = { level = "warn", check-cfg = ['cfg(chacha20_force_soft)'] }
+  = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(chacha20_force_soft)");` to the top of the `build.rs`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `chacha20_force_avx2`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/chacha20-0.9.1/src/backends.rs:8:22
+  |
+8 |             if #[cfg(chacha20_force_avx2)] {
+  |                      ^^^^^^^^^^^^^^^^^^^
+  |
+  = help: consider using a Cargo feature instead
+  = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+           [lints.rust]
+           unexpected_cfgs = { level = "warn", check-cfg = ['cfg(chacha20_force_avx2)'] }
+  = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(chacha20_force_avx2)");` to the top of the `build.rs`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `chacha20_force_sse2`
+  --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/chacha20-0.9.1/src/backends.rs:10:29
+   |
+10 |             } else if #[cfg(chacha20_force_sse2)] {
+   |                             ^^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider using a Cargo feature instead
+   = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+            [lints.rust]
+            unexpected_cfgs = { level = "warn", check-cfg = ['cfg(chacha20_force_sse2)'] }
+   = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(chacha20_force_sse2)");` to the top of the `build.rs`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `chacha20_force_neon`
+  --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/chacha20-0.9.1/src/backends.rs:18:25
+   |
+18 |     } else if #[cfg(all(chacha20_force_neon, target_arch = "aarch64", target_feature = "neon"))] {
+   |                         ^^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider using a Cargo feature instead
+   = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+            [lints.rust]
+            unexpected_cfgs = { level = "warn", check-cfg = ['cfg(chacha20_force_neon)'] }
+   = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(chacha20_force_neon)");` to the top of the `build.rs`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `chacha20_force_soft`
+   --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/chacha20-0.9.1/src/lib.rs:221:22
+    |
+221 |             if #[cfg(chacha20_force_soft)] {
+    |                      ^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(chacha20_force_soft)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(chacha20_force_soft)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `chacha20_force_avx2`
+   --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/chacha20-0.9.1/src/lib.rs:225:30
+    |
+225 |                     if #[cfg(chacha20_force_avx2)] {
+    |                              ^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(chacha20_force_avx2)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(chacha20_force_avx2)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `chacha20_force_sse2`
+   --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/chacha20-0.9.1/src/lib.rs:227:37
+    |
+227 |                     } else if #[cfg(chacha20_force_sse2)] {
+    |                                     ^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(chacha20_force_sse2)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(chacha20_force_sse2)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `chacha20_force_soft`
+   --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/chacha20-0.9.1/src/lib.rs:255:22
+    |
+255 |             if #[cfg(chacha20_force_soft)] {
+    |                      ^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(chacha20_force_soft)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(chacha20_force_soft)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `chacha20_force_avx2`
+   --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/chacha20-0.9.1/src/lib.rs:259:30
+    |
+259 |                     if #[cfg(chacha20_force_avx2)] {
+    |                              ^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(chacha20_force_avx2)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(chacha20_force_avx2)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `chacha20_force_sse2`
+   --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/chacha20-0.9.1/src/lib.rs:263:37
+    |
+263 |                     } else if #[cfg(chacha20_force_sse2)] {
+    |                                     ^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(chacha20_force_sse2)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(chacha20_force_sse2)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `chacha20_force_neon`
+   --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/chacha20-0.9.1/src/lib.rs:282:33
+    |
+282 |             } else if #[cfg(all(chacha20_force_neon, target_arch = "aarch64", target_feature = "neon"))] {
+    |                                 ^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(chacha20_force_neon)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(chacha20_force_neon)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: use of deprecated associated function `core::num::<impl u8>::max_value`: replaced by the `MAX` associated constant on this type
+   --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/chacha20-0.9.1/src/lib.rs:173:17
+    |
+173 |                 cpufeatures::new!(avx2_cpuid, "avx2");
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+    = note: this warning originates in the macro `cpufeatures::new` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: use of deprecated associated function `core::num::<impl u8>::max_value`: replaced by the `MAX` associated constant on this type
+   --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/chacha20-0.9.1/src/lib.rs:174:17
+    |
+174 |                 cpufeatures::new!(sse2_cpuid, "sse2");
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: this warning originates in the macro `cpufeatures::new` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+       Fresh qbind-wire v0.1.0 (/workspaces/QBIND/olivexo28/QBIND/crates/qbind-wire)
+warning: `chacha20` (lib) generated 16 warnings
+       Fresh zstd-sys v2.0.16+zstd.1.5.7
+       Fresh bzip2-sys v0.1.13+1.0.8
+       Fresh libz-sys v1.1.23
+       Fresh lz4-sys v1.11.1+lz4-1.10.0
+       Fresh hmac v0.12.1
+       Fresh aead v0.5.2
+       Fresh pbkdf2 v0.12.2
+       Fresh chacha20poly1305 v0.10.1
+warning: use of deprecated constant `core::u32::MAX`: replaced by the `MAX` associated constant on this type
+  --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/chacha20poly1305-0.10.1/src/cipher.rs:19:38
+   |
+19 | const MAX_BLOCKS: usize = core::u32::MAX as usize;
+   |                                      ^^^
+   |
+   = note: `#[warn(deprecated)]` on by default
+
+warning: `chacha20poly1305` (lib) generated 1 warning
+       Fresh librocksdb-sys v0.16.0+8.10.0
+       Fresh qbind-hash v0.1.0 (/workspaces/QBIND/olivexo28/QBIND/crates/qbind-hash)
+       Fresh rayon-core v1.13.0
+       Fresh zmij v1.0.17
+       Fresh fips204 v0.4.6
+       Fresh fips203 v0.4.3
+       Fresh serde_derive v1.0.228
+       Fresh itoa v1.0.17
+       Fresh serde v1.0.228
+       Fresh serde_json v1.0.149
+       Fresh qbind-crypto v0.1.0 (/workspaces/QBIND/olivexo28/QBIND/crates/qbind-crypto)
+       Fresh rayon v1.11.0
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/blocks.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/chain.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/chunks.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/cloned.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/copied.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::iter::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/empty.rs:1:5
+  |
+1 | use crate::iter::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/enumerate.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/filter.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/filter_map.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/find.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/find_first_last/mod.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/flat_map.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/flat_map_iter.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/flatten.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/flatten_iter.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/fold.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/fold_chunks.rs:4:5
+  |
+4 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/fold_chunks_with.rs:4:5
+  |
+4 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/inspect.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/interleave.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/interleave_shortest.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/intersperse.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/len.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/map.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/map_with.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/multizip.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::iter::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/once.rs:1:5
+  |
+1 | use crate::iter::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/panic_fuse.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/positions.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/repeat.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/rev.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/skip.rs:2:5
+  |
+2 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/skip_any.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/skip_any_while.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/splitter.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/step_by.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/take.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/take_any.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/take_any_while.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/unzip.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/update.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/while_some.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/zip.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::plumbing::*`
+ --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/zip_eq.rs:1:5
+  |
+1 | use super::plumbing::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `std::sync::atomic::Atomic::<usize>::fetch_update`: renamed to `try_update` for consistency
+   --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/find_first_last/mod.rs:187:22
+    |
+187 |                     .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+    |                      ^^^^^^^^^^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+help: replace the use of the deprecated method
+    |
+187 -                     .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+187 +                     .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+    |
+
+warning: use of deprecated method `std::sync::atomic::Atomic::<usize>::fetch_update`: renamed to `try_update` for consistency
+   --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/par_bridge.rs:113:14
+    |
+113 |             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |c| c.checked_sub(1));
+    |              ^^^^^^^^^^^^
+    |
+help: replace the use of the deprecated method
+    |
+113 -             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |c| c.checked_sub(1));
+113 +             .try_update(Ordering::Relaxed, Ordering::Relaxed, |c| c.checked_sub(1));
+    |
+
+warning: use of deprecated method `std::sync::atomic::Atomic::<usize>::fetch_update`: renamed to `try_update` for consistency
+   --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/skip_any.rs:105:7
+    |
+105 |     u.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |u| u.checked_sub(1))
+    |       ^^^^^^^^^^^^
+    |
+help: replace the use of the deprecated method
+    |
+105 -     u.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |u| u.checked_sub(1))
+105 +     u.try_update(Ordering::Relaxed, Ordering::Relaxed, |u| u.checked_sub(1))
+    |
+
+warning: use of deprecated method `std::sync::atomic::Atomic::<usize>::fetch_update`: renamed to `try_update` for consistency
+   --> /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.11.0/src/iter/take_any.rs:105:7
+    |
+105 |     u.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |u| u.checked_sub(1))
+    |       ^^^^^^^^^^^^
+    |
+help: replace the use of the deprecated method
+    |
+105 -     u.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |u| u.checked_sub(1))
+105 +     u.try_update(Ordering::Relaxed, Ordering::Relaxed, |u| u.checked_sub(1))
+    |
+
+warning: `rayon` (lib) generated 48 warnings
+       Fresh rocksdb v0.22.0
+       Fresh qbind-serde v0.1.0 (/workspaces/QBIND/olivexo28/QBIND/crates/qbind-serde)
+       Dirty qbind-ledger v0.1.0 (/workspaces/QBIND/olivexo28/QBIND/crates/qbind-ledger): the file `crates/qbind-ledger/src/parallel_exec.rs` has changed (1794250286.638202299s, 39m 6s after last build at 1794247940.511449018s)
+   Compiling qbind-ledger v0.1.0 (/workspaces/QBIND/olivexo28/QBIND/crates/qbind-ledger)
+     Running `CARGO=/usr/local/rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo CARGO_CRATE_NAME=qbind_ledger CARGO_MANIFEST_DIR=/workspaces/QBIND/olivexo28/QBIND/crates/qbind-ledger CARGO_MANIFEST_PATH=/workspaces/QBIND/olivexo28/QBIND/crates/qbind-ledger/Cargo.toml CARGO_PKG_AUTHORS='' CARGO_PKG_DESCRIPTION='' CARGO_PKG_HOMEPAGE='' CARGO_PKG_LICENSE='' CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=qbind-ledger CARGO_PKG_README='' CARGO_PKG_REPOSITORY='' CARGO_PKG_RUST_VERSION='' CARGO_PKG_VERSION=0.1.0 CARGO_PKG_VERSION_MAJOR=0 CARGO_PKG_VERSION_MINOR=1 CARGO_PKG_VERSION_PATCH=0 CARGO_PKG_VERSION_PRE='' CARGO_PRIMARY_PACKAGE=1 LD_LIBRARY_PATH='/workspaces/QBIND/olivexo28/QBIND/target/debug/deps:/usr/local/rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib' /usr/local/rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc --crate-name qbind_ledger --edition=2021 crates/qbind-ledger/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("test-helpers"))' -C metadata=381403010f22e78b -C extra-filename=-8e72d0217f7b66ff --out-dir /workspaces/QBIND/olivexo28/QBIND/target/debug/deps -C strip=debuginfo -L dependency=/workspaces/QBIND/olivexo28/QBIND/target/debug/deps --extern qbind_crypto=/workspaces/QBIND/olivexo28/QBIND/target/debug/deps/libqbind_crypto-5b5cfcffedb7fc68.rmeta --extern qbind_hash=/workspaces/QBIND/olivexo28/QBIND/target/debug/deps/libqbind_hash-f3636d25b9676bfe.rmeta --extern qbind_serde=/workspaces/QBIND/olivexo28/QBIND/target/debug/deps/libqbind_serde-5e2ea23305bf2765.rmeta --extern qbind_types=/workspaces/QBIND/olivexo28/QBIND/target/debug/deps/libqbind_types-0a61be9234a6d7a1.rmeta --extern qbind_wire=/workspaces/QBIND/olivexo28/QBIND/target/debug/deps/libqbind_wire-334f77547011e2ea.rmeta --extern rayon=/workspaces/QBIND/olivexo28/QBIND/target/debug/deps/librayon-b46f744bc65b1095.rmeta --extern rocksdb=/workspaces/QBIND/olivexo28/QBIND/target/debug/deps/librocksdb-826e2ff36d2e1443.rmeta --extern serde=/workspaces/QBIND/olivexo28/QBIND/target/debug/deps/libserde-4da1c2af232eca04.rmeta --extern serde_json=/workspaces/QBIND/olivexo28/QBIND/target/debug/deps/libserde_json-825faefcb43c9283.rmeta -L native=/workspaces/QBIND/olivexo28/QBIND/target/debug/build/librocksdb-sys-99da6cff1b808b15/out -L native=/workspaces/QBIND/olivexo28/QBIND/target/debug/build/librocksdb-sys-99da6cff1b808b15/out -L native=/workspaces/QBIND/olivexo28/QBIND/target/debug/build/bzip2-sys-fa9b970caae62acc/out/lib -L native=/workspaces/QBIND/olivexo28/QBIND/target/debug/build/libz-sys-96d33e1b89c6f961/out/lib -L native=/workspaces/QBIND/olivexo28/QBIND/target/debug/build/libz-sys-96d33e1b89c6f961/out/lib -L native=/workspaces/QBIND/olivexo28/QBIND/target/debug/build/lz4-sys-20b2153eedbcf712/out -L native=/workspaces/QBIND/olivexo28/QBIND/target/debug/build/zstd-sys-b6dfb4da847bd451/out`
+    Finished `dev` profile [unoptimized] target(s) in 1.72s
+
+ACTUAL_EXIT_STATUS=0
