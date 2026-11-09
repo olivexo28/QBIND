@@ -1,7 +1,16 @@
-use qbind_ledger::{AccountState, PersistentAccountState, RocksDbAccountState};
+use qbind_ledger::{
+    AccountState, PersistentAccountState, RocksDbAccountState, TransferPayload, VmV0ExecutionEngine,
+};
+use qbind_node::execution_adapter::{
+    AsyncExecutionService, QbindBlock, SingleThreadExecutionService,
+    SingleThreadExecutionServiceConfig,
+};
+use qbind_node::metrics::ExecutionMetrics;
 use qbind_node::storage::{ConsensusStorage, RocksDbConsensusStorage};
+use qbind_wire::consensus::{BlockHeader, BlockProposal};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tempfile::tempdir;
 
 const ACCOUNT_ID: [u8; 32] = [0x73; 32];
@@ -329,6 +338,103 @@ fn representable_paths_and_ordinary_storage_errors_control() {
     assert!(account_create_error.is_err());
     assert!(consensus_error.is_err());
     println!("representable UTF-8 account/consensus positive controls: passed");
+}
+
+#[cfg(unix)]
+#[test]
+fn execution_adapter_persistent_failure_falls_back_but_memory_is_explicit() {
+    let fixture = tempdir().expect("create isolated adapter fixture");
+    let root = fixture.path();
+    let blocker = root.join("regular-file");
+    fs::write(&blocker, b"not a directory").expect("create adapter path blocker");
+
+    let failed_persistent_path = blocker.join("state_vm_v0");
+    let persistent_metrics = Arc::new(ExecutionMetrics::new());
+    let persistent_config =
+        SingleThreadExecutionServiceConfig::vm_v0_persistent(&failed_persistent_path);
+    let persistent_service = SingleThreadExecutionService::with_config(
+        VmV0ExecutionEngine::new(),
+        persistent_config,
+        Some(Arc::clone(&persistent_metrics)),
+    );
+    persistent_service
+        .submit_block(adapter_test_block(0x61))
+        .expect("submit VM-v0 block after configured persistent open failure");
+    wait_for_one_applied_transaction(&persistent_metrics);
+    println!(
+        "adapter configured persistent path open failure led to tx count={}",
+        persistent_metrics.txs_applied_total()
+    );
+    persistent_service.shutdown();
+
+    let memory_metrics = Arc::new(ExecutionMetrics::new());
+    let memory_config = SingleThreadExecutionServiceConfig::vm_v0();
+    let memory_service = SingleThreadExecutionService::with_config(
+        VmV0ExecutionEngine::new(),
+        memory_config,
+        Some(Arc::clone(&memory_metrics)),
+    );
+    memory_service
+        .submit_block(adapter_test_block(0x62))
+        .expect("submit VM-v0 block in explicitly selected in-memory mode");
+    wait_for_one_applied_transaction(&memory_metrics);
+    println!(
+        "adapter explicitly selected in-memory tx count={}",
+        memory_metrics.txs_applied_total()
+    );
+    memory_service.shutdown();
+
+    assert_eq!(persistent_metrics.txs_applied_total(), 1);
+    assert_eq!(memory_metrics.txs_applied_total(), 1);
+    assert!(!failed_persistent_path.exists());
+}
+
+#[cfg(unix)]
+fn adapter_test_block(sender_byte: u8) -> QbindBlock {
+    let sender = [sender_byte; 32];
+    let recipient = [sender_byte.wrapping_add(1); 32];
+    let proposal = Arc::new(BlockProposal {
+        header: BlockHeader {
+            version: 1,
+            chain_id: 1337,
+            epoch: 0,
+            height: 1,
+            round: 0,
+            parent_block_id: [0; 32],
+            payload_hash: [sender_byte; 32],
+            proposer_index: 0,
+            suite_id: 0,
+            tx_count: 1,
+            timestamp: 1_704_067_200,
+            payload_kind: 0,
+            next_epoch: 0,
+            batch_commitment: [0; 32],
+        },
+        qc: None,
+        txs: Vec::new(),
+        signature: Vec::new(),
+    });
+    QbindBlock::new(
+        proposal,
+        vec![qbind_ledger::QbindTransaction::new(
+            sender,
+            0,
+            TransferPayload::new(recipient, 0).encode(),
+        )],
+    )
+}
+
+#[cfg(unix)]
+fn wait_for_one_applied_transaction(metrics: &ExecutionMetrics) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while metrics.txs_applied_total() == 0 && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(
+        metrics.txs_applied_total(),
+        1,
+        "worker did not apply test transaction"
+    );
 }
 
 fn result_kind<T, E>(result: &Result<T, E>) -> &'static str {
