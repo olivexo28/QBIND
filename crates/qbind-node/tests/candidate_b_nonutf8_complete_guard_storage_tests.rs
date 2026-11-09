@@ -18,10 +18,10 @@ fn database_path(data_dir: &Path) -> PathBuf {
     data_dir.join(STATE_DIR)
 }
 
-fn write_database(data_dir: &Path, id: u8, state: AccountState) {
+fn write_database(data_dir: &Path, id: u8, state: &AccountState) {
     let path = database_path(data_dir);
     let db = RocksDbAccountState::open(&path).expect("create synthetic account database");
-    db.put_account_state(&account_id(id), &state)
+    db.put_account_state(&account_id(id), state)
         .expect("write synthetic account marker");
     db.flush().expect("flush synthetic account marker");
     drop(db);
@@ -115,8 +115,8 @@ fn nonutf8_complete_alias_guard_then_account_storage_characterization() {
 
     let intended_marker = AccountState::new(0x1111, 0xaaaa);
     let lossy_marker = AccountState::new(0x2222, 0xbbbb);
-    write_database(&intended, 0x51, intended_marker);
-    write_database(&lossy_spelling, 0x51, lossy_marker);
+    write_database(&intended, 0x51, &intended_marker);
+    write_database(&lossy_spelling, 0x51, &lossy_marker);
 
     let record = complete_record(&intended);
     assert_eq!(record.destination_id, canonical_intended.to_str().unwrap());
@@ -192,7 +192,7 @@ fn utf8_positive_control_and_real_guard_refusals_skip_storage() {
     let positive = root.join("utf8-positive");
     fs::create_dir(&positive).expect("create UTF-8 positive destination");
     let positive_marker = AccountState::new(0x3333, 0xcccc);
-    write_database(&positive, 0x52, positive_marker);
+    write_database(&positive, 0x52, &positive_marker);
     let positive_record = complete_record(&positive);
     publish_complete(&positive, &positive_record);
     let positive_decision = evaluate_ordinary_startup(&positive);
@@ -221,7 +221,7 @@ fn utf8_positive_control_and_real_guard_refusals_skip_storage() {
 
     let foreign = root.join("foreign-record");
     fs::create_dir(&foreign).expect("create foreign-record destination");
-    write_database(&foreign, 0x53, AccountState::new(0x4444, 0xdddd));
+    write_database(&foreign, 0x53, &AccountState::new(0x4444, 0xdddd));
     let mut foreign_record = complete_record(&foreign);
     foreign_record.destination_id = root
         .join("different-destination")
