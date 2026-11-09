@@ -1,4 +1,4 @@
-# Worker Write Failure and Backend Reuse: Decision Brief
+# Worker Write Failure and Backend Reuse: Specification Requirements
 
 **Status:** Decision support only. No production policy or recovery authority
 is selected here. The required-persistence candidate remains **NOT ACCEPTED /
@@ -24,6 +24,25 @@ durable corruption, rollback, or safe recovery was established. The prior
 RPC-1/2 controls retain only their documented partial dispositions and
 scheduling limits; this brief does not reopen or strengthen them.
 
+The supplemental source review is pinned to
+`test/checked-arithmetic-owner-contract-followup` at
+`2fdc30da4174a6b131c10c3e14091a5bea9a766f`, tree
+`3bb8f6529b04eca2241ae5d01988cf862be74ae7`. Its source blobs are:
+
+- `crates/qbind-node/src/execution_adapter.rs`:
+  `13adcb22f3317485c47ed019daf019599193e721`
+- `crates/qbind-ledger/src/parallel_exec.rs`:
+  `9791f74b5c54655796edb823743c98d98817b33c`
+- `crates/qbind-ledger/src/execution.rs`:
+  `fe78bed4bddc5f00aa0ea2c8a464050106d84093`
+- Earlier decision brief at that endpoint:
+  `86381214217deb92311402adf621cd348f0b3d30`
+
+The additional behavior and line references are pinned to this supplemental
+endpoint. It is not a new execution experiment and does not upgrade the
+earlier injected controls into real storage-failure or crash-recovery
+evidence.
+
 ## Decision at issue
 
 The current worker adapts `PersistentVmV0State` to the void-returning
@@ -45,7 +64,151 @@ outcomes”). The public put control instead performed a successful RocksDB put
 and overrode its result afterward; it demonstrates an ambiguous post-effect
 error and cache behavior, not a real storage failure.
 
-Two design directions are compared below as proposals only.
+Two design directions are compared below as proposals only. This expanded
+document remains decision support, not an approved production design or
+operating procedure.
+
+## Required properties for a future specification
+
+The following are design requirements and decision prompts, not selected
+mechanisms. Neither direction below is authorized by this document.
+
+### Observable worker-write failure
+
+At the pinned endpoint, the ledger-facing `AccountStateUpdater` setter returns
+no result (`crates/qbind-ledger/src/execution.rs:1138-1145`). The persistent
+worker adapter drops the result from `put_worker_account_state` and updates
+the cache only on success
+(`crates/qbind-node/src/execution_adapter.rs:628-640, 668-670`). The worker
+then derives transaction and block metrics from VM results and logs flush
+errors while proceeding (`:1361-1400`). `submit_block` returns after queue
+admission rather than block completion (`:1492-1518`). Thus the current public
+return value is not evidence that execution or persistence succeeded.
+
+A future design must carry a typed storage/execution outcome across each
+boundary: transaction mutation, block execution, worker completion, caller
+observation, and service health. It must distinguish VM rejection from
+storage failure, definite non-effect from possible/unknown effect, and queue
+admission from completed publication. A block-correlated completion identity
+must survive a lost response so retry does not silently execute the same
+block twice. The first failed or ambiguous result must not be overwritten by
+a later successful setter, flush, or block. These requirements do not choose
+error types, APIs, or retry policy.
+
+### State, membership, and publication are different observations
+
+Transaction-level setter-call counts are not a complete state-change
+observation. `StageBPerAccountState::get` obtains an account lock that creates
+a default entry when the account is absent, and `to_in_memory` exports every
+entry (`crates/qbind-ledger/src/parallel_exec.rs:426-477`). The adapter
+extracts touched sender/recipient accounts into a snapshot, executes Stage B,
+and applies every final snapshot entry through its updater
+(`crates/qbind-node/src/execution_adapter.rs:125-160, 1320-1360`). An absent
+account may therefore become present in the Stage B working/final maps
+without an explicit transaction-level setter for that lookup; adapter
+publication is a further boundary. Whether a default-valued account is
+semantically absent or materialized is an unresolved state-format/API
+decision.
+
+Future evidence must report separately: (1) account values and membership in
+the initial, working, and final maps; (2) transaction-engine setter calls;
+(3) adapter snapshot entries submitted to the underlying updater; and
+(4) durable backend state after reopen. A zero count at one layer does not
+prove zero work or no account materialization at another. A Stage B result or
+final in-memory state alone does not establish adapter selection, service
+publication, storage success, or durability.
+
+### Atomic publication and unknown outcomes
+
+If atomic publication is selected, the proposed consistency unit must include
+the account-state changes and an authoritative execution position sufficient
+to identify which block is committed. It must also decide how account
+membership/materialization and any durable block identity or completion
+record participate. Publishing state and advancing execution position in
+separate, independently visible operations leaves a crash window in which
+they disagree. Cache state must not be presented as committed ahead of the
+durable boundary, and callers must not be told success before that boundary
+is established.
+
+A commit call that reports an error, times out, or loses its response may
+have committed. Its result is **unknown**, not automatically failure or
+success. The service must gate further execution and reuse until a
+block-identity-based, independently trusted resolution establishes the
+outcome. A later flush or matching account values alone cannot resolve the
+identity or prove the complete state transition. The exact commit primitive,
+identity, read-back evidence, cache ordering, and caller protocol remain
+unselected.
+
+### Crash-safe quarantine requires a pre-effect gate
+
+A quarantine marker written only after detecting a failed write cannot by
+itself protect against a crash before that marker is durably written. If
+account effects can occur while the durable record still appears healthy,
+restart may admit a state whose last attempted block is unknown. A process-
+local flag, a worker join, a missing marker, or a marker write attempted
+after the failure does not close this gap.
+
+Any future restart-safe proposal must explain a fail-closed protocol for the
+entire interval before the first state effect, through commit or uncertainty:
+
+1. Establish exclusive ownership and close access to the backend until its
+   durable status has been checked. The gate must cover every relevant
+   reader, writer, worker, alternate service instance, and startup path—not
+   merely `submit_block` or an in-memory ownership flag.
+2. Before allowing effects, durably establish a block-correlated
+   in-progress/prepared state (or an equivalent atomic protocol) tied to the
+   backend and prior authoritative execution position. If recording that
+   state has an ambiguous result, keep the gate closed and resolve it before
+   proceeding.
+3. Publish account state, account membership semantics, and the new
+   authoritative execution position under the selected atomic boundary, or
+   leave a durable unresolved state that startup must refuse to serve.
+4. On restart, admit access only after authenticated evidence proves a
+   consistent committed boundary and current authority. Missing, stale,
+   corrupt, unreadable, conflicting, or unauthenticated status is not a
+   healthy default; refuse service and reuse.
+
+This sequence is a set of required questions, not a claim that the
+repository has such a gate or protocol. A design must specify how it handles
+crash before/while preparing, after preparation but before effects, between
+effects if they are not atomic, during commit, after commit before response,
+and while recording the outcome. It must also prevent access through open
+handles or other processes during recovery. If no mechanism can establish
+that all access is gated and the last durable boundary is authoritative,
+recovery must remain unavailable rather than infer rollback or commit.
+
+Recovery must be authorized by a source independent of the possibly
+compromised backend, its local configuration, and any single delivery
+channel. Evidence must bind the deployment/backend identity, the affected
+execution boundary, and the state/history being accepted; it must be
+authenticated, current under a separately established currentness rule, and
+protected against replay or substitution. The authority, authentication
+scheme, currentness source, recovery evidence format, operator roles,
+provisioning, and transition process are all unresolved. Association-
+verification authority must remain separate from validator signing and
+bundle-signing authority.
+
+### Authority, replay, and signing-history limits
+
+Authenticating a stored anchor or association proves, at most, that the
+presented object was authorized by the trust source under its stated
+assumptions. It does not show that the object is current, has not been
+superseded, or represents complete history. Currentness requires a separate
+authenticated mechanism and trust assumption; absent or unavailable
+currentness evidence requires refusal. A valid older transition may be
+replayed unless transition ordering, freshness, and rollback resistance are
+independently established.
+
+Even a current authenticated association does not establish the complete
+validator signing history, exclusive signer control, or absence of
+equivocation. Recovery authority, canonical execution history, validator
+signing authority, and bundle-signing authority are distinct roles and
+evidence domains. The design must not use a recovery signature as proof of
+signing-history completeness or let association verification authorize
+validator/bundle signing. Trust-root custody, classical versus post-quantum
+assumptions, transition replay, historical reconciliation, and signer
+continuity remain open; this document selects no cryptographic suite or
+authority.
 
 ## A. Stage a block and publish through an atomic commit boundary
 
@@ -259,6 +422,9 @@ experiments and operational/production evidence are separate evidence classes.
 | Cache consistency | Compare cache, reopened database state, committed block identity, and transaction receipts after each injected/ambiguous failure. | Same-process reads alone do not prove durable state. |
 | Ownership and reuse | Attempt competing service construction during active work, shutdown, join, panic, timeout and after restart; require release only at the selected safe boundary. | In-process join tests are not restart or recovery evidence. |
 | Restart and crash windows | Use controlled process-crash/power-loss testing around every durable marker/state ordering boundary; reopen and refuse or reconcile exactly as approved. | Separate crash experiment; filesystem/VM behavior and storage configuration must be recorded. |
+| Crash before failure/quarantine marker | Crash before the error handler can persist a failure marker, including while preparing the block and while resolving an ambiguous prepare; prove the startup gate cannot treat an unrecorded attempted operation as healthy. | FUTURE / NOT EXECUTED. Must test the selected durable pre-effect protocol and actual reopen path; an injected post-error marker does not cover this window. |
+| Gated access and restart | Attempt every configured read/write/service path through startup, recovery, alternate handles and competing processes while state is unresolved; require refusal until authenticated resolution. | FUTURE / NOT EXECUTED. An in-process boolean or one service's queue gate is insufficient evidence of system-wide exclusion. |
+| Account membership and adapter publication | Record account-key membership and values before/after touched-account extraction, Stage B get/set/final-state export, adapter selection and each updater publication; reopen the persistent backend and compare. | FUTURE / NOT EXECUTED. Must distinguish read materialization, transaction setter calls, adapter writes and durable entries. |
 | Authorized recovery | With independently provisioned and authenticated recovery authority, test valid, stale, conflicting, missing and unauthorized evidence; refuse absent/ambiguous authority. | Requires owner-approved authority and real provisioning; not simulated by a test boolean. |
 | Production readiness | Verify the actual configured storage, startup path, external effects and operating procedure, with independently reviewed evidence. | Operational evidence; unit tests do not establish deployment behavior. |
 
@@ -269,15 +435,22 @@ characterization, not proof of real write failure or safe reuse.
 
 ## Scope and status
 
-This document is the only new path in the documentation branch relative to
-the reviewed endpoint `25cd872cd7c6b63b83279dd92ebcc0d7f052c0ea`. The complete
-branch scope relative to main is the existing required-persistence candidate
-and controls history plus this one document; exact path inventory and
-commit/tree/parent identities are reported at delivery.
+This supplemental slice changes only this existing document relative to
+`2fdc30da4174a6b131c10c3e14091a5bea9a766f`; it does not create another copy
+or alter the earlier controls and historical evidence. The full branch scope
+relative to main includes this single-document update plus all inherited
+changes from the checked-arithmetic follow-up; exact branch, commit, tree,
+parent, and path counts are reported with the independent-review delivery.
 
-No source or test files, historical evidence, or refs were changed by this
-assessment. No tests were rerun. No operational keys, live node, provisioning,
-PR, merge or deployment were used. Path encoding, destination authority,
-startup ordering, worker shutdown, durability and recovery remain OPEN.
-A23-F1 and A33-F1 / E27 remain OPEN; activation remains DISABLED; public
-DevNet remains NO-GO.
+No source or test files, historical raw logs, or operational state were
+changed. No tests were run. All proposed verification matrix items remain
+FUTURE / NOT EXECUTED. No operational keys, live node, provisioning, PR,
+merge or deployment were used. No database mechanism, consistency unit
+implementation, production API, gate, durable quarantine format, recovery
+authority, authentication scheme, currentness mechanism, replay policy, or
+signing-history/continuity procedure is approved here. Storage-error
+propagation, destination/path authority, startup ordering, worker shutdown,
+durability and recovery remain OPEN. The required-persistence candidate
+remains NOT ACCEPTED / NOT INTEGRATION-READY; recipient overflow and A23-F1
+and A33-F1 / E27 remain OPEN; activation remains DISABLED; public DevNet
+remains NO-GO.
