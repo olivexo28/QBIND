@@ -194,8 +194,9 @@ fn classify(trace: InitializationTrace<'_>) -> Assessment {
                     Classification::Inconclusive
                 } else if conflicting_signal {
                     Classification::Inconclusive
+                } else if !trace.event_history_complete {
+                    Classification::Inconclusive
                 } else if failed_before_refusal
-                    && trace.event_history_complete
                     && only_rejected_attempts
                 {
                     if worker_termination == WorkerTermination::Unresolved {
@@ -563,7 +564,7 @@ fn unrelated_open_or_refusal_cannot_satisfy_this_initialization() {
     ];
     assessment(
         InitializationTrace {
-            initialization_id: 19,
+            initialization_id: 20,
             requested_mode: RequestedMode::Persistent,
             events: REFUSAL_EVENTS,
             event_history_complete: true,
@@ -755,32 +756,33 @@ fn rejected_submission_is_distinct_from_admitted_or_executed_work() {
         );
     }
 
-    #[test]
-    fn attempted_but_unresolved_submission_is_not_assumed_rejected() {
-        const EVENTS: &[Event] = &[
-            event(30, 1, EventKind::OpenCompleted(OpenOutcome::Failed)),
-            event(
-                30,
-                2,
-                EventKind::Refused(RefusalReason::PersistentOpenFailed),
-            ),
-            event(
-                30,
-                3,
-                EventKind::Work(WorkEvent::Attempted { work_id: 300 }),
-            ),
-        ];
-        assessment(
-            InitializationTrace {
-                initialization_id: 30,
-                requested_mode: RequestedMode::Persistent,
-                events: EVENTS,
-                event_history_complete: true,
-            },
-            Classification::Inconclusive,
-            WorkerTermination::NotStarted,
-        );
-    }
+}
+
+#[test]
+fn attempted_but_unresolved_submission_is_not_assumed_rejected() {
+    const EVENTS: &[Event] = &[
+        event(30, 1, EventKind::OpenCompleted(OpenOutcome::Failed)),
+        event(
+            30,
+            2,
+            EventKind::Refused(RefusalReason::PersistentOpenFailed),
+        ),
+        event(
+            30,
+            3,
+            EventKind::Work(WorkEvent::Attempted { work_id: 300 }),
+        ),
+    ];
+    assessment(
+        InitializationTrace {
+            initialization_id: 30,
+            requested_mode: RequestedMode::Persistent,
+            events: EVENTS,
+            event_history_complete: true,
+        },
+        Classification::Inconclusive,
+        WorkerTermination::NotStarted,
+    );
 }
 
 #[test]
