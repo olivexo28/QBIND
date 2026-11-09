@@ -1285,7 +1285,7 @@ mod tests {
     use qbind_ledger::{get_account_nonce, NonceExecutionEngine};
     use qbind_wire::consensus::BlockHeader;
     use std::sync::atomic::AtomicU64;
-    use std::sync::mpsc::{Receiver, Sender};
+    use std::sync::mpsc::Receiver;
     use std::thread::JoinHandle;
     use std::time::{Duration, Instant};
 
@@ -1301,7 +1301,7 @@ mod tests {
     struct ObservedAdapterWorker {
         initialization_id: u64,
         worker_id: u64,
-        sender: Option<Sender<ExecTask>>,
+        sender: Option<crossbeam_channel::Sender<ExecTask>>,
         events: Receiver<AdapterTestEvent>,
         join: Option<JoinHandle<()>>,
     }
