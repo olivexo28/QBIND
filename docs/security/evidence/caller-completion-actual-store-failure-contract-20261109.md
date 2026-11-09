@@ -42,8 +42,8 @@ At commit `257d0c265578e328aae272864cd36dad9e1a1d4b`, tree
 - `crates/qbind-node/src/evm_commit.rs`, blob
   `263e0d680e31e235b13170714f2f5797f73d4bd2`: public
   `EvmCommitResult`, `apply_committed_block` return, in-memory
-  `get_commit_result` and retention window (126–150, 182–188, 286–288,
-  321–378).
+  `get_commit_result`, snapshot-retention field and pruning (126–150,
+  182–188, 286–288, 295–297, 321–378).
 - `crates/qbind-node/src/lib.rs`, blob
   `b2a477139d62e8b90c65decbca01edf3de0be42e`: `BlockApplyOutcome` and
   `Node::apply_block` result path (2525–2534, 2595–2640).
@@ -102,7 +102,7 @@ callers are entitled to durable fields.
 | VM-v0 worker and metrics consumer | Worker executes ordered transactions, consumes results for success/error metrics, attempts `flush_state`, logs flush failure, then advances local height. Stage B may materialize missing accounts in its temporary state and exports changed state back through setters. | Worker-local use establishes that results affect metrics, not that those metrics or results are a durable caller response. It returns no completion handle/result to submitters. The setter/cache updates, Stage B state materialization/export, adapter publication and backend writes/flush are distinct. |
 | HotStuff simulator commit callback | Submits a committed `QbindBlock` to async service, or calls synchronous adapter; after this dispatch it removes committed transactions from the selected mempool. Queue-full is fail-stop; shutdown logs and continues without execution; sync adapter failure is logged and does not fail the commit callback. | This caller observes admission or `Result<(), ExecutionAdapterError>`, not durable completion. Mempool removal is not evidence that a result was delivered to a transaction submitter. This is simulator behavior, not proof about an ordinary P2P route. |
 | `Node::apply_block` API caller | Returns `BlockApplyOutcome` with height, round, block ID, `BlockExecutionResult` (one success/failure outcome per transaction), and vote decision. | The API exposes ordered transaction outcomes to its caller, but this local execute-and-return path does not establish durable commit or a persistent retry result. No production external consumer entitlement is established by its signature alone. |
-| EVM bridge API and callers | `apply_committed_block` returns `EvmCommitResult` with receipts, state/transaction/receipts roots and total gas; `get_commit_result(height)` retrieves from an in-memory map with a configured retention window. EVM receipts expose success, gas, cumulative gas, effective gas price, logs, contract address, output and error. | Tests inspect the returned and retained values. The public interface exposes detailed results and a memory lookup; the map/retention is not the atomic durable completion candidate. In the inspected implementation, current height and the in-memory result map update before snapshot persistence; storage failure can return an error after those in-memory updates. No production caller or entitlement/expiry contract was established. |
+| EVM bridge API and callers | `apply_committed_block` returns `EvmCommitResult` with receipts, state/transaction/receipts roots and total gas; `get_commit_result(height)` looks up the separate in-memory `committed_roots` map. EVM receipts expose success, gas, cumulative gas, effective gas price, logs, contract address, output and error. | Tests inspect the returned and retained values. The configured/default `retention` value is used by snapshot pruning, not by `get_commit_result`; in the inspected `evm_commit.rs`, no eviction from `committed_roots` is shown. That file does not establish durable result storage or restart retrieval. In the inspected implementation, current height and the in-memory result map update before snapshot persistence; storage failure can return an error after those in-memory updates. No production caller or entitlement/expiry contract was established. |
 | Repository integration tests/harnesses | Tests submit blocks, poll queue drain/metrics, or directly inspect execution results/receipts. | These are test consumers, not production caller commitments. They confirm results are used in some harnesses but do not determine the external completion schema. |
 
 This is a bounded repository-source inventory. It does not identify every
@@ -188,19 +188,23 @@ while its caller entitlement or recovery requirement remains active.
 | Field class | Proposed minimum retention | Limit needed before implementation |
 |---|---|---|
 | Block acknowledgement and operation/position key | Keep throughout the approved idempotent retry window and until the operation is no longer needed for authoritative recovery or conflict detection. An expired record must not cause re-execution if the position may already have committed. | Retry window, recovery horizon, expiration semantics, and whether a compact tombstone remains after payload pruning are OPEN. |
-| Caller-entitled ordered outcomes | Keep each required outcome for at least that caller’s approved retrieval/retry window. A separately stored reference is acceptable only if the referenced bytes remain retrievable and authenticated for the same period. | Per-caller window, response/API contract, size cap, archive availability, and behavior on retention exhaustion are OPEN. |
+| Caller-entitled ordered outcomes | Keep each required outcome for at least that caller’s approved retrieval/retry window. The outcome bytes must be committed in the same reviewed atomic consistency unit as account values/membership, position, operation identity and acknowledgement. A logical reference is permitted only when both the reference and its target outcome data are included in that same consistency unit. | Per-caller window, response/API contract, size cap, and behavior on retention exhaustion are OPEN. Independently writing/committing required outcomes or their references is not authorized by this specification, even if authenticated and retrievable; a broader scheme needs a new owner decision and safety proof. |
 | Outcome fields with unresolved entitlement | Preserve pending entitlement review or explicitly return unavailable to affected callers; do not silently omit or prune. | Owner must complete downstream inventory and decide whether each field is retained or unavailable before claiming the associated API contract. |
 | Schema, ruleset, identity and integrity metadata | Retain alongside every acknowledgement/outcome that depends on it, for at least the longest retention period of those records; do not delete the decoder/policy context while dependent records exist. | Version support, migration/deprecation and metadata compaction rules are OPEN. |
-| State/result reference and integrity/authentication evidence | Keep an immutable, authenticated reference and verification material sufficient to check the exact referenced bytes for the full dependent-record lifetime. If the reference cannot be fetched or validated, report unavailable. | Storage location, replication, access controls, cryptographic constructions/keys, key rotation, archive service level and integrity verification schedule are OPEN. |
+| State/result reference and integrity/authentication evidence | Any reference for required outcome data must point to bytes co-committed with that reference in the same reviewed atomic consistency unit. Keep the logical reference and its verification context with the acknowledgement for the full promised lifetime; if the same-boundary data cannot be retrieved or validated, report unavailable. | Storage location within the boundary, access controls, cryptographic constructions/keys, key rotation, and integrity verification schedule are OPEN. Independently stored/committed required data or references are not permitted absent a new owner decision and safety proof. |
 | Maximum record size and aggregate storage | Refuse or mark unavailable before acknowledging if a required record cannot be stored within the approved bound; do not truncate required fields. | Maximum transactions/block, bytes per transaction, error/log/output sizes, total per-block outcomes, database limits and backpressure policy are OPEN. |
 
 No concrete numeric retention or size limit can be derived from the inspected
-caller APIs. The EVM bridge’s default in-memory result window of 256 blocks
-is a local cache behavior, not an approved durable retention period and not
-evidence for the VM-v0 contract. A proposed durable reference must define
-integrity-protected content addressing or equivalent authenticated lookup,
-availability for the whole promised window, and refusal if the record is
-missing or fails verification; no such mechanism is selected.
+caller APIs. In `crates/qbind-node/src/evm_commit.rs` at the pinned blob
+`263e0d680e31e235b13170714f2f5797f73d4bd2`, the configured/default 256-block
+window is used to prune persisted snapshots. `get_commit_result` separately
+reads the in-memory `committed_roots` map; the inspected file shows no map
+eviction, but it does not establish durable storage or retrieval after
+restart. Neither behavior is an approved durable retention period or
+evidence for the VM-v0 contract. A logical result reference is acceptable
+only if both reference and target data belong to the same reviewed atomic
+consistency unit; authenticated bytes written or committed independently do
+not satisfy this specification.
 
 The record’s encoding, integrity primitive, authentication authority,
 native post-quantum construction and parameters, and storage schema are
@@ -392,9 +396,11 @@ At minimum, later evidence must include:
   gas/fee/receipt fields, including count/order and explicit behavior for
   unresolved or missing fields; test size-limit/backpressure without silent
   truncation;
-- retention/expiry, reference availability and integrity tests for every
-  field over the approved caller and recovery windows; test unavailable
-  references and required-record pruning refusal;
+- retention/expiry and integrity tests for every field over approved caller
+  and recovery windows; verify any logical reference and its target
+  completion bytes are in the same actual atomic consistency unit, and that
+  no required outcome or reference is independently written/committed. Test
+  unavailable references and required-record pruning refusal;
 - exact selected backend/dependency, API, configuration, WAL and sync
   semantics, source provenance, filesystem/device assumptions, and a stated
   failure model;
