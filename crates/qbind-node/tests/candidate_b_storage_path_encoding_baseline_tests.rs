@@ -66,9 +66,9 @@ fn account_create_nonrepresentable_path_contract_baseline() {
         "RocksDbAccountState::open(raw) result: {}",
         result_kind(&opened)
     );
+    let expected_marker = AccountState::new(0x7171, 0x9292);
     if let Ok(db) = opened {
-        let marker = AccountState::new(0x7171, 0x9292);
-        db.put_account_state(&ACCOUNT_ID, &marker)
+        db.put_account_state(&ACCOUNT_ID, &expected_marker)
             .expect("write baseline marker through raw-path API result");
         db.flush().expect("flush baseline account marker");
         drop(db);
@@ -78,6 +78,7 @@ fn account_create_nonrepresentable_path_contract_baseline() {
     print_tree("lossy ancestor after", lossy_db.parent().unwrap());
     print_tree("raw database after", &raw_db);
     print_tree("lossy database after", &lossy_db);
+    let mut lossy_marker_matches = false;
     if lossy_db.exists() {
         let db = RocksDbAccountState::open_existing(&lossy_db)
             .expect("open lossy-path control after raw-path account open");
@@ -86,15 +87,26 @@ fn account_create_nonrepresentable_path_contract_baseline() {
             "lossy-path marker after account create call: nonce={} balance={}",
             marker.nonce, marker.balance
         );
+        lossy_marker_matches =
+            (marker.nonce, marker.balance) == (expected_marker.nonce, expected_marker.balance);
         drop(db);
     }
+    println!("lossy-path database contains raw-call marker: {lossy_marker_matches}");
 
     assert!(
         raw_db.as_os_str().to_str().is_none(),
         "fixture must contain an invalid UTF-8 ancestor"
     );
     assert!(
-        !open_succeeded && !raw_db.exists() && !lossy_db.exists(),
+        !open_succeeded || lossy_marker_matches,
+        "raw-path account create did not expose the expected lossy-path marker"
+    );
+    assert!(
+        !open_succeeded
+            && !raw_db.parent().unwrap().exists()
+            && !lossy_db.parent().unwrap().exists()
+            && !raw_db.exists()
+            && !lossy_db.exists(),
         "BASELINE CONTRACT FAILURE: account create did not refuse before observed effects"
     );
 }
@@ -136,17 +148,19 @@ fn account_existing_only_nonrepresentable_path_contract_baseline() {
         "RocksDbAccountState::open_existing(raw) result: {}",
         result_kind(&opened)
     );
-    let observed = match opened {
+    let (observed, expected_lossy_marker_returned) = match opened {
         Ok(db) => {
             let marker = db.get_account_state(&ACCOUNT_ID);
             println!(
                 "marker returned by raw-path existing-only API: nonce={} balance={}",
                 marker.nonce, marker.balance
             );
+            let matched_lossy_marker =
+                (marker.nonce, marker.balance) == (expected.nonce, expected.balance);
             drop(db);
-            Some(marker)
+            (Some(marker), matched_lossy_marker)
         }
-        Err(_) => None,
+        Err(_) => (None, false),
     };
 
     print_tree("raw ancestor after", raw_db.parent().unwrap());
@@ -157,6 +171,7 @@ fn account_existing_only_nonrepresentable_path_contract_baseline() {
         "lossy database entries unchanged: {}",
         before_lossy == after_lossy
     );
+    println!("raw-path call returned distinct lossy marker: {expected_lossy_marker_returned}");
     println!("raw database exists after: {}", raw_db.exists());
     println!("lossy database exists after: {}", lossy_db.exists());
 
@@ -165,7 +180,12 @@ fn account_existing_only_nonrepresentable_path_contract_baseline() {
         "fixture must contain an invalid UTF-8 ancestor"
     );
     assert!(
+        observed.is_none() || expected_lossy_marker_returned,
+        "raw-path existing-only API returned unexpected data instead of the lossy control marker"
+    );
+    assert!(
         observed.is_none()
+            && !raw_db.parent().unwrap().exists()
             && !raw_db.exists()
             && before_lossy == after_lossy,
         "BASELINE CONTRACT FAILURE: account existing-only open did not refuse before observed effects"
@@ -235,7 +255,14 @@ fn consensus_nonrepresentable_path_contract_baseline() {
         "fixture must contain invalid UTF-8 in an ancestor"
     );
     assert!(
-        observed_epoch.is_none() && !raw_db.exists() && before_lossy == after_lossy,
+        observed_epoch.is_none() || observed_epoch == Some(expected_epoch),
+        "raw-path consensus API returned unexpected state instead of the lossy control epoch"
+    );
+    assert!(
+        observed_epoch.is_none()
+            && !raw_db.parent().unwrap().exists()
+            && !raw_db.exists()
+            && before_lossy == after_lossy,
         "BASELINE CONTRACT FAILURE: consensus open did not refuse before observed effects"
     );
 }
