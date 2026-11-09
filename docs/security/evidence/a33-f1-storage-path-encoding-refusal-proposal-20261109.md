@@ -22,7 +22,7 @@ NO-GO.
 | Reviewed guard-to-storage characterization | `4ca2839796e27b8384ff6b4b12e21ab9d3b2fccf`, tree `50a406a986cf830cdc2d166e4a30ba29440a2aa6` |
 | Characterization test-source commit | `7af0d66578ea3e538f24dde3e67b0895ee2766cd`, tree `9d714c32e82bde478485b3a5d9ed712b7e41092f` |
 | Reviewed path-encoding source qualification | `docs/security/evidence/a33-f1-candidate-b-existing-destination-authorization-contract-20261109.md` at the reviewed characterization endpoint |
-| Owner-approved scoped pre-ownership boundary | `docs/security/evidence/a33-f1-candidate-b-pre-ownership-gate-spec-20261109.md` at pinned main |
+| Owner-approved scoped pre-ownership boundary | `docs/security/evidence/a33-f1-candidate-b-pre-ownership-gate-spec-20261109.md` at reviewed characterization endpoint `4ca2839796e27b8384ff6b4b12e21ab9d3b2fccf` |
 | Upstream wrapper source inspected by the prior review | rust-rocksdb v0.22.0 commit `e523ca4a13a7bf364abd0743149d0b3cd40856c0` (`src/db.rs`, `src/ffi_util.rs`) |
 
 Source line references below are pinned to main. The characterization
