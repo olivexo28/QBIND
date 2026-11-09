@@ -52,15 +52,14 @@ use qbind_consensus::ids::ValidatorId;
 
 use qbind_crypto::{AeadSuite, CryptoError, KemSuite, SignatureSuite, StaticCryptoProvider};
 use qbind_ledger::{
-    AccountState, AccountStateUpdater, CachedPersistentAccountState, NonceExecutionEngine,
-    QbindTransaction, RocksDbAccountState, TransferPayload,
+    AccountState, AccountStateUpdater, NonceExecutionEngine, QbindTransaction, TransferPayload,
 };
 use qbind_net::{
-    ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode, ServerConnectionConfig,
-    ServerHandshakeConfig,
+    ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode,
+    ServerConnectionConfig, ServerHandshakeConfig,
 };
 use qbind_node::execution_adapter::{
-    SingleThreadExecutionService, SingleThreadExecutionServiceConfig,
+    PersistentVmV0State, SingleThreadExecutionService, SingleThreadExecutionServiceConfig,
 };
 use qbind_node::mempool::{InMemoryMempool, Mempool, MempoolConfig};
 use qbind_node::metrics::ExecutionMetrics;
@@ -494,7 +493,7 @@ pub struct DagCouplingClusterHandle {
     execution_services: Vec<Arc<SingleThreadExecutionService>>,
     #[allow(dead_code)]
     data_dirs: Vec<TempDir>,
-    state_backends: Vec<CachedPersistentAccountState<RocksDbAccountState>>,
+    state_backends: Vec<PersistentVmV0State>,
     config: DagCouplingClusterConfig,
 }
 
@@ -543,9 +542,8 @@ impl DagCouplingClusterHandle {
             let state_path = data_dir.path().join("state_vm_v0");
 
             // Create persistent state backend
-            let persistent_state = RocksDbAccountState::open(&state_path)
+            let state_backend = PersistentVmV0State::open(&state_path)
                 .map_err(|e| format!("Failed to open RocksDB state for node {}: {:?}", i, e))?;
-            let state_backend = CachedPersistentAccountState::new(persistent_state);
 
             // Create KEMTLS config for this node
             let kemtls_cfg = create_kemtls_config_for_node(i);
@@ -573,11 +571,15 @@ impl DagCouplingClusterHandle {
             let engine = NonceExecutionEngine::new();
             let exec_metrics = Arc::new(ExecutionMetrics::new());
             let exec_config = SingleThreadExecutionServiceConfig::vm_v0_persistent(&state_path);
-            let execution_service = Arc::new(SingleThreadExecutionService::with_config(
-                engine,
-                exec_config,
-                Some(exec_metrics),
-            ));
+            let execution_service = Arc::new(
+                SingleThreadExecutionService::with_config_and_persistent_state(
+                    engine,
+                    exec_config,
+                    Some(exec_metrics),
+                    state_backend.clone(),
+                )
+                .map_err(|e| e.to_string())?,
+            );
 
             // Create harness
             let harness = NodeHotstuffHarness::new_from_validator_config(

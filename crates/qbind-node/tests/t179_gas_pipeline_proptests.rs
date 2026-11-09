@@ -392,7 +392,8 @@ proptest! {
         let engine = qbind_ledger::NonceExecutionEngine::new();
         // Note: The config's execution_profile should be VmV0
         let config = SingleThreadExecutionServiceConfig::vm_v0();
-        let service = SingleThreadExecutionService::with_config(engine, config, None);
+        let service = SingleThreadExecutionService::with_config(engine, config, None)
+            .expect("valid VM-v0 service configuration");
 
         let proposal = make_test_proposal(1);
         let block = QbindBlock::new(proposal, txs.clone());
@@ -442,7 +443,8 @@ proptest! {
     ) {
         let engine = qbind_ledger::NonceExecutionEngine::new();
         let config = SingleThreadExecutionServiceConfig::vm_v0();
-        let service = SingleThreadExecutionService::with_config(engine, config, None);
+        let service = SingleThreadExecutionService::with_config(engine, config, None)
+            .expect("valid VM-v0 service configuration");
 
         // Split transfers across blocks
         let chunk_size = (transfers.len() / block_count).max(1);
@@ -514,7 +516,8 @@ fn test_gas_pipeline_basic_execution() {
 fn test_gas_pipeline_service_with_gas_transactions() {
     let engine = qbind_ledger::NonceExecutionEngine::new();
     let config = SingleThreadExecutionServiceConfig::vm_v0();
-    let service = SingleThreadExecutionService::with_config(engine, config, None);
+    let service = SingleThreadExecutionService::with_config(engine, config, None)
+        .expect("valid VM-v0 service configuration");
 
     let sender = test_account_id(0xAA);
     let recipient = test_account_id(0xBB);

@@ -504,11 +504,15 @@ impl DevnetClusterHandle {
                     min_senders_for_parallel: 2,
                 },
             );
-            let execution_service = Arc::new(SingleThreadExecutionService::with_config(
-                engine,
-                exec_config,
-                Some(exec_metrics),
-            ));
+            let execution_service = Arc::new(
+                SingleThreadExecutionService::with_config(engine, exec_config, Some(exec_metrics))
+                    .map_err(|e| {
+                        ClusterError::Setup(format!(
+                            "Failed to initialize execution service for node {}: {}",
+                            i, e
+                        ))
+                    })?,
+            );
 
             // Create harness
             let harness = NodeHotstuffHarness::new_from_validator_config(

@@ -49,15 +49,14 @@ use qbind_consensus::ids::ValidatorId;
 use qbind_crypto::ml_dsa44::MlDsa44Backend;
 use qbind_crypto::{AeadSuite, CryptoError, KemSuite, SignatureSuite, StaticCryptoProvider};
 use qbind_ledger::{
-    AccountState, AccountStateUpdater, AccountStateView, CachedPersistentAccountState,
-    NonceExecutionEngine, QbindTransaction, RocksDbAccountState, TransferPayload,
+    AccountState, AccountStateUpdater, NonceExecutionEngine, QbindTransaction, TransferPayload,
 };
 use qbind_net::{
-    ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode, ServerConnectionConfig,
-    ServerHandshakeConfig,
+    ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode,
+    ServerConnectionConfig, ServerHandshakeConfig,
 };
 use qbind_node::execution_adapter::{
-    SingleThreadExecutionService, SingleThreadExecutionServiceConfig,
+    PersistentVmV0State, SingleThreadExecutionService, SingleThreadExecutionServiceConfig,
 };
 use qbind_node::mempool::{InMemoryMempool, Mempool, MempoolConfig};
 use qbind_node::metrics::ExecutionMetrics;
@@ -834,7 +833,7 @@ pub struct TestnetAlphaClusterHandle {
     /// Per-validator data directories (temp dirs for RocksDB state).
     data_dirs: Vec<TempDir>,
     /// Persistent account state backends for each node.
-    state_backends: Vec<CachedPersistentAccountState<RocksDbAccountState>>,
+    state_backends: Vec<PersistentVmV0State>,
     /// Cluster configuration.
     config: TestnetAlphaClusterConfig,
     /// Whether shutdown has been initiated.
@@ -908,13 +907,12 @@ impl TestnetAlphaClusterHandle {
             let state_path = data_dir.path().join("state_vm_v0");
 
             // Create persistent state backend
-            let persistent_state = RocksDbAccountState::open(&state_path).map_err(|e| {
+            let state_backend = PersistentVmV0State::open(&state_path).map_err(|e| {
                 ClusterError::Storage(format!(
                     "Failed to open RocksDB state for node {}: {:?}",
                     i, e
                 ))
             })?;
-            let state_backend = CachedPersistentAccountState::new(persistent_state);
 
             // Create KEMTLS config for this node
             let kemtls_cfg = create_kemtls_config_for_node(i);
@@ -946,11 +944,20 @@ impl TestnetAlphaClusterHandle {
             // T187: Apply stage_b_enabled from cluster config
             let exec_config = SingleThreadExecutionServiceConfig::vm_v0_persistent(&state_path)
                 .with_stage_b_enabled(config.stage_b_enabled);
-            let execution_service = Arc::new(SingleThreadExecutionService::with_config(
-                engine,
-                exec_config,
-                Some(exec_metrics),
-            ));
+            let execution_service = Arc::new(
+                SingleThreadExecutionService::with_config_and_persistent_state(
+                    engine,
+                    exec_config,
+                    Some(exec_metrics),
+                    state_backend.clone(),
+                )
+                .map_err(|e| {
+                    ClusterError::Setup(format!(
+                        "Failed to initialize execution service for node {}: {}",
+                        i, e
+                    ))
+                })?,
+            );
 
             // Create harness
             let harness = NodeHotstuffHarness::new_from_validator_config(
@@ -1082,13 +1089,12 @@ impl TestnetAlphaClusterHandle {
             let state_path = data_dir_path.join("state_vm_v0");
 
             // Reopen persistent state backend
-            let persistent_state = RocksDbAccountState::open(&state_path).map_err(|e| {
+            let state_backend = PersistentVmV0State::open(&state_path).map_err(|e| {
                 ClusterError::Storage(format!(
                     "Failed to reopen RocksDB state for node {}: {:?}",
                     i, e
                 ))
             })?;
-            let state_backend = CachedPersistentAccountState::new(persistent_state);
 
             // Create KEMTLS config for this node
             let kemtls_cfg = create_kemtls_config_for_node(i);
@@ -1120,11 +1126,20 @@ impl TestnetAlphaClusterHandle {
             // T187: Apply stage_b_enabled from cluster config
             let exec_config = SingleThreadExecutionServiceConfig::vm_v0_persistent(&state_path)
                 .with_stage_b_enabled(config.stage_b_enabled);
-            let execution_service = Arc::new(SingleThreadExecutionService::with_config(
-                engine,
-                exec_config,
-                Some(exec_metrics),
-            ));
+            let execution_service = Arc::new(
+                SingleThreadExecutionService::with_config_and_persistent_state(
+                    engine,
+                    exec_config,
+                    Some(exec_metrics),
+                    state_backend.clone(),
+                )
+                .map_err(|e| {
+                    ClusterError::Setup(format!(
+                        "Failed to initialize execution service for node {}: {}",
+                        i, e
+                    ))
+                })?,
+            );
 
             // Create harness
             let harness = NodeHotstuffHarness::new_from_validator_config(

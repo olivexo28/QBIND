@@ -61,6 +61,7 @@
 //! - On first execution error, the adapter returns the error immediately
 //! - Future versions may support different error policies (continue, revert, etc.)
 
+use std::io;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -68,13 +69,15 @@ use std::thread;
 use std::time::Instant;
 
 use crossbeam_channel::{bounded, Receiver, Sender, TrySendError};
+use parking_lot::Mutex;
 use qbind_ledger::{
-    execute_block_stage_b, AccountStateUpdater, AccountStateView, CachedPersistentAccountState,
-    ExecutionEngine, ExecutionEngineError, InMemoryAccountState, InMemoryState, ParallelExecConfig,
-    PersistentAccountState, QbindTransaction, RocksDbAccountState, SenderPartitionedNonceExecutor,
-    StateUpdater, TransferPayload, VmV0ExecutionEngine,
+    execute_block_stage_b, AccountState, AccountStateUpdater, AccountStateView,
+    CachedPersistentAccountState, ExecutionEngine, ExecutionEngineError, InMemoryAccountState,
+    InMemoryState, ParallelExecConfig, PersistentAccountState, QbindTransaction,
+    RocksDbAccountState, SenderPartitionedNonceExecutor, StateUpdater, StorageError,
+    TransferPayload, VmV0ExecutionEngine,
 };
-use qbind_types::Hash32;
+use qbind_types::{AccountId, Hash32};
 use qbind_wire::consensus::BlockProposal;
 
 use crate::metrics::ExecutionMetrics;
@@ -386,6 +389,41 @@ pub enum AsyncExecError {
     ShuttingDown,
 }
 
+/// Errors while initializing a single-threaded execution service.
+#[derive(Debug)]
+pub enum ExecutionServiceInitError {
+    /// Persistent VM-v0 state was requested with a non-VM-v0 profile.
+    InvalidConfiguration(&'static str),
+    /// The requested VM-v0 persistent backend could not be opened.
+    PersistentOpen(StorageError),
+    /// The worker thread could not be created after backend initialization.
+    WorkerSpawn(io::Error),
+}
+
+impl std::fmt::Display for ExecutionServiceInitError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidConfiguration(reason) => {
+                write!(f, "invalid execution service configuration: {reason}")
+            }
+            Self::PersistentOpen(error) => {
+                write!(f, "failed to open requested persistent state: {error}")
+            }
+            Self::WorkerSpawn(error) => write!(f, "failed to spawn execution worker: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for ExecutionServiceInitError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidConfiguration(_) => None,
+            Self::PersistentOpen(error) => Some(error),
+            Self::WorkerSpawn(error) => Some(error),
+        }
+    }
+}
+
 impl std::fmt::Display for AsyncExecError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -446,6 +484,92 @@ struct ExecTask {
     submitted_at: Instant,
 }
 
+/// Shared handle to an opened persistent VM-v0 database.
+///
+/// Clones refer to the same RocksDB instance and account cache, allowing a caller
+/// to initialize or inspect state while the execution worker uses it.
+#[derive(Clone)]
+pub struct PersistentVmV0State {
+    path: PathBuf,
+    state: Arc<RocksDbAccountState>,
+    cache: Arc<Mutex<InMemoryAccountState>>,
+}
+
+impl PersistentVmV0State {
+    /// Open a persistent VM-v0 state backend that can be shared with its worker.
+    pub fn open<P: Into<PathBuf>>(path: P) -> Result<Self, StorageError> {
+        let path = path.into();
+        let backend = RocksDbAccountState::open(&path)?;
+        Ok(Self {
+            path,
+            state: Arc::new(backend),
+            cache: Arc::new(Mutex::new(InMemoryAccountState::new())),
+        })
+    }
+
+    /// Read one account from the shared persistent state.
+    pub fn get_account_state(&self, account: &AccountId) -> AccountState {
+        let cached = self.cache.lock().get_account_state(account);
+        if cached != AccountState::default() {
+            return cached;
+        }
+        self.state.get_account_state(account)
+    }
+
+    /// Write one account to the shared persistent state.
+    pub fn set_account_state(&self, account: &AccountId, state: AccountState) {
+        self.cache.lock().set_account_state(account, state.clone());
+        let _ = self.state.put_account_state(account, &state);
+    }
+
+    /// Flush the shared persistent state.
+    pub fn flush(&self) -> Result<(), StorageError> {
+        self.state.flush()
+    }
+}
+
+impl AccountStateView for PersistentVmV0State {
+    fn get_account_state(&self, account: &AccountId) -> AccountState {
+        PersistentVmV0State::get_account_state(self, account)
+    }
+}
+
+impl AccountStateUpdater for PersistentVmV0State {
+    fn set_account_state(&mut self, account: &AccountId, state: AccountState) {
+        PersistentVmV0State::set_account_state(self, account, state);
+    }
+}
+
+impl FlushableState for PersistentVmV0State {
+    fn flush_state(&self) -> Result<(), StorageError> {
+        self.flush()
+    }
+}
+
+enum VmV0StateBackend {
+    Persistent(PersistentVmV0State),
+    InMemory(InMemoryAccountState),
+}
+
+#[cfg(test)]
+thread_local! {
+    static FAIL_NEXT_EXECUTION_WORKER_SPAWN: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
+}
+
+fn spawn_execution_worker<F>(worker: F) -> io::Result<thread::JoinHandle<()>>
+where
+    F: FnOnce() + Send + 'static,
+{
+    #[cfg(test)]
+    if FAIL_NEXT_EXECUTION_WORKER_SPAWN.with(|fail| fail.replace(false)) {
+        drop(worker);
+        return Err(io::Error::other("injected execution worker spawn failure"));
+    }
+
+    thread::Builder::new().spawn(worker)
+}
+
 /// Configuration for the single-threaded execution service.
 #[derive(Debug, Clone)]
 pub struct SingleThreadExecutionServiceConfig {
@@ -460,8 +584,9 @@ pub struct SingleThreadExecutionServiceConfig {
     pub execution_profile: ExecutionProfile,
     /// State directory for VM v0 persistence (T164).
     ///
-    /// When set and `execution_profile` is `VmV0`, the service uses RocksDB-backed
-    /// persistent storage at this path. When `None`, uses in-memory state only.
+    /// When set and `execution_profile` is `VmV0`, the service opens RocksDB-backed
+    /// persistent storage at this path before it becomes available. When `None`,
+    /// VM-v0 uses in-memory state. A path with `NonceOnly` is invalid.
     pub state_dir: Option<PathBuf>,
     /// Whether Stage B conflict-graph parallel execution is enabled (T186).
     ///
@@ -632,6 +757,7 @@ impl SingleThreadExecutionService {
     /// * `engine` - The execution engine to use for applying blocks
     pub fn new<E: ExecutionEngine + 'static>(engine: E) -> Self {
         Self::with_config(engine, SingleThreadExecutionServiceConfig::default(), None)
+            .expect("default execution service configuration is valid")
     }
 
     /// Create a new service with custom configuration and optional metrics.
@@ -641,11 +767,68 @@ impl SingleThreadExecutionService {
     /// * `engine` - The execution engine to use
     /// * `config` - Service configuration
     /// * `metrics` - Optional metrics for observability
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an invalid profile/path combination, a failed
+    /// persistent open, or a worker-thread spawn failure.
     pub fn with_config<E: ExecutionEngine + 'static>(
         engine: E,
         config: SingleThreadExecutionServiceConfig,
         metrics: Option<Arc<ExecutionMetrics>>,
-    ) -> Self {
+    ) -> Result<Self, ExecutionServiceInitError> {
+        let vm_v0_backend = match (config.execution_profile, config.state_dir.as_ref()) {
+            (ExecutionProfile::NonceOnly, Some(_)) => {
+                return Err(ExecutionServiceInitError::InvalidConfiguration(
+                    "persistent state directory requires the VM-v0 execution profile",
+                ));
+            }
+            (ExecutionProfile::NonceOnly, None) => None,
+            (ExecutionProfile::VmV0, Some(path)) => Some(VmV0StateBackend::Persistent(
+                PersistentVmV0State::open(path)
+                    .map_err(ExecutionServiceInitError::PersistentOpen)?,
+            )),
+            (ExecutionProfile::VmV0, None) => {
+                Some(VmV0StateBackend::InMemory(InMemoryAccountState::new()))
+            }
+        };
+
+        Self::with_initialized_backend(engine, config, metrics, vm_v0_backend)
+    }
+
+    /// Create a persistent VM-v0 service using an already opened shared backend.
+    ///
+    /// This is useful when the caller must seed or inspect the same state while
+    /// the worker is active. The configured path must match the path that was
+    /// opened by `state`.
+    pub fn with_config_and_persistent_state<E: ExecutionEngine + 'static>(
+        engine: E,
+        config: SingleThreadExecutionServiceConfig,
+        metrics: Option<Arc<ExecutionMetrics>>,
+        state: PersistentVmV0State,
+    ) -> Result<Self, ExecutionServiceInitError> {
+        if config.execution_profile != ExecutionProfile::VmV0
+            || config.state_dir.as_ref() != Some(&state.path)
+        {
+            return Err(ExecutionServiceInitError::InvalidConfiguration(
+                "configured profile and state path must match the opened persistent backend",
+            ));
+        }
+
+        Self::with_initialized_backend(
+            engine,
+            config,
+            metrics,
+            Some(VmV0StateBackend::Persistent(state)),
+        )
+    }
+
+    fn with_initialized_backend<E: ExecutionEngine + 'static>(
+        engine: E,
+        config: SingleThreadExecutionServiceConfig,
+        metrics: Option<Arc<ExecutionMetrics>>,
+        vm_v0_backend: Option<VmV0StateBackend>,
+    ) -> Result<Self, ExecutionServiceInitError> {
         let (sender, receiver) = bounded::<ExecTask>(config.queue_capacity);
         let shutdown = Arc::new(AtomicBool::new(false));
         let queue_len = Arc::new(AtomicU64::new(0));
@@ -658,11 +841,10 @@ impl SingleThreadExecutionService {
         let worker_metrics = metrics.clone();
         let parallel_config = config.parallel_config.clone();
         let execution_profile = config.execution_profile;
-        let state_dir = config.state_dir.clone();
         let stage_b_enabled = config.stage_b_enabled;
 
-        // Spawn the dedicated worker thread
-        thread::spawn(move || {
+        // The opened backend is moved into the worker only after initialization succeeds.
+        spawn_execution_worker(move || {
             Self::worker_loop(
                 engine,
                 receiver,
@@ -671,19 +853,20 @@ impl SingleThreadExecutionService {
                 worker_metrics,
                 parallel_config,
                 execution_profile,
-                state_dir,
+                vm_v0_backend,
                 stage_b_enabled,
             );
-        });
+        })
+        .map_err(ExecutionServiceInitError::WorkerSpawn)?;
 
-        Self {
+        Ok(Self {
             sender,
             shutdown,
             metrics,
             queue_len,
             queue_full_count,
             worker_restarts,
-        }
+        })
     }
     /// - `VmV0`: Uses sequential VM v0 execution with account balances (T163)
     /// - `VmV0` + `stage_b_enabled`: Uses Stage B conflict-graph parallel execution (T186)
@@ -696,7 +879,7 @@ impl SingleThreadExecutionService {
         metrics: Option<Arc<ExecutionMetrics>>,
         parallel_config: ParallelExecConfig,
         execution_profile: ExecutionProfile,
-        state_dir: Option<PathBuf>,
+        vm_v0_backend: Option<VmV0StateBackend>,
         stage_b_enabled: bool,
     ) {
         let mut current_height: u64 = 0;
@@ -718,7 +901,7 @@ impl SingleThreadExecutionService {
                     shutdown,
                     queue_len,
                     metrics,
-                    state_dir,
+                    vm_v0_backend.expect("VM-v0 backend initialized before worker spawn"),
                     &mut current_height,
                     stage_b_enabled,
                 );
@@ -858,7 +1041,7 @@ impl SingleThreadExecutionService {
         shutdown: Arc<AtomicBool>,
         queue_len: Arc<AtomicU64>,
         metrics: Option<Arc<ExecutionMetrics>>,
-        state_dir: Option<PathBuf>,
+        backend: VmV0StateBackend,
         current_height: &mut u64,
         stage_b_enabled: bool,
     ) {
@@ -873,50 +1056,24 @@ impl SingleThreadExecutionService {
             eprintln!("[T187] VM v0 Stage B parallel execution disabled (sequential execution)");
         }
 
-        // T164: Initialize state backend based on configuration
-        match state_dir {
-            Some(ref path) => {
-                // Use persistent state
-                match RocksDbAccountState::open(path) {
-                    Ok(persistent) => {
-                        eprintln!("[T164] VM v0 using persistent state at {:?}", path);
-                        let mut state = CachedPersistentAccountState::new(persistent);
-                        Self::run_vm_v0_loop(
-                            &engine,
-                            &mut state,
-                            receiver,
-                            shutdown,
-                            queue_len,
-                            metrics,
-                            current_height,
-                            true, // persistent
-                            stage_b_enabled,
-                        );
-                    }
-                    Err(e) => {
-                        eprintln!(
-                            "[T164] Failed to open persistent state at {:?}: {:?}, falling back to in-memory",
-                            path, e
-                        );
-                        let mut state = InMemoryAccountState::new();
-                        Self::run_vm_v0_loop(
-                            &engine,
-                            &mut state,
-                            receiver,
-                            shutdown,
-                            queue_len,
-                            metrics,
-                            current_height,
-                            false, // not persistent
-                            stage_b_enabled,
-                        );
-                    }
-                }
+        // The backend was selected and initialized before the service was published.
+        match backend {
+            VmV0StateBackend::Persistent(mut state) => {
+                eprintln!("[T164] VM v0 using initialized persistent state");
+                Self::run_vm_v0_loop(
+                    &engine,
+                    &mut state,
+                    receiver,
+                    shutdown,
+                    queue_len,
+                    metrics,
+                    current_height,
+                    true,
+                    stage_b_enabled,
+                );
             }
-            None => {
-                // Use in-memory state (T163 behavior)
+            VmV0StateBackend::InMemory(mut state) => {
                 eprintln!("[T164] VM v0 using in-memory state (no persistence)");
-                let mut state = InMemoryAccountState::new();
                 Self::run_vm_v0_loop(
                     &engine,
                     &mut state,
@@ -1439,10 +1596,182 @@ mod tests {
     fn test_single_thread_service_with_config() {
         let engine = NonceExecutionEngine::new();
         let config = SingleThreadExecutionServiceConfig::default().with_queue_capacity(16);
-        let service = SingleThreadExecutionService::with_config(engine, config, None);
+        let service = SingleThreadExecutionService::with_config(engine, config, None)
+            .expect("valid NonceOnly service configuration");
 
         assert_eq!(service.queue_len(), 0);
         assert!(!service.is_shutting_down());
+    }
+
+    fn wait_for_blocks(metrics: &ExecutionMetrics, count: u64) {
+        let deadline = Instant::now() + std::time::Duration::from_secs(5);
+        while metrics.blocks_applied_total() < count && Instant::now() < deadline {
+            thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(metrics.blocks_applied_total() >= count);
+    }
+
+    #[test]
+    fn persistent_open_failure_refuses_service_initialization() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("not-a-directory");
+        std::fs::write(&file_path, b"blocker").unwrap();
+        let config = SingleThreadExecutionServiceConfig::vm_v0_persistent(&file_path);
+
+        let result =
+            SingleThreadExecutionService::with_config(NonceExecutionEngine::new(), config, None);
+
+        assert!(matches!(
+            result,
+            Err(ExecutionServiceInitError::PersistentOpen(_))
+        ));
+    }
+
+    #[test]
+    fn persistent_backend_is_used_for_vm_v0_execution() {
+        let dir = tempfile::tempdir().unwrap();
+        let state_path = dir.path().join("state");
+        let sender = test_account_id(0x51);
+        let recipient = test_account_id(0x52);
+        {
+            let state = RocksDbAccountState::open(&state_path).unwrap();
+            state
+                .put_account_state(&sender, &qbind_ledger::AccountState::new(0, 100))
+                .unwrap();
+            state.flush().unwrap();
+        }
+
+        let metrics = Arc::new(ExecutionMetrics::new());
+        let config = SingleThreadExecutionServiceConfig::vm_v0_persistent(&state_path);
+        let service = SingleThreadExecutionService::with_config(
+            NonceExecutionEngine::new(),
+            config,
+            Some(metrics.clone()),
+        )
+        .unwrap();
+        let tx = QbindTransaction::new(sender, 0, TransferPayload::new(recipient, 7).encode());
+        service
+            .submit_block(QbindBlock::new(make_test_proposal(1), vec![tx]))
+            .unwrap();
+        wait_for_blocks(&metrics, 1);
+        drop(service);
+
+        let deadline = Instant::now() + std::time::Duration::from_secs(5);
+        let state = loop {
+            match RocksDbAccountState::open_existing(&state_path) {
+                Ok(state) => break state,
+                Err(_) if Instant::now() < deadline => {
+                    thread::sleep(std::time::Duration::from_millis(5));
+                }
+                Err(error) => panic!("persistent state did not become reopenable: {error}"),
+            }
+        };
+        assert_eq!(state.get_account_state(&sender).nonce, 1);
+        assert_eq!(state.get_account_state(&sender).balance, 93);
+        assert_eq!(state.get_account_state(&recipient).balance, 7);
+    }
+
+    #[test]
+    fn shared_persistent_backend_is_used_by_the_service_worker() {
+        let dir = tempfile::tempdir().unwrap();
+        let state_path = dir.path().join("state");
+        let state = PersistentVmV0State::open(&state_path).unwrap();
+        let sender = test_account_id(0x61);
+        let recipient = test_account_id(0x62);
+        state.set_account_state(&sender, qbind_ledger::AccountState::new(0, 100));
+        state.flush().unwrap();
+
+        let metrics = Arc::new(ExecutionMetrics::new());
+        let config = SingleThreadExecutionServiceConfig::vm_v0_persistent(&state_path);
+        let service = SingleThreadExecutionService::with_config_and_persistent_state(
+            NonceExecutionEngine::new(),
+            config,
+            Some(metrics.clone()),
+            state.clone(),
+        )
+        .unwrap();
+        let tx = QbindTransaction::new(sender, 0, TransferPayload::new(recipient, 7).encode());
+        service
+            .submit_block(QbindBlock::new(make_test_proposal(1), vec![tx]))
+            .unwrap();
+        wait_for_blocks(&metrics, 1);
+
+        assert_eq!(state.get_account_state(&sender).nonce, 1);
+        assert_eq!(state.get_account_state(&sender).balance, 93);
+        assert_eq!(state.get_account_state(&recipient).balance, 7);
+        drop(service);
+    }
+
+    #[test]
+    fn explicit_vm_v0_memory_mode_remains_functional() {
+        let metrics = Arc::new(ExecutionMetrics::new());
+        let service = SingleThreadExecutionService::with_config(
+            NonceExecutionEngine::new(),
+            SingleThreadExecutionServiceConfig::vm_v0(),
+            Some(metrics.clone()),
+        )
+        .unwrap();
+        service
+            .submit_block(QbindBlock::empty(make_test_proposal(1)))
+            .unwrap();
+        wait_for_blocks(&metrics, 1);
+        drop(service);
+    }
+
+    #[test]
+    fn nonce_only_rejects_a_persistent_state_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let config =
+            SingleThreadExecutionServiceConfig::default().with_state_dir(dir.path().join("state"));
+
+        let result =
+            SingleThreadExecutionService::with_config(NonceExecutionEngine::new(), config, None);
+
+        assert!(matches!(
+            result,
+            Err(ExecutionServiceInitError::InvalidConfiguration(_))
+        ));
+    }
+
+    #[test]
+    fn shared_persistent_constructor_rejects_a_different_configured_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = PersistentVmV0State::open(dir.path().join("opened")).unwrap();
+        let config =
+            SingleThreadExecutionServiceConfig::vm_v0_persistent(dir.path().join("configured"));
+
+        let result = SingleThreadExecutionService::with_config_and_persistent_state(
+            NonceExecutionEngine::new(),
+            config,
+            None,
+            state,
+        );
+
+        assert!(matches!(
+            result,
+            Err(ExecutionServiceInitError::InvalidConfiguration(_))
+        ));
+    }
+
+    #[test]
+    fn worker_spawn_failure_reports_error_and_releases_opened_backend() {
+        let dir = tempfile::tempdir().unwrap();
+        let state_path = dir.path().join("state");
+        drop(RocksDbAccountState::open(&state_path).unwrap());
+        FAIL_NEXT_EXECUTION_WORKER_SPAWN.with(|fail| fail.set(true));
+
+        let result = SingleThreadExecutionService::with_config(
+            NonceExecutionEngine::new(),
+            SingleThreadExecutionServiceConfig::vm_v0_persistent(&state_path),
+            None,
+        );
+
+        assert!(matches!(
+            result,
+            Err(ExecutionServiceInitError::WorkerSpawn(_))
+        ));
+        let _reopened = RocksDbAccountState::open_existing(&state_path)
+            .expect("opened backend is released after worker creation failure");
     }
 
     #[test]
@@ -1487,7 +1816,8 @@ mod tests {
         let engine = NonceExecutionEngine::new();
         // Create service with tiny queue
         let config = SingleThreadExecutionServiceConfig::default().with_queue_capacity(1);
-        let service = SingleThreadExecutionService::with_config(engine, config, None);
+        let service = SingleThreadExecutionService::with_config(engine, config, None)
+            .expect("valid NonceOnly service configuration");
 
         // Submit multiple blocks quickly to fill the queue
         let mut queue_full_seen = false;

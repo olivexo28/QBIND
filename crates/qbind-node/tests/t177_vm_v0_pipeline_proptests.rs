@@ -299,7 +299,8 @@ proptest! {
         // Create service with VM v0 profile
         let engine = NonceExecutionEngine::new();
         let config = SingleThreadExecutionServiceConfig::vm_v0();
-        let service = SingleThreadExecutionService::with_config(engine, config, None);
+        let service = SingleThreadExecutionService::with_config(engine, config, None)
+            .expect("valid VM-v0 service configuration");
 
         // Create block with transactions
         let proposal = make_test_proposal(1);
@@ -336,7 +337,8 @@ proptest! {
     ) {
         let engine = NonceExecutionEngine::new();
         let config = SingleThreadExecutionServiceConfig::vm_v0();
-        let service = SingleThreadExecutionService::with_config(engine, config, None);
+        let service = SingleThreadExecutionService::with_config(engine, config, None)
+            .expect("valid VM-v0 service configuration");
 
         // Split transfers across blocks
         let chunk_size = (transfers.len() / block_count).max(1);
@@ -381,7 +383,8 @@ proptest! {
 fn test_pipeline_basic_execution() {
     let engine = NonceExecutionEngine::new();
     let config = SingleThreadExecutionServiceConfig::vm_v0();
-    let service = SingleThreadExecutionService::with_config(engine, config, None);
+    let service = SingleThreadExecutionService::with_config(engine, config, None)
+        .expect("valid VM-v0 service configuration");
 
     // Create simple transactions
     let sender = test_account_id(0xAA);
@@ -413,7 +416,8 @@ fn test_pipeline_basic_execution() {
 fn test_pipeline_empty_blocks() {
     let engine = NonceExecutionEngine::new();
     let config = SingleThreadExecutionServiceConfig::vm_v0();
-    let service = SingleThreadExecutionService::with_config(engine, config, None);
+    let service = SingleThreadExecutionService::with_config(engine, config, None)
+        .expect("valid VM-v0 service configuration");
 
     // Submit multiple empty blocks
     for height in 1..=5 {
@@ -454,7 +458,8 @@ fn test_pipeline_restart_consistency() {
     {
         let engine = NonceExecutionEngine::new();
         let config = SingleThreadExecutionServiceConfig::vm_v0();
-        let service = SingleThreadExecutionService::with_config(engine, config, None);
+        let service = SingleThreadExecutionService::with_config(engine, config, None)
+            .expect("valid VM-v0 service configuration");
 
         let txs = build_txs();
         let proposal = make_test_proposal(1);
@@ -471,7 +476,8 @@ fn test_pipeline_restart_consistency() {
     {
         let engine = NonceExecutionEngine::new();
         let config = SingleThreadExecutionServiceConfig::vm_v0();
-        let service = SingleThreadExecutionService::with_config(engine, config, None);
+        let service = SingleThreadExecutionService::with_config(engine, config, None)
+            .expect("valid VM-v0 service configuration");
 
         let txs = build_txs();
         let proposal = make_test_proposal(1);
@@ -492,7 +498,8 @@ fn test_pipeline_restart_consistency() {
 fn test_pipeline_mixed_valid_invalid_txs() {
     let engine = NonceExecutionEngine::new();
     let config = SingleThreadExecutionServiceConfig::vm_v0();
-    let service = SingleThreadExecutionService::with_config(engine, config, None);
+    let service = SingleThreadExecutionService::with_config(engine, config, None)
+        .expect("valid VM-v0 service configuration");
 
     let sender = test_account_id(0xAA);
     let recipient = test_account_id(0xBB);
@@ -521,7 +528,8 @@ fn test_pipeline_mixed_valid_invalid_txs() {
 fn test_pipeline_malformed_payloads() {
     let engine = NonceExecutionEngine::new();
     let config = SingleThreadExecutionServiceConfig::vm_v0();
-    let service = SingleThreadExecutionService::with_config(engine, config, None);
+    let service = SingleThreadExecutionService::with_config(engine, config, None)
+        .expect("valid VM-v0 service configuration");
 
     let sender = test_account_id(0xCC);
 
@@ -551,7 +559,8 @@ fn test_pipeline_malformed_payloads() {
 fn test_pipeline_multiple_senders() {
     let engine = NonceExecutionEngine::new();
     let config = SingleThreadExecutionServiceConfig::vm_v0();
-    let service = SingleThreadExecutionService::with_config(engine, config, None);
+    let service = SingleThreadExecutionService::with_config(engine, config, None)
+        .expect("valid VM-v0 service configuration");
 
     let sender_a = test_account_id(0x01);
     let sender_b = test_account_id(0x02);
@@ -593,7 +602,8 @@ fn test_vm_v0_service_config() {
 fn test_service_with_custom_queue() {
     let engine = NonceExecutionEngine::new();
     let config = SingleThreadExecutionServiceConfig::vm_v0().with_queue_capacity(128);
-    let service = SingleThreadExecutionService::with_config(engine, config, None);
+    let service = SingleThreadExecutionService::with_config(engine, config, None)
+        .expect("valid VM-v0 service configuration");
 
     // Verify service starts correctly
     assert!(!service.is_shutting_down());

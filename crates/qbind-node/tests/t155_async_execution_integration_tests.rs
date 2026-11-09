@@ -95,7 +95,8 @@ fn test_async_service_with_metrics() {
     let engine = NonceExecutionEngine::new();
     let metrics = Arc::new(ExecutionMetrics::new());
     let config = SingleThreadExecutionServiceConfig::default();
-    let service = SingleThreadExecutionService::with_config(engine, config, Some(metrics.clone()));
+    let service = SingleThreadExecutionService::with_config(engine, config, Some(metrics.clone()))
+        .expect("valid execution service configuration");
 
     let sender = test_account_id(0xBB);
 
@@ -126,7 +127,8 @@ fn test_async_service_with_metrics() {
 fn test_async_service_queue_backpressure() {
     let engine = NonceExecutionEngine::new();
     let config = SingleThreadExecutionServiceConfig::default().with_queue_capacity(2);
-    let service = SingleThreadExecutionService::with_config(engine, config, None);
+    let service = SingleThreadExecutionService::with_config(engine, config, None)
+        .expect("valid execution service configuration");
 
     // Rapidly submit many blocks to trigger backpressure
     let mut queue_full_count = 0;
@@ -179,7 +181,8 @@ fn test_async_service_empty_blocks() {
     let engine = NonceExecutionEngine::new();
     let metrics = Arc::new(ExecutionMetrics::new());
     let config = SingleThreadExecutionServiceConfig::default();
-    let service = SingleThreadExecutionService::with_config(engine, config, Some(metrics.clone()));
+    let service = SingleThreadExecutionService::with_config(engine, config, Some(metrics.clone()))
+        .expect("valid execution service configuration");
 
     // Submit empty blocks
     for i in 0..5 {
@@ -204,7 +207,8 @@ fn test_async_service_multiple_senders() {
     let engine = NonceExecutionEngine::new();
     let metrics = Arc::new(ExecutionMetrics::new());
     let config = SingleThreadExecutionServiceConfig::default();
-    let service = SingleThreadExecutionService::with_config(engine, config, Some(metrics.clone()));
+    let service = SingleThreadExecutionService::with_config(engine, config, Some(metrics.clone()))
+        .expect("valid execution service configuration");
 
     let sender_a = test_account_id(0xA1);
     let sender_b = test_account_id(0xB2);
@@ -235,7 +239,8 @@ fn test_async_service_multiple_senders() {
 fn test_async_service_execution_latency_reasonable() {
     let engine = NonceExecutionEngine::new();
     let config = SingleThreadExecutionServiceConfig::default();
-    let service = SingleThreadExecutionService::with_config(engine, config, None);
+    let service = SingleThreadExecutionService::with_config(engine, config, None)
+        .expect("valid execution service configuration");
 
     let sender = test_account_id(0xCC);
 
@@ -267,7 +272,8 @@ fn test_async_service_nonce_mismatch_error_handling() {
     let engine = NonceExecutionEngine::new();
     let metrics = Arc::new(ExecutionMetrics::new());
     let config = SingleThreadExecutionServiceConfig::default();
-    let service = SingleThreadExecutionService::with_config(engine, config, Some(metrics.clone()));
+    let service = SingleThreadExecutionService::with_config(engine, config, Some(metrics.clone()))
+        .expect("valid execution service configuration");
 
     let sender = test_account_id(0xDD);
 
@@ -301,7 +307,8 @@ fn test_async_service_tps_compatibility() {
     let engine = NonceExecutionEngine::new();
     let metrics = Arc::new(ExecutionMetrics::new());
     let config = SingleThreadExecutionServiceConfig::default().with_queue_capacity(1024);
-    let service = SingleThreadExecutionService::with_config(engine, config, Some(metrics.clone()));
+    let service = SingleThreadExecutionService::with_config(engine, config, Some(metrics.clone()))
+        .expect("valid execution service configuration");
 
     // Generate a test keypair
     let (pk_bytes, sk) = MlDsa44Backend::generate_keypair().expect("keygen failed");

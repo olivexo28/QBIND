@@ -2237,8 +2237,8 @@ pub use execution_adapter::{
 
 // T155 Async Execution Service exports
 pub use execution_adapter::{
-    AsyncExecError, AsyncExecutionService, SingleThreadExecutionService,
-    SingleThreadExecutionServiceConfig,
+    AsyncExecError, AsyncExecutionService, ExecutionServiceInitError, PersistentVmV0State,
+    SingleThreadExecutionService, SingleThreadExecutionServiceConfig,
 };
 
 // T151 Mempool exports

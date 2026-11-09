@@ -157,7 +157,8 @@ fn test_service_config_builder() {
 fn test_service_nonce_only_profile() {
     let engine = NonceExecutionEngine::new();
     let config = SingleThreadExecutionServiceConfig::default();
-    let service = SingleThreadExecutionService::with_config(engine, config, None);
+    let service = SingleThreadExecutionService::with_config(engine, config, None)
+        .expect("valid execution service configuration");
 
     // Create a block with some transactions
     let txs = vec![
@@ -193,7 +194,8 @@ fn test_service_vm_v0_profile() {
     // The service creates its own VmV0ExecutionEngine internally.
     let engine = NonceExecutionEngine::new();
     let config = SingleThreadExecutionServiceConfig::vm_v0();
-    let service = SingleThreadExecutionService::with_config(engine, config, None);
+    let service = SingleThreadExecutionService::with_config(engine, config, None)
+        .expect("valid execution service configuration");
 
     // Note: The service processes blocks internally, but we can't directly
     // check the VM state from outside. We just verify the service runs.
@@ -222,7 +224,8 @@ fn test_service_vm_v0_multiple_blocks() {
     // Note: The engine parameter is unused internally when VmV0 profile is selected.
     let engine = NonceExecutionEngine::new();
     let config = SingleThreadExecutionServiceConfig::vm_v0();
-    let service = SingleThreadExecutionService::with_config(engine, config, None);
+    let service = SingleThreadExecutionService::with_config(engine, config, None)
+        .expect("valid execution service configuration");
 
     // Submit multiple empty blocks
     for height in 1..=5 {

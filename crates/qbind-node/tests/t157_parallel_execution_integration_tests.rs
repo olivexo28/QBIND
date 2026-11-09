@@ -64,7 +64,8 @@ fn test_parallel_execution_multiple_senders() {
     let metrics = Arc::new(ExecutionMetrics::new());
     let config = SingleThreadExecutionServiceConfig::default()
         .with_parallel_config(ParallelExecConfig::default());
-    let service = SingleThreadExecutionService::with_config(engine, config, Some(metrics.clone()));
+    let service = SingleThreadExecutionService::with_config(engine, config, Some(metrics.clone()))
+        .expect("valid execution service configuration");
 
     // Create a block with many distinct senders
     let mut txs = Vec::new();
@@ -112,7 +113,8 @@ fn test_sequential_fallback_single_sender() {
     let metrics = Arc::new(ExecutionMetrics::new());
     let config = SingleThreadExecutionServiceConfig::default()
         .with_parallel_config(ParallelExecConfig::default().with_min_senders(2));
-    let service = SingleThreadExecutionService::with_config(engine, config, Some(metrics.clone()));
+    let service = SingleThreadExecutionService::with_config(engine, config, Some(metrics.clone()))
+        .expect("valid execution service configuration");
 
     // Create a block with a single sender
     let sender = test_account_id(0xAA);
@@ -146,7 +148,8 @@ fn test_forced_sequential_mode() {
     let engine = NonceExecutionEngine::new();
     let metrics = Arc::new(ExecutionMetrics::new());
     let config = SingleThreadExecutionServiceConfig::default().sequential_only();
-    let service = SingleThreadExecutionService::with_config(engine, config, Some(metrics.clone()));
+    let service = SingleThreadExecutionService::with_config(engine, config, Some(metrics.clone()))
+        .expect("valid execution service configuration");
 
     // Create a block with multiple senders (would normally use parallel)
     let mut txs = Vec::new();
@@ -185,7 +188,8 @@ fn test_parallel_execution_metrics_recorded() {
     let engine = NonceExecutionEngine::new();
     let metrics = Arc::new(ExecutionMetrics::new());
     let config = SingleThreadExecutionServiceConfig::default();
-    let service = SingleThreadExecutionService::with_config(engine, config, Some(metrics.clone()));
+    let service = SingleThreadExecutionService::with_config(engine, config, Some(metrics.clone()))
+        .expect("valid execution service configuration");
 
     // Submit multiple blocks with varying sender counts
     for block_num in 1u64..=3 {
@@ -233,7 +237,8 @@ fn test_parallel_execution_metrics_recorded() {
 fn test_queue_behavior_with_parallel() {
     let engine = NonceExecutionEngine::new();
     let config = SingleThreadExecutionServiceConfig::default().with_queue_capacity(10);
-    let service = SingleThreadExecutionService::with_config(engine, config, None);
+    let service = SingleThreadExecutionService::with_config(engine, config, None)
+        .expect("valid execution service configuration");
 
     // Submit multiple blocks quickly
     for i in 0..20 {
@@ -269,7 +274,8 @@ fn test_tps_harness_compatibility_parallel() {
     let config = SingleThreadExecutionServiceConfig::default()
         .with_queue_capacity(1024)
         .with_parallel_config(ParallelExecConfig::default().with_min_senders(2));
-    let service = SingleThreadExecutionService::with_config(engine, config, Some(metrics.clone()));
+    let service = SingleThreadExecutionService::with_config(engine, config, Some(metrics.clone()))
+        .expect("valid execution service configuration");
 
     // Simulate TPS workload: 10 senders, 100 txs each = 1000 txs total
     let num_senders = 10usize;
@@ -362,7 +368,8 @@ fn test_empty_blocks_parallel_executor() {
     let engine = NonceExecutionEngine::new();
     let metrics = Arc::new(ExecutionMetrics::new());
     let config = SingleThreadExecutionServiceConfig::default();
-    let service = SingleThreadExecutionService::with_config(engine, config, Some(metrics.clone()));
+    let service = SingleThreadExecutionService::with_config(engine, config, Some(metrics.clone()))
+        .expect("valid execution service configuration");
 
     // Submit empty blocks
     for i in 1..=5 {
@@ -390,7 +397,8 @@ fn test_nonce_errors_recorded_parallel() {
     let engine = NonceExecutionEngine::new();
     let metrics = Arc::new(ExecutionMetrics::new());
     let config = SingleThreadExecutionServiceConfig::default();
-    let service = SingleThreadExecutionService::with_config(engine, config, Some(metrics.clone()));
+    let service = SingleThreadExecutionService::with_config(engine, config, Some(metrics.clone()))
+        .expect("valid execution service configuration");
 
     // Create block with intentional nonce errors
     let sender_a = test_account_id(0xA1);
