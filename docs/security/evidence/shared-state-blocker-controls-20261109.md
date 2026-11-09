@@ -151,7 +151,7 @@ downstream callers. This control branch does not implement them.
 All commands below ran on the pinned test source commit, author-run locally.
 The complete command output and exit codes are in
 [`shared-state-blocker-controls-output-20261109.txt`](shared-state-blocker-controls-output-20261109.txt),
-SHA-256 `baec55a12d308c12b7f724981124a1eedf2ce6ed6df1965ab5eaafd30d4845cd`.
+SHA-256 `9418254723df3e169bfc614c28d264a9917dfb41e4e7df20d2156ed209973005`.
 
 - Six exact focused `cargo test -p qbind-node --lib ... -- --exact --nocapture`
   invocations, one per named control above: each exit 0, one passed.
