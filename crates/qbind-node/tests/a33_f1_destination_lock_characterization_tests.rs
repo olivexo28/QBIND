@@ -41,6 +41,7 @@ fn fixture_data_dir(root: &Path) -> PathBuf {
 #[test]
 fn same_lock_object_records_second_acquisition_outcome() {
     let root = tempfile::tempdir().expect("unique temporary root");
+    let root_path = root.path().to_path_buf();
     let data_dir = fixture_data_dir(root.path());
     let lock_path = data_dir.join(RESTORE_LOCK_FILENAME);
 
@@ -73,11 +74,15 @@ fn same_lock_object_records_second_acquisition_outcome() {
         ),
     }
     drop(first);
+    drop(root);
+    assert!(!root_path.exists(), "temporary fixture must be cleaned up");
+    println!("fixture cleanup: removed {}", root_path.display());
 }
 
 #[test]
 fn replaced_lock_path_records_acquisition_outcome_for_distinct_object() {
     let root = tempfile::tempdir().expect("unique temporary root");
+    let root_path = root.path().to_path_buf();
     let data_dir = fixture_data_dir(root.path());
     let lock_path = data_dir.join(RESTORE_LOCK_FILENAME);
     let retired_path = data_dir.join("retained-original-lock");
@@ -136,4 +141,7 @@ fn replaced_lock_path_records_acquisition_outcome_for_distinct_object() {
         ),
     }
     drop(first);
+    drop(root);
+    assert!(!root_path.exists(), "temporary fixture must be cleaned up");
+    println!("fixture cleanup: removed {}", root_path.display());
 }
