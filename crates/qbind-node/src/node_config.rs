@@ -3981,7 +3981,9 @@ pub struct NodeConfig {
     /// - TestNet Alpha/Beta: `None` (optional, recommended)
     /// - MainNet v0: **Required** (`validate_mainnet_invariants()` rejects `None`)
     ///
-    /// The hash is SHA3-256 over the exact bytes of the genesis JSON file.
+    /// The expected value is the canonical hash of the parsed genesis
+    /// configuration under the selected environment; JSON file formatting
+    /// is not part of the hash.
     pub expected_genesis_hash: Option<GenesisHash>,
 }
 

@@ -24362,6 +24362,38 @@ checkout `/home/user/ONDRAT`; HEAD = `main` = `origin/main` = `3a79b539f579f7f84
 
 checkout `/home/user/ONDRAT`; HEAD = `main` = `origin/main` = `3a79b539f579f7f84b2dea37d6783f78eeb24668`, tree `80c23b4d83d8dafed79f9c112c7cec6e9c605ccb`; branch `claude/focused-gauss-xl6ed0`; shallow; **0 modified paths** at START and END. Baseline `ef99e2902a6397dc238c8e471c442173627e343f` (tree `59a259467ea28eeb2c84000d0aa2822dfc92f209`) and candidate `56524ee13bdcdbc2adde0c4d659fb6b048ae4aed` present and unchanged; HEAD a descendant of the pinned baseline (`git merge-base --is-ancestor` = yes). **A23.5 source reads (read-only `git show`/`git grep`, pinned `ef99e29`) — only to supply the §28.12 verbatim excerpts and confirm the `decide_marker_acceptance_v2` file attribution; no new subsystem:** `crates/qbind-node/src/main.rs` (preflight signature :1176–1184), `crates/qbind-ledger/src/bundle_signing_ratification.rs` (v1 `RatifiesDifferentKey` :1213–1218), `crates/qbind-node/src/pqc_authority_state.rs` (v2 derive target↔verifier binding :1969–1976), `crates/qbind-node/src/pqc_authority_marker_acceptance.rs` (`decide_marker_acceptance_v2` :1590, attribution confirmed). **No** fetch/pull/switch/checkout/reset/remote change/stage/commit/push/PR, **no** build/test/run/install/fixture/key/dependency-install/node-contact/secret inspection; **no** measurement or execution — E23 is documentation-only (NOT EXECUTED; no harness/fixtures created). Baseline/candidate/working-tree-HEAD separation + the RUN 422 implementation boundary preserved. A23.5's only write is this external register (`v0.79`); no repository mutation. **Nothing executed, fixed, closed, re-pinned, or launch-approved; C4/C5 OPEN; RS1 unchanged; coverage INCOMPLETE; OBL-CONS-3 untouched (OPEN, SR-PARTIAL); A23-F1 unchanged (STATIC-SUPPORTED/OPEN, 14th static-supported finding); E23 now present in §8; totals 14 static / 4 gaps / 23 evidence gaps (E01–E23); OBL-GEN-1 SR-DONE source; unfinished-source 18; T-A18-6 NOT begun.**
 
+### 28.15 Dated current-source cross-reference — T233 expected-hash documentation (2026-11-10; `main` `677d5ef3aae4b944ea26fbd0824476b4f766fa89`)
+
+This note supplements, and does not rewrite, the A23.1/A23.2 observations
+above, which are retained at their historical source pin `ef99e29`.
+
+At current `main` (`677d5ef`), `NodeConfig.expected_genesis_hash` documentation
+still says SHA3-256 is over the exact genesis JSON file bytes
+(`crates/qbind-node/src/node_config.rs:3977-3985`). The inspected boot path
+parses the external JSON and compares the supplied expected value with
+`compute_canonical_genesis_hash`
+(`crates/qbind-node/src/pqc_boot_genesis.rs:173-195,215-248`;
+`crates/qbind-ledger/src/genesis.rs:1831-1855`). The current
+`--print-genesis-hash` path calls `compute_print_genesis_hash`, which parses
+the same input and computes that canonical hash; `main` prints its formatted
+value for use with `--expect-genesis-hash`
+(`crates/qbind-node/src/main.rs:2296-2344`;
+`crates/qbind-node/src/pqc_boot_genesis.rs:260-289`). Thus print-and-pin is
+internally consistent for the same genesis input and environment. Supplying
+a raw-file-byte hash instead can mismatch the canonical comparison and is a
+startup refusal, not a bypass.
+
+The current `compute_genesis_hash_bytes` references at
+`pqc_boot_genesis.rs:503-506` are inside the
+`print_hash_is_canonical_not_raw_file_bytes` test; they are not the current
+production print path. This clarifies, at the current source pin, the
+historical A23.2 §28.8(D) print-path observation without changing its
+historical scope. No CLI invocation or test was run for this note, and no
+mismatch, exploitability, or operational impact is established. This is an
+operator-documentation correction, not a new finding or ID. It is separate
+from **A50-F1 OPEN**, which concerns `GenesisConfig.extra` being omitted from
+the inspected canonical preimage.
+
 ## 29. A24 — T-A18-6 / OBL-OPS-1: operational configuration, metrics endpoint, diagnostic data flow (read-only; v0.80)
 
 A24 performs the **OBL-OPS-1 portion** of T-A18-6 (the other T-A18-6 transport obligations retain their own statuses). Firsthand pinned-source at `ef99e29`; register/excerpt review, **not** independent checkout verification. **No new finding** (one scoped availability observation, §29.4); **no count change (14/4/23)**. OBL-CONS-3, C4/C5, RS1, coverage, baseline, execution all unchanged.
