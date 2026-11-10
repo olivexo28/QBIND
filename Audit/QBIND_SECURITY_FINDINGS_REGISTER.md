@@ -1,3 +1,98 @@
+<!-- Focused owner-authorized finding addendum; preserves all prior register content below. -->
+
+# QBIND Security Findings Register — focused A50-F1 addendum
+
+**Scope:** This owner-authorized addendum records one finding only. It is not
+a general A50 audit, new runtime review, test authorization, severity
+assessment, or release decision. The prior A49.1 statement that A50 was not
+authorized is retained below as historical context; this addendum supersedes
+it only as necessary to authorize this single entry.
+
+**Register source pin:** `main` commit
+`aa382fa28b2d3e97e6203d47fa8231b5f2269741`, tree
+`f1a7d40993bfefbe18635bd637a100ad5527d875`; register blob
+`cd81efdbaf2bfb45e00dc3c60db3ea4f523adfa0`. The complete register was
+scanned for existing IDs and exact `GenesisConfig.extra` / canonical-hash
+references before assigning this entry. Its stable finding-ID convention is
+`A{pass}-F{ordinal}`; `A50-F1` was unused. The `C1`–`C7` entries are audit
+workstreams, not finding IDs. No C11 disposition is changed, and the unrelated
+C05/C15/C12 proposals are not assigned here.
+
+## A50-F1 — Canonical genesis hash omits `GenesisConfig.extra` (OPEN)
+
+**Disposition:** OPEN — latent soundness gap and comment/code contradiction.
+Severity and exploitability are unassessed. This finding records the owner's
+decision to treat the known source discrepancy as an open finding; it does not
+claim a demonstrated attack, affected production deployment, or reachable
+production exploit.
+
+**Prior coverage and relationship:** A49.1 §28.8 / §28.8(F) in this register
+(lines 24067–24151) already records the same comment/body discrepancy as a
+named source residual, but concluded “no finding” for its bounded property:
+the reviewed in-tree consumer scope did not read `GenesisConfig.extra`, and
+successfully parsed inputs differing only in well-formed `extra` had the same
+canonical hash and accepted in-tree behavior. That conclusion did not establish
+equal raw-byte hashes, equal parse resource use, or identical malformed-input
+failure behavior. This entry supersedes only the earlier no-finding
+classification for the latent identity-coverage gap; the prior evidence and
+its scope remain intact.
+
+BR-11 in `docs/devnet/QBIND_RUN_422_DEVNET_BOOTSTRAP_AUTHORITY_DECISION.md`
+is related but not an alias or closure: it requires the candidate v1 initial
+DevNet configuration to refuse non-null `extra` until the hash contract covers
+it. That candidate-specific refusal is not a generic runtime refusal and does
+not resolve this finding.
+
+### Source facts
+
+- `GenesisConfig` contains `extra: serde_json::Value` with `#[serde(default)]`
+  (`crates/qbind-ledger/src/genesis.rs:1336-1341`). `GenesisConfig::new`
+  initializes it to `Value::Null` (`genesis.rs:1360-1380`); the inspected
+  standard public-DevNet genesis example also explicitly has `"extra": null`
+  (`docs/release/public-devnet/genesis/devnet-genesis.json:50`). These are
+  default/example facts, not evidence that every deployment uses null.
+- The canonical-hash documentation says `extra` is hashed using canonical
+  JSON (`genesis.rs:1569-1575`). The inspected `compute_canonical_genesis_hash`
+  body encodes the environment, chain ID, time, allocations, validators,
+  council, monetary fields, and authority block, then hashes that buffer; it
+  does not encode or otherwise read `config.extra`
+  (`genesis.rs:1576-1641`).
+- The generic genesis validation path does not require `extra == Null`
+  (`genesis.rs:1360-1515`). No general runtime refusal on non-null `extra` is
+  established by this finding or by BR-11.
+
+### Scope, impact conditions, and limits
+
+For successfully parsed genesis inputs that differ only in a well-formed
+`extra`, the present canonical preimage does not distinguish those values. The
+standard/default DevNet example has `extra = Null`; for that inspected example
+the discrepancy is currently inert, not proven safe. Do not generalize this
+to every deployment or infer that all non-null values are accepted by every
+route.
+
+The latent soundness concern applies if an accepted deployment or another
+consumer treats non-null `extra` as semantically or security relevant while
+using the canonical genesis hash as the identity of the complete deployment
+configuration. In that condition, the identity would not commit to the
+relevant `extra` value. The register's prior bounded in-tree search found no
+current production/test reader of this field; actual deployed configurations,
+out-of-tree consumers, and any security consequence are not established here.
+No attacker-controlled route, substitution attack, or production reachability
+has been demonstrated.
+
+Any Route A mapping design must not put mapping fields in `extra`, or in any
+other field outside the canonical preimage, and rely on the current canonical
+genesis hash to authenticate those fields. Adding an explicitly hashed field
+would require a separately reviewed canonical-identity compatibility and
+migration analysis, including expected-hash attestations and cutover.
+
+**No implementation or verification was performed.** No hash behavior, source
+code, historical evidence, or other register identity was changed by this
+entry. Prior C11 coverage and all unrelated C05/C15/C12 proposals remain
+unchanged.
+
+---
+
 <!-- A49.1 BUILD-PROVENANCE CORRECTION LAYER (internal v1.138) — prepended to the preserved v1.137 input below -->
 
 # QBIND Security Findings Register — A49.1 correction layer (internal v1.138)
