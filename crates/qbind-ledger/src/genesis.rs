@@ -21,7 +21,7 @@
 //!   "validators": [...],
 //!   "council": { "members": [...], "threshold": 2 },
 //!   "monetary": { ... },
-//!   "extra": {}
+//!   "extra": null
 //! }
 //! ```
 //!
@@ -32,6 +32,7 @@
 //! - Validator count must be >= 1
 //! - Council threshold must be <= member count and > 0
 //! - Total supply (sum of allocations) must be > 0
+//! - `extra` must be null (it is not covered by the canonical genesis hash)
 //!
 //! See: `docs/consensus/QBIND_GENESIS_AND_LAUNCH_DESIGN.md` for detailed design.
 
@@ -1332,10 +1333,15 @@ pub struct GenesisConfig {
     /// Defines the starting monetary policy parameters (inflation targets, premiums, etc.).
     pub monetary: GenesisMonetaryConfig,
 
-    /// Reserved for future extensions.
+    /// Reserved for future extensions. **Must be `Null`.**
     ///
-    /// Additional fields can be stored here without breaking schema compatibility.
-    /// This allows adding new genesis features without changing the core schema.
+    /// This field is **not** covered by the canonical genesis hash (A50-F1;
+    /// see [`compute_canonical_genesis_hash`]), so [`GenesisConfig::validate`]
+    /// rejects any non-null value fail-closed. Storing operator-visible data
+    /// here would otherwise be silently excluded from the accepted provenance.
+    /// Adding hash-covered extension data requires a canonical, deterministic
+    /// encoding in [`compute_canonical_genesis_hash`] **and** relaxing that
+    /// rejection in the same change.
     #[serde(default)]
     pub extra: serde_json::Value,
 
@@ -1461,6 +1467,14 @@ impl GenesisConfig {
         // Validate council configuration
         self.council.validate()?;
 
+        // A50-F1: the reserved `extra` field is NOT absorbed into the
+        // canonical genesis hash (see `compute_canonical_genesis_hash`).
+        // Reject any non-null value fail-closed so operator-supplied data can
+        // never be silently excluded from the accepted provenance.
+        if !self.extra.is_null() {
+            return Err(GenesisValidationError::NonNullExtra);
+        }
+
         Ok(())
     }
 
@@ -1566,13 +1580,13 @@ pub const CANONICAL_GENESIS_HASH_DOMAIN_V1: &[u8] = b"QBIND:GENESIS:v1";
 /// Optional fields are framed with a single `0` or `1` discriminator byte
 /// so that `None` and `Some("")` never collide.
 ///
-/// The `extra` field is hashed via `serde_json::to_vec` of the *value* (not
-/// the raw substring of the source JSON). Operators who set `extra` MUST
-/// supply canonical JSON values — strings, numbers, booleans, ordered
-/// arrays, and `serde_json::Map` (which is `BTreeMap` here in `qbind-ledger`'s
-/// build of `serde_json` with the `preserve_order` feature **disabled**;
-/// see `Cargo.toml`). For Run 101 / DevNet the `extra` field is `Null` in
-/// practice.
+/// The reserved `extra` field is **not** absorbed into the canonical genesis
+/// hash (A50-F1). It has no consumer and is required to be `Null` by
+/// [`GenesisConfig::validate`], which rejects any non-null value fail-closed,
+/// so excluding it here cannot drop operator-visible state from the accepted
+/// provenance. If `extra` ever needs to carry hash-covered data, a canonical,
+/// deterministic encoding must be added to this function **and** the
+/// `validate` rejection relaxed in the same change.
 pub fn compute_canonical_genesis_hash(
     config: &GenesisConfig,
     env: NetworkEnvironmentPolicy,
@@ -1903,6 +1917,14 @@ pub enum GenesisValidationError {
 
     /// Run 101: authority block validation failed (additive).
     AuthorityValidationFailed(GenesisAuthorityValidationError),
+
+    /// A50-F1: the reserved `extra` field is non-null.
+    ///
+    /// `extra` is **not** part of the canonical genesis hash (see
+    /// [`compute_canonical_genesis_hash`]), so a non-null value would be
+    /// silently excluded from the accepted provenance. It is rejected
+    /// fail-closed until a canonical, hash-covered encoding is defined.
+    NonNullExtra,
 }
 
 impl std::fmt::Display for GenesisValidationError {
@@ -1956,6 +1978,13 @@ impl std::fmt::Display for GenesisValidationError {
             }
             GenesisValidationError::AuthorityValidationFailed(e) => {
                 write!(f, "authority validation failed: {}", e)
+            }
+            GenesisValidationError::NonNullExtra => {
+                write!(
+                    f,
+                    "genesis `extra` field must be null: it is not covered by \
+                     the canonical genesis hash and is rejected fail-closed"
+                )
             }
         }
     }
@@ -2234,6 +2263,104 @@ mod tests {
             config.validate(),
             Err(GenesisValidationError::ZeroAllocationAmount { .. })
         ));
+    }
+
+    /// A50-F1: a non-null `extra` must be rejected fail-closed, because the
+    /// field is not covered by the canonical genesis hash.
+    #[test]
+    fn test_genesis_rejects_non_null_extra() {
+        let base = valid_genesis_config();
+        assert!(base.extra.is_null());
+        assert!(base.validate().is_ok());
+
+        let mut absent = serde_json::to_value(&base).expect("serialize valid genesis");
+        absent
+            .as_object_mut()
+            .expect("genesis config serializes as an object")
+            .remove("extra");
+        let absent: GenesisConfig =
+            serde_json::from_value(absent).expect("absent extra defaults to null");
+        assert!(absent.extra.is_null());
+        assert_eq!(absent.validate(), Ok(()));
+
+        let mut explicit_null = serde_json::to_value(&base).expect("serialize valid genesis");
+        explicit_null
+            .as_object_mut()
+            .expect("genesis config serializes as an object")
+            .insert("extra".to_string(), serde_json::Value::Null);
+        let explicit_null: GenesisConfig =
+            serde_json::from_value(explicit_null).expect("explicit null extra parses");
+        assert_eq!(explicit_null.validate(), Ok(()));
+
+        let values = [
+            serde_json::json!({ "operator_note": "anything" }),
+            serde_json::json!([1, "anything"]),
+            serde_json::json!("anything"),
+            serde_json::json!(7),
+            serde_json::json!(true),
+        ];
+        let environments = [
+            (
+                NetworkEnvironmentPolicy::Devnet,
+                devnet_genesis_config_no_authority(),
+            ),
+            (NetworkEnvironmentPolicy::Testnet, {
+                let mut cfg = mainnet_genesis_config();
+                cfg.chain_id = "qbind-testnet-beta".to_string();
+                cfg
+            }),
+            (NetworkEnvironmentPolicy::Mainnet, mainnet_genesis_config()),
+        ];
+
+        for (env, valid) in environments {
+            valid
+                .validate_for_environment(env)
+                .expect("environment fixture is valid");
+            let valid_hash = compute_canonical_genesis_hash(&valid, env);
+            verify_boot_time_genesis(env, &valid, Some(&valid_hash))
+                .expect("valid fixture passes boot verification");
+
+            for value in &values {
+                let mut config = valid.clone();
+                config.extra = value.clone();
+                assert_eq!(
+                    config.validate(),
+                    Err(GenesisValidationError::NonNullExtra)
+                );
+                assert_eq!(
+                    config.validate_for_environment(env),
+                    Err(GenesisValidationError::NonNullExtra)
+                );
+                assert_eq!(
+                    verify_boot_time_genesis(env, &config, Some(&valid_hash)),
+                    Err(BootGenesisVerificationError::GenesisValidationFailed(
+                        GenesisValidationError::NonNullExtra
+                    ))
+                );
+            }
+        }
+    }
+
+    /// A50-F1: the canonical genesis hash does **not** absorb `extra`. This
+    /// pins current behavior so `extra` can never be silently folded into the
+    /// hash without also updating `validate` (which currently requires null).
+    #[test]
+    fn test_a50_f1_extra_not_absorbed_into_canonical_hash() {
+        let with_null = valid_genesis_config();
+        let baseline =
+            compute_canonical_genesis_hash(&with_null, NetworkEnvironmentPolicy::Testnet);
+
+        // compute_canonical_genesis_hash does not validate, so we can observe
+        // the hashing behavior directly on a non-null `extra`.
+        let mut with_extra = valid_genesis_config();
+        with_extra.extra = serde_json::json!({ "k": [1, 2, 3], "s": "x" });
+        let with_extra_hash =
+            compute_canonical_genesis_hash(&with_extra, NetworkEnvironmentPolicy::Testnet);
+
+        assert_eq!(
+            baseline, with_extra_hash,
+            "extra must not affect the canonical genesis hash (A50-F1)"
+        );
     }
 
     #[test]
