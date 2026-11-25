@@ -446,6 +446,60 @@ struct ExecTask {
     submitted_at: Instant,
 }
 
+/// R150 (test-utils only): worker-local observation/flush control messages.
+///
+/// These travel on a SEPARATE unbounded control channel and are serviced by the
+/// VM-v0 worker ONLY when no block is pending (see `vm_v0_next_task`), so an
+/// observation reflects the state produced by every block enqueued before it —
+/// a same-owner, FIFO-correlated read of the worker's own backend. This is a
+/// non-authorizing, test-only boundary gated entirely behind the pre-existing
+/// `test-utils` feature: it is absent from every default build and adds no
+/// default production behavior, no external account-state mutation, and no
+/// signer/authority surface. The worker remains the sole writer of the backend.
+#[cfg(feature = "test-utils")]
+enum WorkerControl {
+    /// Read one account's state from the worker-owned backend (no mutation).
+    ObserveAccount {
+        account: qbind_types::AccountId,
+        reply: Sender<qbind_ledger::AccountState>,
+    },
+    /// Flush the worker-owned backend to durable storage.
+    Flush {
+        reply: Sender<Result<(), String>>,
+    },
+}
+
+/// R150 (test-utils only): identifiable bounded outcome of a worker-local
+/// observation. A `Timeout`/`WorkerGone` is an explicit non-result — it never
+/// fabricates or implies any state value.
+#[cfg(feature = "test-utils")]
+#[derive(Debug)]
+pub enum WorkerObserveError {
+    /// The worker is gone (service shutting down / control channel closed); no
+    /// observation was made.
+    WorkerGone,
+    /// The worker did not answer within the bounded wait; no observation claimed.
+    Timeout,
+    /// The worker reported a flush failure.
+    Flush(String),
+}
+
+#[cfg(feature = "test-utils")]
+impl std::fmt::Display for WorkerObserveError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WorkerObserveError::WorkerGone => write!(f, "execution worker is gone; no observation"),
+            WorkerObserveError::Timeout => {
+                write!(f, "execution worker did not answer within the bounded wait")
+            }
+            WorkerObserveError::Flush(e) => write!(f, "worker-owned backend flush failed: {}", e),
+        }
+    }
+}
+
+#[cfg(feature = "test-utils")]
+impl std::error::Error for WorkerObserveError {}
+
 /// Configuration for the single-threaded execution service.
 #[derive(Debug, Clone)]
 pub struct SingleThreadExecutionServiceConfig {
@@ -575,6 +629,43 @@ impl SingleThreadExecutionServiceConfig {
     }
 }
 
+/// C15(i) — typed initialization failure for
+/// [`SingleThreadExecutionService::try_with_config`].
+///
+/// A requested persistent account-state backend MUST open successfully before
+/// an executable service is published. Any failure here yields a typed refusal
+/// and publishes NO service, worker, or capability — there is never a silent
+/// in-memory fallback for a requested persistent backend.
+#[derive(Debug, thiserror::Error)]
+pub enum ExecutionServiceInitError {
+    /// A persistent `state_dir` was requested together with a non-`VmV0`
+    /// execution profile. Persistence is only supported by `VmV0`; this
+    /// contradictory configuration is rejected before any backend open or
+    /// worker spawn — never accepted silently as in-memory success.
+    #[error(
+        "contradictory configuration: a persistent state_dir was requested but \
+         execution_profile is {profile:?} (persistence requires VmV0)"
+    )]
+    ContradictoryConfig { profile: ExecutionProfile },
+    /// The requested persistent backend at `path` failed to open. No executable
+    /// service is published and there is no in-memory fallback.
+    #[error("failed to open requested persistent account state at {path}: {source}")]
+    OpenState {
+        path: PathBuf,
+        #[source]
+        source: qbind_ledger::StorageError,
+    },
+    /// The requested backend opened, but the execution worker thread could not
+    /// be spawned. This is reported distinctly from a backend-open failure; the
+    /// successfully-opened backend is dropped (closed) as ordinary ownership
+    /// cleanup, and no service is published.
+    #[error("failed to spawn execution worker thread: {source}")]
+    WorkerSpawn {
+        #[source]
+        source: std::io::Error,
+    },
+}
+
 /// Single-threaded async execution service (T155).
 ///
 /// This service runs block execution on a dedicated worker thread,
@@ -622,6 +713,11 @@ pub struct SingleThreadExecutionService {
     queue_full_count: Arc<AtomicU64>,
     /// Worker restart counter (for metrics).
     worker_restarts: Arc<AtomicU64>,
+    /// R150 (test-utils only): sender for worker-local observation/flush control
+    /// requests. Absent from default builds. Used only by the gated `observe_*`
+    /// methods; it does not change block submission or any default behavior.
+    #[cfg(feature = "test-utils")]
+    control_sender: Sender<WorkerControl>,
 }
 
 impl SingleThreadExecutionService {
@@ -646,11 +742,111 @@ impl SingleThreadExecutionService {
         config: SingleThreadExecutionServiceConfig,
         metrics: Option<Arc<ExecutionMetrics>>,
     ) -> Self {
+        // C15(i): `with_config` is an infallible, MEMORY-ONLY convenience. A
+        // requested persistent backend (`state_dir = Some`) is a programmer
+        // precondition violation on this entry point — NOT a supported
+        // persistent initializer, and NOT evidence of a typed C15(i)
+        // initialization refusal. Persistent backends MUST use
+        // [`Self::try_with_config`], which opens the backend before publishing
+        // an executable service and returns a typed error on failure.
+        assert!(
+            config.state_dir.is_none(),
+            "SingleThreadExecutionService::with_config is memory-only \
+             (config.state_dir must be None); use try_with_config(..) for a \
+             requested persistent backend"
+        );
+        // Memory-only: no persistent backend is opened here; the worker builds
+        // in-memory state for the selected profile.
+        Self::build_and_spawn(engine, config, metrics, None)
+            .expect("in-memory execution worker thread failed to spawn")
+    }
+
+    /// Create a service, synchronously initializing a requested persistent
+    /// backend BEFORE any executable service capability is published (C15(i)).
+    ///
+    /// * `execution_profile == VmV0` with `state_dir == Some(path)`: the RocksDB
+    ///   account-state backend at `path` is opened ONCE here, on the calling
+    ///   thread, before the task channel or worker is created. The
+    ///   successfully-opened backend is MOVED into the worker (single owner);
+    ///   there is no second open and no in-memory fallback. An open failure
+    ///   returns [`ExecutionServiceInitError::OpenState`] and publishes no
+    ///   service, worker, or capability.
+    /// * `state_dir == Some(path)` with a non-`VmV0` profile is rejected as
+    ///   [`ExecutionServiceInitError::ContradictoryConfig`] before any open or
+    ///   spawn — never treated as silent memory success.
+    /// * `state_dir == None` (any profile) is genuine memory-only: no backend is
+    ///   opened and the service is published with in-memory state.
+    ///
+    /// A worker-thread spawn failure is reported as
+    /// [`ExecutionServiceInitError::WorkerSpawn`], distinct from a backend-open
+    /// failure. Successful initialization binds the service to the opened
+    /// backend; it does NOT by itself assert worker liveness or any later
+    /// write/shutdown/durability guarantee.
+    pub fn try_with_config<E: ExecutionEngine + 'static>(
+        engine: E,
+        config: SingleThreadExecutionServiceConfig,
+        metrics: Option<Arc<ExecutionMetrics>>,
+    ) -> Result<Self, ExecutionServiceInitError> {
+        // Resolve the requested backend BEFORE publishing anything. Matched on
+        // `state_dir` first so the cases are exhaustive without relying on a
+        // match guard (guarded arms do not count toward exhaustivity): a
+        // requested persistent backend with any non-`VmV0` profile is rejected
+        // as contradictory (fail-closed for any future non-`VmV0` profile too),
+        // never silently accepted as in-memory.
+        let preopened = match config.state_dir.as_ref() {
+            // Genuine, explicitly-selected memory-only: no persistence requested
+            // (any profile). Nothing is opened.
+            None => None,
+            Some(path) => match config.execution_profile {
+                ExecutionProfile::VmV0 => {
+                    let state = RocksDbAccountState::open(path).map_err(|source| {
+                        ExecutionServiceInitError::OpenState {
+                            path: path.clone(),
+                            source,
+                        }
+                    })?;
+                    eprintln!(
+                        "[C15(i)] opened persistent VM-v0 account state at {} before \
+                         publishing execution service",
+                        path.display()
+                    );
+                    Some(state)
+                }
+                // A persistent `state_dir` with a non-`VmV0` profile is a
+                // contradictory configuration: rejected BEFORE any open or
+                // worker spawn, never treated as silent memory success.
+                profile => {
+                    return Err(ExecutionServiceInitError::ContradictoryConfig { profile });
+                }
+            },
+        };
+        Self::build_and_spawn(engine, config, metrics, preopened)
+            .map_err(|source| ExecutionServiceInitError::WorkerSpawn { source })
+    }
+
+    /// Build the task channel and spawn the execution worker, handing it the
+    /// optional pre-opened persistent backend. Shared by `with_config`
+    /// (memory-only, `preopened == None`) and `try_with_config`. Returns the
+    /// spawn result so a worker-spawn failure is surfaced distinctly; on spawn
+    /// failure the moved-in `preopened` backend is dropped (closed) as ordinary
+    /// ownership cleanup and no service is published.
+    fn build_and_spawn<E: ExecutionEngine + 'static>(
+        engine: E,
+        config: SingleThreadExecutionServiceConfig,
+        metrics: Option<Arc<ExecutionMetrics>>,
+        preopened: Option<RocksDbAccountState>,
+    ) -> std::io::Result<Self> {
         let (sender, receiver) = bounded::<ExecTask>(config.queue_capacity);
         let shutdown = Arc::new(AtomicBool::new(false));
         let queue_len = Arc::new(AtomicU64::new(0));
         let queue_full_count = Arc::new(AtomicU64::new(0));
         let worker_restarts = Arc::new(AtomicU64::new(0));
+
+        // R150 (test-utils only): unbounded control channel for worker-local
+        // observation/flush. The worker services it only when no block is pending,
+        // so it never reorders or affects block execution. Absent in default builds.
+        #[cfg(feature = "test-utils")]
+        let (control_sender, control_receiver) = crossbeam_channel::unbounded::<WorkerControl>();
 
         // Clone references for the worker thread
         let worker_shutdown = Arc::clone(&shutdown);
@@ -658,32 +854,41 @@ impl SingleThreadExecutionService {
         let worker_metrics = metrics.clone();
         let parallel_config = config.parallel_config.clone();
         let execution_profile = config.execution_profile;
-        let state_dir = config.state_dir.clone();
         let stage_b_enabled = config.stage_b_enabled;
 
-        // Spawn the dedicated worker thread
-        thread::spawn(move || {
-            Self::worker_loop(
-                engine,
-                receiver,
-                worker_shutdown,
-                worker_queue_len,
-                worker_metrics,
-                parallel_config,
-                execution_profile,
-                state_dir,
-                stage_b_enabled,
-            );
-        });
+        // Spawn the dedicated worker thread. Fallible spawn so a worker-thread
+        // creation failure becomes an identifiable initialization error rather
+        // than an unconditional panic; `try_with_config` maps it to
+        // `WorkerSpawn`, `with_config` (memory-only) keeps the prior
+        // panic-on-failure behavior via `.expect`.
+        thread::Builder::new()
+            .name("qbind-exec-worker".to_string())
+            .spawn(move || {
+                Self::worker_loop(
+                    engine,
+                    receiver,
+                    worker_shutdown,
+                    worker_queue_len,
+                    worker_metrics,
+                    parallel_config,
+                    execution_profile,
+                    preopened,
+                    stage_b_enabled,
+                    #[cfg(feature = "test-utils")]
+                    control_receiver,
+                );
+            })?;
 
-        Self {
+        Ok(Self {
             sender,
             shutdown,
             metrics,
             queue_len,
             queue_full_count,
             worker_restarts,
-        }
+            #[cfg(feature = "test-utils")]
+            control_sender,
+        })
     }
     /// - `VmV0`: Uses sequential VM v0 execution with account balances (T163)
     /// - `VmV0` + `stage_b_enabled`: Uses Stage B conflict-graph parallel execution (T186)
@@ -696,13 +901,23 @@ impl SingleThreadExecutionService {
         metrics: Option<Arc<ExecutionMetrics>>,
         parallel_config: ParallelExecConfig,
         execution_profile: ExecutionProfile,
-        state_dir: Option<PathBuf>,
+        preopened: Option<RocksDbAccountState>,
         stage_b_enabled: bool,
+        // R150 (test-utils only): worker-local observation/flush control channel.
+        #[cfg(feature = "test-utils")] control_receiver: Receiver<WorkerControl>,
     ) {
         let mut current_height: u64 = 0;
 
         match execution_profile {
             ExecutionProfile::NonceOnly => {
+                // NonceOnly never requests a persistent backend; `try_with_config`
+                // rejects (NonceOnly + Some) and `with_config` is memory-only, so
+                // `preopened` is always None here. Drop it explicitly.
+                let _ = preopened;
+                // NonceOnly has no persistent backend to observe; drop the control
+                // receiver so a mistaken observation call reports WorkerGone.
+                #[cfg(feature = "test-utils")]
+                let _ = control_receiver;
                 Self::worker_loop_nonce_only(
                     receiver,
                     shutdown,
@@ -718,9 +933,11 @@ impl SingleThreadExecutionService {
                     shutdown,
                     queue_len,
                     metrics,
-                    state_dir,
+                    preopened,
                     &mut current_height,
                     stage_b_enabled,
+                    #[cfg(feature = "test-utils")]
+                    control_receiver,
                 );
             }
         }
@@ -858,9 +1075,11 @@ impl SingleThreadExecutionService {
         shutdown: Arc<AtomicBool>,
         queue_len: Arc<AtomicU64>,
         metrics: Option<Arc<ExecutionMetrics>>,
-        state_dir: Option<PathBuf>,
+        preopened: Option<RocksDbAccountState>,
         current_height: &mut u64,
         stage_b_enabled: bool,
+        // R150 (test-utils only): worker-local observation/flush control channel.
+        #[cfg(feature = "test-utils")] control_receiver: Receiver<WorkerControl>,
     ) {
         let engine = VmV0ExecutionEngine::new();
 
@@ -873,48 +1092,32 @@ impl SingleThreadExecutionService {
             eprintln!("[T187] VM v0 Stage B parallel execution disabled (sequential execution)");
         }
 
-        // T164: Initialize state backend based on configuration
-        match state_dir {
-            Some(ref path) => {
-                // Use persistent state
-                match RocksDbAccountState::open(path) {
-                    Ok(persistent) => {
-                        eprintln!("[T164] VM v0 using persistent state at {:?}", path);
-                        let mut state = CachedPersistentAccountState::new(persistent);
-                        Self::run_vm_v0_loop(
-                            &engine,
-                            &mut state,
-                            receiver,
-                            shutdown,
-                            queue_len,
-                            metrics,
-                            current_height,
-                            true, // persistent
-                            stage_b_enabled,
-                        );
-                    }
-                    Err(e) => {
-                        eprintln!(
-                            "[T164] Failed to open persistent state at {:?}: {:?}, falling back to in-memory",
-                            path, e
-                        );
-                        let mut state = InMemoryAccountState::new();
-                        Self::run_vm_v0_loop(
-                            &engine,
-                            &mut state,
-                            receiver,
-                            shutdown,
-                            queue_len,
-                            metrics,
-                            current_height,
-                            false, // not persistent
-                            stage_b_enabled,
-                        );
-                    }
-                }
+        // C15(i): a requested persistent backend (if any) was opened BEFORE this
+        // service was published and is handed in here as `preopened`. The worker
+        // never opens a backend and never falls back to in-memory for a
+        // requested-persistent service: `Some` ⇒ use that exact opened backend;
+        // `None` ⇒ genuine, explicitly-selected memory-only (no persistence
+        // requested). The prior in-worker open-with-fallback is removed.
+        match preopened {
+            Some(persistent) => {
+                eprintln!("[C15(i)] VM v0 using the pre-opened persistent account-state backend");
+                let mut state = CachedPersistentAccountState::new(persistent);
+                Self::run_vm_v0_loop(
+                    &engine,
+                    &mut state,
+                    receiver,
+                    shutdown,
+                    queue_len,
+                    metrics,
+                    current_height,
+                    true, // persistent
+                    stage_b_enabled,
+                    #[cfg(feature = "test-utils")]
+                    control_receiver,
+                );
             }
             None => {
-                // Use in-memory state (T163 behavior)
+                // Explicit memory-only (T163 behavior): no persistence requested.
                 eprintln!("[T164] VM v0 using in-memory state (no persistence)");
                 let mut state = InMemoryAccountState::new();
                 Self::run_vm_v0_loop(
@@ -927,6 +1130,8 @@ impl SingleThreadExecutionService {
                     current_height,
                     false, // not persistent
                     stage_b_enabled,
+                    #[cfg(feature = "test-utils")]
+                    control_receiver,
                 );
             }
         }
@@ -955,6 +1160,8 @@ impl SingleThreadExecutionService {
         current_height: &mut u64,
         is_persistent: bool,
         stage_b_enabled: bool,
+        // R150 (test-utils only): worker-local observation/flush control channel.
+        #[cfg(feature = "test-utils")] control_receiver: Receiver<WorkerControl>,
     ) {
         // T187: Set Stage B enabled metric at startup
         if let Some(ref m) = metrics {
@@ -967,8 +1174,16 @@ impl SingleThreadExecutionService {
                 break;
             }
 
-            // Receive next task (blocking)
-            match receiver.recv() {
+            // Receive next task (blocking). In default builds this is exactly
+            // `receiver.recv()` (R149 behavior). Under `test-utils`, the gated
+            // helper additionally services worker-local observation/flush control
+            // requests, but ONLY when no block is pending — so an observation
+            // reflects every block enqueued before it (same-owner, FIFO). R150.
+            #[cfg(not(feature = "test-utils"))]
+            let recv_outcome = receiver.recv();
+            #[cfg(feature = "test-utils")]
+            let recv_outcome = Self::vm_v0_next_task(&receiver, &control_receiver, state);
+            match recv_outcome {
                 Ok(task) => {
                     // Update queue length
                     let len = receiver.len();
@@ -1121,6 +1336,106 @@ impl SingleThreadExecutionService {
                     break;
                 }
             }
+        }
+    }
+
+    /// R150 (test-utils only): obtain the next block task for the VM-v0 worker
+    /// while servicing worker-local observation/flush control requests.
+    ///
+    /// Pending blocks are ALWAYS preferred: a control request is serviced only
+    /// when the block channel is empty, so any observation reflects the state
+    /// produced by every block enqueued before it (same-owner, FIFO-correlated).
+    /// Blocks and controls are each `recv`-blocking (no busy-wait). Returns the
+    /// next block, or `RecvError` once the block channel is disconnected.
+    #[cfg(feature = "test-utils")]
+    fn vm_v0_next_task<S: qbind_ledger::AccountStateUpdater + FlushableState>(
+        receiver: &Receiver<ExecTask>,
+        control: &Receiver<WorkerControl>,
+        state: &mut S,
+    ) -> Result<ExecTask, crossbeam_channel::RecvError> {
+        loop {
+            // Prefer any already-enqueued block (FIFO before controls).
+            match receiver.try_recv() {
+                Ok(task) => return Ok(task),
+                Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                    return Err(crossbeam_channel::RecvError);
+                }
+                Err(crossbeam_channel::TryRecvError::Empty) => {}
+            }
+            // No pending block: block until a block arrives or a control request
+            // is ready, then loop (re-checking blocks first).
+            crossbeam_channel::select! {
+                recv(receiver) -> msg => return msg,
+                recv(control) -> msg => match msg {
+                    Ok(ctrl) => Self::handle_worker_control(state, ctrl),
+                    // Control channel closed: block solely on blocks thereafter.
+                    Err(_) => return receiver.recv(),
+                },
+            }
+        }
+    }
+
+    /// R150 (test-utils only): service one worker-local control request against
+    /// the worker-owned backend. Reads are non-mutating; flush is the same flush
+    /// the worker performs after each persistent block. Never affects block
+    /// execution, ordering, or any default behavior.
+    #[cfg(feature = "test-utils")]
+    fn handle_worker_control<S: qbind_ledger::AccountStateUpdater + FlushableState>(
+        state: &mut S,
+        ctrl: WorkerControl,
+    ) {
+        match ctrl {
+            WorkerControl::ObserveAccount { account, reply } => {
+                let observed = state.get_account_state(&account);
+                let _ = reply.send(observed);
+            }
+            WorkerControl::Flush { reply } => {
+                let result = state.flush_state().map_err(|e| format!("{:?}", e));
+                let _ = reply.send(result);
+            }
+        }
+    }
+
+    /// R150 (test-utils only): read one account's state FROM THE WORKER-OWNED
+    /// backend, after every block submitted before this call has been executed.
+    ///
+    /// This is the only sanctioned way for a test to observe post-execution
+    /// persistent state under the single-owner contract: the request is serviced
+    /// by the worker that exclusively owns the backend, in FIFO order behind all
+    /// prior blocks. Returns an identifiable `WorkerObserveError` (never a
+    /// fabricated value) if the worker is gone or does not answer within the
+    /// bounded wait. VmV0 persistent/in-memory workers answer; a NonceOnly
+    /// service has no such backend and reports `WorkerGone`.
+    #[cfg(feature = "test-utils")]
+    pub fn observe_account_state(
+        &self,
+        account: qbind_types::AccountId,
+    ) -> Result<qbind_ledger::AccountState, WorkerObserveError> {
+        let (reply_tx, reply_rx) = bounded(1);
+        self.control_sender
+            .send(WorkerControl::ObserveAccount {
+                account,
+                reply: reply_tx,
+            })
+            .map_err(|_| WorkerObserveError::WorkerGone)?;
+        reply_rx
+            .recv_timeout(std::time::Duration::from_secs(30))
+            .map_err(|_| WorkerObserveError::Timeout)
+    }
+
+    /// R150 (test-utils only): flush the WORKER-OWNED backend to durable storage,
+    /// in FIFO order behind all prior blocks. Returns an identifiable error on a
+    /// flush failure, a gone worker, or a bounded-wait timeout.
+    #[cfg(feature = "test-utils")]
+    pub fn observe_flush(&self) -> Result<(), WorkerObserveError> {
+        let (reply_tx, reply_rx) = bounded(1);
+        self.control_sender
+            .send(WorkerControl::Flush { reply: reply_tx })
+            .map_err(|_| WorkerObserveError::WorkerGone)?;
+        match reply_rx.recv_timeout(std::time::Duration::from_secs(30)) {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(e)) => Err(WorkerObserveError::Flush(e)),
+            Err(_) => Err(WorkerObserveError::Timeout),
         }
     }
 
@@ -1443,6 +1758,206 @@ mod tests {
 
         assert_eq!(service.queue_len(), 0);
         assert!(!service.is_shutting_down());
+    }
+
+    // ====================================================================
+    // C15(i) — required-persistence initialization (R149) defensive controls.
+    // Isolated disposable temp data; no external deps; no live node/startup.
+    // ====================================================================
+
+    /// Isolated disposable temp directory (no external `tempfile` dependency).
+    fn r149_tmp_dir(tag: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let p = std::env::temp_dir().join(format!(
+            "qbind-r149-{}-{}-{}",
+            tag,
+            std::process::id(),
+            nanos
+        ));
+        std::fs::create_dir_all(&p).expect("create isolated temp dir");
+        p
+    }
+
+    /// Supported requested persistence: a fresh state dir opens successfully and
+    /// the service is published bound to a REAL on-disk backend (not in-memory).
+    #[test]
+    fn c15i_try_with_config_opens_persistent_backend_before_publishing() {
+        let base = r149_tmp_dir("ok");
+        let state_path = base.join("vm_v0_state");
+        let engine = NonceExecutionEngine::new();
+        let config = SingleThreadExecutionServiceConfig::vm_v0_persistent(&state_path);
+        let service = SingleThreadExecutionService::try_with_config(engine, config, None)
+            .expect("requested persistent backend must initialize");
+        assert_eq!(service.queue_len(), 0);
+        assert!(!service.is_shutting_down());
+        // Bound to a real on-disk backend: RocksDB created the state directory at
+        // the requested path during the synchronous pre-publish open.
+        assert!(
+            state_path.exists(),
+            "persistent backend directory must exist on disk after successful init"
+        );
+        drop(service);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Ordinary open failure ⇒ typed `OpenState` refusal, NO service published,
+    /// NO in-memory fallback. Deterministic failure: request a backend whose
+    /// parent path is a regular FILE (directory creation fails with ENOTDIR).
+    #[test]
+    fn c15i_try_with_config_refuses_open_failure_without_service() {
+        let base = r149_tmp_dir("fail");
+        let blocker = base.join("not_a_dir");
+        std::fs::write(&blocker, b"x").expect("write blocker file");
+        let state_path = blocker.join("vm_v0_state");
+        let engine = NonceExecutionEngine::new();
+        let config = SingleThreadExecutionServiceConfig::vm_v0_persistent(&state_path);
+        let result = SingleThreadExecutionService::try_with_config(engine, config, None);
+        match result {
+            Err(ExecutionServiceInitError::OpenState { path, .. }) => {
+                assert_eq!(path, state_path);
+            }
+            Err(other) => panic!("expected OpenState refusal, got {:?}", other),
+            Ok(_) => panic!("expected a typed OpenState refusal, got a published service"),
+        }
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Contradictory config: persistence requested with a non-`VmV0` profile ⇒
+    /// typed invalid-config refusal BEFORE any open/spawn, never silent memory.
+    #[test]
+    fn c15i_try_with_config_rejects_contradictory_nonceonly_plus_state_dir() {
+        let base = r149_tmp_dir("contradictory");
+        let config = SingleThreadExecutionServiceConfig::default() // NonceOnly
+            .with_state_dir(base.join("state"));
+        let engine = NonceExecutionEngine::new();
+        let result = SingleThreadExecutionService::try_with_config(engine, config, None);
+        assert!(matches!(
+            result,
+            Err(ExecutionServiceInitError::ContradictoryConfig {
+                profile: ExecutionProfile::NonceOnly
+            })
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Genuine memory-only via the fallible API succeeds with no backend opened:
+    /// VmV0 + `state_dir=None` and the default NonceOnly both return `Ok`.
+    #[test]
+    fn c15i_try_with_config_memory_only_is_ok_for_none_state_dir() {
+        let svc1 = SingleThreadExecutionService::try_with_config(
+            NonceExecutionEngine::new(),
+            SingleThreadExecutionServiceConfig::vm_v0(), // VmV0 + state_dir None
+            None,
+        )
+        .expect("memory-only VmV0 must succeed");
+        assert!(!svc1.is_shutting_down());
+        let svc2 = SingleThreadExecutionService::try_with_config(
+            NonceExecutionEngine::new(),
+            SingleThreadExecutionServiceConfig::default(), // NonceOnly + None
+            None,
+        )
+        .expect("memory-only NonceOnly must succeed");
+        assert!(!svc2.is_shutting_down());
+    }
+
+    /// Legacy infallible `with_config` enforces its memory-only precondition with
+    /// a PANIC on a persistent config. This is a programmer-precondition failure,
+    /// explicitly NOT a typed persistent-initialization refusal.
+    #[test]
+    #[should_panic(expected = "memory-only")]
+    fn c15i_legacy_with_config_persistent_is_programmer_precondition_panic() {
+        let base = r149_tmp_dir("legacy");
+        let engine = NonceExecutionEngine::new();
+        let config = SingleThreadExecutionServiceConfig::vm_v0_persistent(base.join("state"));
+        let _ = SingleThreadExecutionService::with_config(engine, config, None);
+    }
+
+    /// R150 positive persistent-execution witness (test-utils only).
+    ///
+    /// Genuine evidence that a requested persistent service executes on, and is
+    /// observed through, ONE worker-owned backend:
+    ///   known funded state  →  an ACTUAL nonzero state transition executed by
+    ///   the worker (submit_block)  →  correlated observation from the SAME
+    ///   worker-owned backend (FIFO behind the block)  →  successful explicit
+    ///   flush.
+    /// This exercises LOCAL execution via the real async service, deliberately
+    /// NOT consensus-commit qualification. It does not assert restart, durability,
+    /// shutdown, atomicity, fencing, or readiness. A separate ordinary memory-only
+    /// positive is `c15i_try_with_config_memory_only_is_ok_for_none_state_dir`.
+    #[cfg(feature = "test-utils")]
+    #[test]
+    fn c15i_r150_persistent_execution_witness_same_owner_observation() {
+        let base = r149_tmp_dir("r150-witness");
+        let state_path = base.join("vm_v0_state");
+        let sender = test_account_id(0x11);
+        let recipient = test_account_id(0x22);
+
+        // Pre-initialization funding: open, fund, flush, RELEASE the setup handle
+        // (the single-owner precondition) — no second writable handle is retained.
+        {
+            let persistent =
+                RocksDbAccountState::open(&state_path).expect("open funding handle");
+            let mut funding = CachedPersistentAccountState::new(persistent);
+            funding.set_account_state(&sender, qbind_ledger::AccountState::new(0, 1000));
+            funding.set_account_state(&recipient, qbind_ledger::AccountState::new(0, 0));
+            funding.flush().expect("flush funding");
+        } // released
+
+        // Hand exclusive ownership of the funded backend to the service.
+        let config = SingleThreadExecutionServiceConfig::vm_v0_persistent(&state_path);
+        let service =
+            SingleThreadExecutionService::try_with_config(NonceExecutionEngine::new(), config, None)
+                .expect("persistent VM-v0 service must initialize");
+
+        // Pre-execution observation THROUGH the worker-owned backend: the funded
+        // state is visible, the recipient starts at zero.
+        let before_sender = service
+            .observe_account_state(sender)
+            .expect("observe funded sender");
+        assert_eq!(before_sender.balance, 1000, "funded sender visible pre-exec");
+        let before_recipient = service
+            .observe_account_state(recipient)
+            .expect("observe recipient");
+        assert_eq!(before_recipient.balance, 0, "recipient starts at zero");
+
+        // Submit a real transfer block to the service (LOCAL execution).
+        let transfer_amount = 100u128;
+        let payload = TransferPayload::new(recipient, transfer_amount).encode();
+        let tx = QbindTransaction::new(sender, 0, payload);
+        let block = QbindBlock::new(make_test_proposal(1), vec![tx]);
+        service.submit_block(block).expect("submit_block");
+
+        // Correlated observation of the ACTUAL nonzero state transition from the
+        // SAME worker-owned backend (serviced in FIFO order AFTER the block).
+        let after_sender = service
+            .observe_account_state(sender)
+            .expect("observe sender after execution");
+        let after_recipient = service
+            .observe_account_state(recipient)
+            .expect("observe recipient after execution");
+        assert_eq!(
+            after_sender.balance,
+            1000 - transfer_amount,
+            "sender debited by exactly the transfer amount (worker-owned backend)"
+        );
+        assert_eq!(
+            after_recipient.balance, transfer_amount,
+            "recipient credited the exact transfer amount — a genuine nonzero transition"
+        );
+        assert_ne!(
+            after_recipient.balance, before_recipient.balance,
+            "recipient balance genuinely changed (not unchanged/detached state)"
+        );
+        assert_eq!(after_sender.nonce, 1, "sender nonce advanced by the applied tx");
+
+        // Explicit flush of the worker-owned backend succeeds.
+        service.observe_flush().expect("explicit worker-owned flush");
+
+        drop(service);
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

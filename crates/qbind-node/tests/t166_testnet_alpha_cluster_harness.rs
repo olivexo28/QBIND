@@ -820,7 +820,8 @@ impl std::error::Error for ClusterError {}
 pub struct TestnetAlphaClusterHandle {
     /// Node handles for each validator.
     node_handles: Vec<NodeHandle>,
-    /// The underlying harnesses for each node.
+    /// The underlying harnesses for each node. R150: built in `ensure_built`
+    /// (single-owner handoff), not in `start`.
     harnesses: Vec<NodeHotstuffHarness>,
     /// FIFO mempools for each node (used when DAG is disabled).
     mempools: Vec<Arc<InMemoryMempool>>,
@@ -828,13 +829,20 @@ pub struct TestnetAlphaClusterHandle {
     dag_mempools: Vec<Option<Arc<InMemoryDagMempool>>>,
     /// DAG metrics for each node (used when DAG availability is enabled).
     dag_metrics: Vec<Option<Arc<DagMempoolMetrics>>>,
-    /// Async execution services for each node (kept alive).
-    #[allow(dead_code)]
+    /// Async execution services for each node. R150: the execution service is
+    /// the SOLE owner of each node's persistent backend; built in `ensure_built`
+    /// after pre-init funding is released. The only post-execution state reads
+    /// go THROUGH the worker-owned backend via the service's `test-utils`
+    /// observation seam — there is no independent writable inspection handle.
     execution_services: Vec<Arc<SingleThreadExecutionService>>,
     /// Per-validator data directories (temp dirs for RocksDB state).
     data_dirs: Vec<TempDir>,
-    /// Persistent account state backends for each node.
-    state_backends: Vec<CachedPersistentAccountState<RocksDbAccountState>>,
+    /// R150: pre-initialization funding intents. Written + flushed into each
+    /// node's real persistent directory and RELEASED before the execution
+    /// service opens it (the single-owner contract). No second writable handle.
+    pending_funding: Vec<(AccountId, AccountState)>,
+    /// R150: whether the single-owner handoff (fund → release → service) is done.
+    built: bool,
     /// Cluster configuration.
     config: TestnetAlphaClusterConfig,
     /// Whether shutdown has been initiated.
@@ -889,45 +897,21 @@ impl TestnetAlphaClusterHandle {
 
         let num_validators = config.num_validators;
         let mut node_handles = Vec::with_capacity(num_validators);
-        let mut harnesses = Vec::with_capacity(num_validators);
         let mut mempools = Vec::with_capacity(num_validators);
         let mut dag_mempools = Vec::with_capacity(num_validators);
         let mut dag_metrics_vec = Vec::with_capacity(num_validators);
-        let mut execution_services = Vec::with_capacity(num_validators);
         let mut data_dirs = Vec::with_capacity(num_validators);
-        let mut state_backends = Vec::with_capacity(num_validators);
 
         for i in 0..num_validators {
             let validator_id = ValidatorId::new(i as u64);
             let metrics = Arc::new(NodeMetrics::new());
 
-            // Create per-validator data directory for persistent state
+            // Per-validator data directory for persistent state. R150: the
+            // execution service becomes the SOLE owner of this directory in
+            // `ensure_built`; no second writable handle is opened here.
             let data_dir = tempfile::tempdir().map_err(|e| {
                 ClusterError::Setup(format!("Failed to create data dir for node {}: {}", i, e))
             })?;
-            let state_path = data_dir.path().join("state_vm_v0");
-
-            // Create persistent state backend
-            let persistent_state = RocksDbAccountState::open(&state_path).map_err(|e| {
-                ClusterError::Storage(format!(
-                    "Failed to open RocksDB state for node {}: {:?}",
-                    i, e
-                ))
-            })?;
-            let state_backend = CachedPersistentAccountState::new(persistent_state);
-
-            // Create KEMTLS config for this node
-            let kemtls_cfg = create_kemtls_config_for_node(i);
-
-            // Create node configuration (single-validator network for simplicity)
-            let node_cfg = NodeValidatorConfig {
-                local: make_test_local_validator_config(
-                    validator_id,
-                    SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
-                    vec![],
-                ),
-                remotes: vec![],
-            };
 
             // Create FIFO mempool
             let mempool_config = MempoolConfig {
@@ -938,40 +922,10 @@ impl TestnetAlphaClusterHandle {
             };
             let mempool = Arc::new(InMemoryMempool::with_config(mempool_config));
 
-            // Create execution service with VM v0 profile
-            // Note: The engine passed to with_config is for compatibility;
-            // the execution_profile in config determines actual behavior.
-            let engine = NonceExecutionEngine::new();
-            let exec_metrics = Arc::new(ExecutionMetrics::new());
-            // T187: Apply stage_b_enabled from cluster config
-            let exec_config = SingleThreadExecutionServiceConfig::vm_v0_persistent(&state_path)
-                .with_stage_b_enabled(config.stage_b_enabled);
-            let execution_service = Arc::new(SingleThreadExecutionService::with_config(
-                engine,
-                exec_config,
-                Some(exec_metrics),
-            ));
-
-            // Create harness
-            let harness = NodeHotstuffHarness::new_from_validator_config(
-                &node_cfg,
-                kemtls_cfg.client_cfg,
-                kemtls_cfg.server_cfg,
-                None,
-            )
-            .map_err(|e| {
-                ClusterError::Setup(format!("Failed to create harness for node {}: {}", i, e))
-            })?;
-
-            // Configure harness with mempool and execution
-            let harness = harness
-                .with_mempool(mempool.clone())
-                .with_async_execution(execution_service.clone())
-                .with_max_txs_per_block(config.max_txs_per_block)
-                .with_metrics(metrics.clone());
-
-            // Configure DAG mempool and availability if enabled
-            let (harness, dag_mempool_opt, dag_metrics_opt) = if config.use_dag_mempool {
+            // Create DAG mempool / metrics if enabled (consumed by `ensure_built`
+            // when the harness is built). The proposer-source wiring stays in
+            // `ensure_built` alongside harness construction.
+            let (dag_mempool_opt, dag_metrics_opt) = if config.use_dag_mempool {
                 let dag_config = DagMempoolConfig {
                     local_validator_id: validator_id,
                     batch_size: 50,
@@ -998,17 +952,9 @@ impl TestnetAlphaClusterHandle {
                 let dag_metrics = Arc::new(DagMempoolMetrics::new());
                 let dag_mempool = Arc::new(dag_mempool.with_metrics(dag_metrics.clone()));
 
-                // T191: Configure DAG availability and coupling mode
-                let harness = harness
-                    .with_dag_mempool(dag_mempool.clone())
-                    .with_proposer_source(ProposerSource::DagMempool)
-                    .with_dag_availability_enabled(config.enable_dag_availability)
-                    .with_dag_coupling_mode(config.dag_coupling_mode);
-
-                (harness, Some(dag_mempool), Some(dag_metrics))
+                (Some(dag_mempool), Some(dag_metrics))
             } else {
-                let harness = harness.with_proposer_source(ProposerSource::FifoMempool);
-                (harness, None, None)
+                (None, None)
             };
 
             node_handles.push(NodeHandle {
@@ -1016,29 +962,132 @@ impl TestnetAlphaClusterHandle {
                 index: i,
                 metrics,
             });
-            harnesses.push(harness);
             mempools.push(mempool);
             dag_mempools.push(dag_mempool_opt);
             dag_metrics_vec.push(dag_metrics_opt);
-            execution_services.push(execution_service);
             data_dirs.push(data_dir);
-            state_backends.push(state_backend);
         }
 
-        eprintln!("[T166] Cluster started with {} validators", num_validators);
+        eprintln!(
+            "[T166] Cluster prepared with {} validators (single-owner execution \
+             services built at first funding/step)",
+            num_validators
+        );
 
         Ok(TestnetAlphaClusterHandle {
             node_handles,
-            harnesses,
+            harnesses: Vec::new(),
             mempools,
             dag_mempools,
             dag_metrics: dag_metrics_vec,
-            execution_services,
+            execution_services: Vec::new(),
             data_dirs,
-            state_backends,
+            pending_funding: Vec::new(),
+            built: false,
             config,
             shutdown_initiated: false,
         })
+    }
+
+    /// R150 single-owner handoff (idempotent). For each node: write the recorded
+    /// pre-initialization funding into the node's REAL persistent directory,
+    /// flush it, RELEASE the setup handle, then hand EXCLUSIVE ownership of that
+    /// same directory to the fallible R149 execution-service constructor and
+    /// build the harness around it. No second writable handle is ever held at
+    /// the same time; the service is the sole writer after handoff. Post-execution
+    /// reads go through the worker-owned backend via the service observation seam.
+    fn ensure_built(&mut self) -> Result<(), ClusterError> {
+        if self.built {
+            return Ok(());
+        }
+        let num_validators = self.config.num_validators;
+        for i in 0..num_validators {
+            let validator_id = ValidatorId::new(i as u64);
+            let state_path = self.data_dirs[i].path().join("state_vm_v0");
+
+            // Pre-initialization funding: write + flush into the real per-node
+            // persistent directory, then DROP (release) the setup handle so the
+            // execution service can take exclusive single ownership.
+            {
+                let persistent = RocksDbAccountState::open(&state_path).map_err(|e| {
+                    ClusterError::Storage(format!(
+                        "Failed to open funding handle for node {}: {:?}",
+                        i, e
+                    ))
+                })?;
+                let mut funding = CachedPersistentAccountState::new(persistent);
+                for (account, state) in &self.pending_funding {
+                    funding.set_account_state(account, state.clone());
+                }
+                funding.flush().map_err(|e| {
+                    ClusterError::Storage(format!(
+                        "Failed to flush pre-init funding for node {}: {:?}",
+                        i, e
+                    ))
+                })?;
+            } // funding handle released here — single-owner precondition.
+
+            // Hand exclusive ownership of the funded backend to the service.
+            let engine = NonceExecutionEngine::new();
+            let exec_metrics = Arc::new(ExecutionMetrics::new());
+            let exec_config = SingleThreadExecutionServiceConfig::vm_v0_persistent(&state_path)
+                .with_stage_b_enabled(self.config.stage_b_enabled);
+            let execution_service = Arc::new(
+                SingleThreadExecutionService::try_with_config(engine, exec_config, Some(exec_metrics))
+                    .map_err(|e| {
+                        ClusterError::Setup(format!(
+                            "Failed to initialize persistent execution service for node {}: {:?}",
+                            i, e
+                        ))
+                    })?,
+            );
+
+            // Build the harness around the sole-owner service.
+            let kemtls_cfg = create_kemtls_config_for_node(i);
+            let node_cfg = NodeValidatorConfig {
+                local: make_test_local_validator_config(
+                    validator_id,
+                    SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+                    vec![],
+                ),
+                remotes: vec![],
+            };
+            let harness = NodeHotstuffHarness::new_from_validator_config(
+                &node_cfg,
+                kemtls_cfg.client_cfg,
+                kemtls_cfg.server_cfg,
+                None,
+            )
+            .map_err(|e| {
+                ClusterError::Setup(format!("Failed to create harness for node {}: {}", i, e))
+            })?;
+            let harness = harness
+                .with_mempool(self.mempools[i].clone())
+                .with_async_execution(execution_service.clone())
+                .with_max_txs_per_block(self.config.max_txs_per_block)
+                .with_metrics(self.node_handles[i].metrics.clone());
+            let harness = if self.config.use_dag_mempool {
+                let dag_mempool = self.dag_mempools[i]
+                    .clone()
+                    .expect("DAG mempool present when use_dag_mempool is set");
+                harness
+                    .with_dag_mempool(dag_mempool)
+                    .with_proposer_source(ProposerSource::DagMempool)
+                    .with_dag_availability_enabled(self.config.enable_dag_availability)
+                    .with_dag_coupling_mode(self.config.dag_coupling_mode)
+            } else {
+                harness.with_proposer_source(ProposerSource::FifoMempool)
+            };
+
+            self.execution_services.push(execution_service);
+            self.harnesses.push(harness);
+        }
+        self.built = true;
+        eprintln!(
+            "[T166] Single-owner execution services built for {} validators",
+            num_validators
+        );
+        Ok(())
     }
 
     /// Restart the cluster from existing data directories.
@@ -1073,22 +1122,12 @@ impl TestnetAlphaClusterHandle {
         let mut dag_mempools = Vec::with_capacity(num_validators);
         let mut dag_metrics_vec = Vec::with_capacity(num_validators);
         let mut execution_services = Vec::with_capacity(num_validators);
-        let mut state_backends = Vec::with_capacity(num_validators);
 
         for (i, data_dir_path) in data_dir_paths.iter().enumerate() {
             let validator_id = ValidatorId::new(i as u64);
             let metrics = Arc::new(NodeMetrics::new());
 
             let state_path = data_dir_path.join("state_vm_v0");
-
-            // Reopen persistent state backend
-            let persistent_state = RocksDbAccountState::open(&state_path).map_err(|e| {
-                ClusterError::Storage(format!(
-                    "Failed to reopen RocksDB state for node {}: {:?}",
-                    i, e
-                ))
-            })?;
-            let state_backend = CachedPersistentAccountState::new(persistent_state);
 
             // Create KEMTLS config for this node
             let kemtls_cfg = create_kemtls_config_for_node(i);
@@ -1112,19 +1151,26 @@ impl TestnetAlphaClusterHandle {
             };
             let mempool = Arc::new(InMemoryMempool::with_config(mempool_config));
 
-            // Create execution service with VM v0 profile
-            // Note: The engine passed to with_config is for compatibility;
-            // the execution_profile in config determines actual behavior.
+            // R150: hand EXCLUSIVE ownership of the EXISTING persisted directory
+            // to the execution service — no separate writable handle is opened,
+            // and no funding is written (restart preserves the already-persisted
+            // state; it does NOT reseed a reopened database as if fresh). The
+            // fallible R149 constructor opens the existing backend before
+            // publishing a service. NOTE: this is local re-open only; it does NOT
+            // qualify ordered close / worker-termination restart (C05/R-restart).
             let engine = NonceExecutionEngine::new();
             let exec_metrics = Arc::new(ExecutionMetrics::new());
-            // T187: Apply stage_b_enabled from cluster config
             let exec_config = SingleThreadExecutionServiceConfig::vm_v0_persistent(&state_path)
                 .with_stage_b_enabled(config.stage_b_enabled);
-            let execution_service = Arc::new(SingleThreadExecutionService::with_config(
-                engine,
-                exec_config,
-                Some(exec_metrics),
-            ));
+            let execution_service = Arc::new(
+                SingleThreadExecutionService::try_with_config(engine, exec_config, Some(exec_metrics))
+                    .map_err(|e| {
+                        ClusterError::Storage(format!(
+                            "Failed to reopen persistent execution service for node {}: {:?}",
+                            i, e
+                        ))
+                    })?,
+            );
 
             // Create harness
             let harness = NodeHotstuffHarness::new_from_validator_config(
@@ -1155,7 +1201,6 @@ impl TestnetAlphaClusterHandle {
             dag_mempools.push(None);
             dag_metrics_vec.push(None);
             execution_services.push(execution_service);
-            state_backends.push(state_backend);
         }
 
         eprintln!(
@@ -1163,8 +1208,10 @@ impl TestnetAlphaClusterHandle {
             num_validators
         );
 
-        // Note: We don't own the data dirs in restart mode, so we use empty vec
-        // The caller is responsible for keeping the original data dirs alive
+        // Note: We don't own the data dirs in restart mode, so we use empty vec.
+        // The caller is responsible for keeping the original data dirs alive.
+        // R150: restart builds the single-owner services eagerly (no pending
+        // funding; existing state preserved), so the cluster is already `built`.
         Ok(TestnetAlphaClusterHandle {
             node_handles,
             harnesses,
@@ -1173,7 +1220,8 @@ impl TestnetAlphaClusterHandle {
             dag_metrics: dag_metrics_vec,
             execution_services,
             data_dirs: vec![], // Not owned in restart mode
-            state_backends,
+            pending_funding: Vec::new(),
+            built: true,
             config,
             shutdown_initiated: false,
         })
@@ -1194,22 +1242,29 @@ impl TestnetAlphaClusterHandle {
 
     /// Initialize account state with a given balance on all nodes.
     ///
-    /// This sets up the initial state for test accounts before running transfers.
+    /// R150: records a pre-initialization funding intent. It is written and
+    /// flushed into each node's real persistent directory in `ensure_built`,
+    /// BEFORE the execution service takes exclusive ownership — not into a
+    /// separate inspection handle.
     pub fn init_account(&mut self, account_id: &AccountId, balance: u128) {
-        for backend in &mut self.state_backends {
-            backend.set_account_state(account_id, AccountState::new(0, balance));
-        }
+        self.pending_funding
+            .push((*account_id, AccountState::new(0, balance)));
     }
 
-    /// Get the account state from a specific node.
+    /// Get the account state from a specific node, read THROUGH the worker-owned
+    /// backend (R150 observation seam, in FIFO order behind any pending blocks).
+    ///
+    /// Returns `None` if the node index is out of range, the single-owner handoff
+    /// has not happened yet (no service), or the worker does not answer within
+    /// the bounded wait — it never fabricates a value.
     pub fn get_account_state(
         &self,
         node_idx: usize,
         account_id: &AccountId,
     ) -> Option<AccountState> {
-        self.state_backends
+        self.execution_services
             .get(node_idx)
-            .map(|backend| backend.get_account_state(account_id))
+            .and_then(|svc| svc.observe_account_state(*account_id).ok())
     }
 
     /// Submit a transfer transaction to a specific node.
@@ -1298,6 +1353,12 @@ impl TestnetAlphaClusterHandle {
     ///
     /// The number of ticks actually executed.
     pub fn step(&mut self, ticks: usize) -> usize {
+        // R150: ensure the single-owner handoff has happened (idempotent) so the
+        // harnesses exist. Tests normally trigger this via `flush_state` first.
+        if let Err(e) = self.ensure_built() {
+            eprintln!("[T166] Failed to build cluster before stepping: {}", e);
+            return 0;
+        }
         let mut executed = 0;
         for _ in 0..ticks {
             for harness in &mut self.harnesses {
@@ -1319,27 +1380,50 @@ impl TestnetAlphaClusterHandle {
             .unwrap_or(false)
     }
 
-    /// Flush state to disk on all nodes.
+    /// Flush state.
+    ///
+    /// R150: the FIRST call performs the pre-initialization funding write + flush
+    /// and the single-owner handoff (idempotent). Any LATER call (post-execution)
+    /// flushes the WORKER-OWNED backend through the observation seam, in FIFO
+    /// order behind any pending blocks; there is no separate writable handle.
     pub fn flush_state(&mut self) -> Result<(), ClusterError> {
-        for (i, backend) in self.state_backends.iter_mut().enumerate() {
-            backend.flush().map_err(|e| {
-                ClusterError::Storage(format!("Failed to flush state for node {}: {:?}", i, e))
-            })?;
+        let was_built = self.built;
+        self.ensure_built()?;
+        if was_built {
+            for (i, svc) in self.execution_services.iter().enumerate() {
+                svc.observe_flush().map_err(|e| {
+                    ClusterError::Storage(format!(
+                        "Failed to flush worker-owned backend for node {}: {}",
+                        i, e
+                    ))
+                })?;
+            }
         }
         Ok(())
     }
 
     /// Verify that all nodes have consistent state for given accounts.
+    ///
+    /// R150: each node's value is read THROUGH its worker-owned backend (the
+    /// observation seam, in FIFO order behind any pending blocks). A cluster
+    /// whose single-owner handoff has not happened has nothing to read and is
+    /// trivially consistent.
     pub fn verify_state_consistency(&self, accounts: &[AccountId]) -> Result<bool, ClusterError> {
-        if self.state_backends.is_empty() {
+        if self.execution_services.is_empty() {
             return Ok(true);
         }
 
         for account in accounts {
-            let reference_state = self.state_backends[0].get_account_state(account);
+            let reference_state = self.execution_services[0]
+                .observe_account_state(*account)
+                .map_err(|e| {
+                    ClusterError::Storage(format!("node 0 state observation failed: {}", e))
+                })?;
 
-            for (i, backend) in self.state_backends.iter().enumerate().skip(1) {
-                let state = backend.get_account_state(account);
+            for (i, svc) in self.execution_services.iter().enumerate().skip(1) {
+                let state = svc.observe_account_state(*account).map_err(|e| {
+                    ClusterError::Storage(format!("node {} state observation failed: {}", i, e))
+                })?;
                 if state != reference_state {
                     eprintln!(
                         "[T166] State inconsistency for account {:?}: node 0 has {:?}, node {} has {:?}",

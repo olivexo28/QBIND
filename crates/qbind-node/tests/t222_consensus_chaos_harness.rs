@@ -851,17 +851,23 @@ impl ChaosNodeHandle {
 /// Handle to a running chaos cluster.
 pub struct ChaosClusterHandle {
     node_handles: Vec<ChaosNodeHandle>,
+    // R150: harnesses are built in `ensure_built` (single-owner handoff), not here.
     harnesses: Vec<NodeHotstuffHarness>,
     mempools: Vec<Arc<InMemoryMempool>>,
     #[allow(dead_code)]
     dag_mempools: Vec<Arc<InMemoryDagMempool>>,
     #[allow(dead_code)]
     dag_metrics: Vec<Arc<DagMempoolMetrics>>,
-    #[allow(dead_code)]
+    // R150: the execution service is the SOLE owner of each node's persistent
+    // backend; built in `ensure_built` after pre-init funding has been released.
     execution_services: Vec<Arc<SingleThreadExecutionService>>,
     #[allow(dead_code)]
     data_dirs: Vec<TempDir>,
-    state_backends: Vec<CachedPersistentAccountState<RocksDbAccountState>>,
+    // R150: pre-initialization funding intents, written + flushed into each
+    // node's real persistent directory and RELEASED before the execution service
+    // opens it. No independent writable inspection handle is retained.
+    pending_funding: Vec<(AccountId, AccountState)>,
+    built: bool,
     config: ChaosClusterConfig,
     /// Active fault tracking.
     active_faults: ActiveFaults,
@@ -894,40 +900,20 @@ impl ChaosClusterHandle {
 
         let num_validators = config.num_validators;
         let mut node_handles = Vec::with_capacity(num_validators);
-        let mut harnesses = Vec::with_capacity(num_validators);
         let mut mempools = Vec::with_capacity(num_validators);
         let mut dag_mempools = Vec::with_capacity(num_validators);
         let mut dag_metrics_vec = Vec::with_capacity(num_validators);
-        let mut execution_services = Vec::with_capacity(num_validators);
         let mut data_dirs = Vec::with_capacity(num_validators);
-        let mut state_backends = Vec::with_capacity(num_validators);
 
         for i in 0..num_validators {
             let validator_id = ValidatorId::new(i as u64);
             let metrics = Arc::new(NodeMetrics::new());
 
-            // Create per-validator data directory
+            // Per-validator data directory. R150: the execution service becomes
+            // the SOLE owner of this directory in `ensure_built`; no second
+            // writable handle is opened here.
             let data_dir = tempfile::tempdir()
                 .map_err(|e| format!("Failed to create data dir for node {}: {}", i, e))?;
-            let state_path = data_dir.path().join("state_vm_v0");
-
-            // Create persistent state backend
-            let persistent_state = RocksDbAccountState::open(&state_path)
-                .map_err(|e| format!("Failed to open RocksDB state for node {}: {:?}", i, e))?;
-            let state_backend = CachedPersistentAccountState::new(persistent_state);
-
-            // Create KEMTLS config
-            let kemtls_cfg = create_kemtls_config_for_node(i);
-
-            // Create node configuration
-            let node_cfg = NodeValidatorConfig {
-                local: make_test_local_validator_config(
-                    validator_id,
-                    SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
-                    vec![],
-                ),
-                remotes: vec![],
-            };
 
             // Create FIFO mempool
             let mempool_config = MempoolConfig {
@@ -937,31 +923,6 @@ impl ChaosClusterHandle {
                 enable_fee_priority: config.enable_fee_priority,
             };
             let mempool = Arc::new(InMemoryMempool::with_config(mempool_config));
-
-            // Create execution service
-            let engine = NonceExecutionEngine::new();
-            let exec_metrics = Arc::new(ExecutionMetrics::new());
-            let exec_config = SingleThreadExecutionServiceConfig::vm_v0_persistent(&state_path);
-            let execution_service = Arc::new(SingleThreadExecutionService::with_config(
-                engine,
-                exec_config,
-                Some(exec_metrics),
-            ));
-
-            // Create harness
-            let harness = NodeHotstuffHarness::new_from_validator_config(
-                &node_cfg,
-                kemtls_cfg.client_cfg,
-                kemtls_cfg.server_cfg,
-                None,
-            )
-            .map_err(|e| format!("Failed to create harness for node {}: {}", i, e))?;
-
-            let harness = harness
-                .with_mempool(mempool.clone())
-                .with_async_execution(execution_service.clone())
-                .with_max_txs_per_block(config.max_txs_per_block)
-                .with_metrics(metrics.clone());
 
             // Create DAG mempool with availability enabled
             let dag_config = DagMempoolConfig {
@@ -985,43 +946,122 @@ impl ChaosClusterHandle {
             let dag_metrics = Arc::new(DagMempoolMetrics::new());
             let dag_mempool = Arc::new(dag_mempool.with_metrics(dag_metrics.clone()));
 
-            let harness = harness
-                .with_dag_mempool(dag_mempool.clone())
-                .with_proposer_source(ProposerSource::DagMempool)
-                .with_dag_availability_enabled(true)
-                .with_dag_coupling_mode(config.dag_coupling_mode);
-
             node_handles.push(ChaosNodeHandle {
                 validator_id,
                 index: i,
                 metrics,
                 is_crashed: false,
             });
-            harnesses.push(harness);
             mempools.push(mempool);
             dag_mempools.push(dag_mempool);
             dag_metrics_vec.push(dag_metrics);
-            execution_services.push(execution_service);
             data_dirs.push(data_dir);
-            state_backends.push(state_backend);
         }
 
-        eprintln!("[T222] Cluster started with {} validators", num_validators);
+        eprintln!(
+            "[T222] Cluster prepared with {} validators (single-owner execution \
+             services built at first funding/step)",
+            num_validators
+        );
 
         Ok(ChaosClusterHandle {
             node_handles,
-            harnesses,
+            harnesses: Vec::new(),
             mempools,
             dag_mempools,
             dag_metrics: dag_metrics_vec,
-            execution_services,
+            execution_services: Vec::new(),
             data_dirs,
-            state_backends,
+            pending_funding: Vec::new(),
+            built: false,
             config,
             active_faults: ActiveFaults::new(),
             pending_events: Vec::new(),
             faults_injected: 0,
         })
+    }
+
+    /// R150 single-owner handoff (idempotent). For each node: write the recorded
+    /// pre-initialization funding into the node's REAL persistent directory,
+    /// flush it, RELEASE the setup handle, then hand EXCLUSIVE ownership of that
+    /// same directory to the fallible R149 execution-service constructor and
+    /// build the harness around it. No second writable handle is ever held at
+    /// the same time; the service is the sole writer after handoff.
+    fn ensure_built(&mut self) -> Result<(), String> {
+        if self.built {
+            return Ok(());
+        }
+        let num_validators = self.config.num_validators;
+        for i in 0..num_validators {
+            let validator_id = ValidatorId::new(i as u64);
+            let state_path = self.data_dirs[i].path().join("state_vm_v0");
+
+            // Pre-initialization funding: write + flush into the real per-node
+            // persistent directory, then DROP (release) the setup handle so the
+            // execution service can take exclusive single ownership.
+            {
+                let persistent = RocksDbAccountState::open(&state_path).map_err(|e| {
+                    format!("Failed to open funding handle for node {}: {:?}", i, e)
+                })?;
+                let mut funding = CachedPersistentAccountState::new(persistent);
+                for (account, state) in &self.pending_funding {
+                    funding.set_account_state(account, state.clone());
+                }
+                funding.flush().map_err(|e| {
+                    format!("Failed to flush pre-init funding for node {}: {:?}", i, e)
+                })?;
+            } // funding handle released here — single-owner precondition.
+
+            // Hand exclusive ownership of the funded backend to the service.
+            let engine = NonceExecutionEngine::new();
+            let exec_metrics = Arc::new(ExecutionMetrics::new());
+            let exec_config = SingleThreadExecutionServiceConfig::vm_v0_persistent(&state_path);
+            let execution_service = Arc::new(
+                SingleThreadExecutionService::try_with_config(engine, exec_config, Some(exec_metrics))
+                    .map_err(|e| {
+                        format!(
+                            "Failed to initialize persistent execution service for node {}: {:?}",
+                            i, e
+                        )
+                    })?,
+            );
+
+            // Build the harness around the sole-owner service.
+            let kemtls_cfg = create_kemtls_config_for_node(i);
+            let node_cfg = NodeValidatorConfig {
+                local: make_test_local_validator_config(
+                    validator_id,
+                    SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+                    vec![],
+                ),
+                remotes: vec![],
+            };
+            let harness = NodeHotstuffHarness::new_from_validator_config(
+                &node_cfg,
+                kemtls_cfg.client_cfg,
+                kemtls_cfg.server_cfg,
+                None,
+            )
+            .map_err(|e| format!("Failed to create harness for node {}: {}", i, e))?;
+            let harness = harness
+                .with_mempool(self.mempools[i].clone())
+                .with_async_execution(execution_service.clone())
+                .with_max_txs_per_block(self.config.max_txs_per_block)
+                .with_metrics(self.node_handles[i].metrics.clone())
+                .with_dag_mempool(self.dag_mempools[i].clone())
+                .with_proposer_source(ProposerSource::DagMempool)
+                .with_dag_availability_enabled(true)
+                .with_dag_coupling_mode(self.config.dag_coupling_mode);
+
+            self.execution_services.push(execution_service);
+            self.harnesses.push(harness);
+        }
+        self.built = true;
+        eprintln!(
+            "[T222] Single-owner execution services built for {} validators",
+            num_validators
+        );
+        Ok(())
     }
 
     /// Get the number of nodes in the cluster.
@@ -1030,20 +1070,23 @@ impl ChaosClusterHandle {
     }
 
     /// Initialize account state with a given balance on all nodes.
+    ///
+    /// R150: records a pre-initialization funding intent, applied to each node's
+    /// real persistent directory in `ensure_built` before the execution service
+    /// takes exclusive ownership (no separate inspection handle).
     pub fn init_account(&mut self, account_id: &AccountId, balance: u128) {
-        for backend in &mut self.state_backends {
-            backend.set_account_state(account_id, AccountState::new(0, balance));
-        }
+        self.pending_funding
+            .push((*account_id, AccountState::new(0, balance)));
     }
 
-    /// Flush all state backends.
+    /// Flush state.
+    ///
+    /// R150: performs the pre-initialization funding write + flush and the
+    /// single-owner handoff (idempotent). After the execution service owns the
+    /// backend there is no separate writable handle to flush here; the worker
+    /// flushes the owned backend after each committed block.
     pub fn flush_state(&mut self) -> Result<(), String> {
-        for (i, backend) in self.state_backends.iter_mut().enumerate() {
-            backend
-                .flush()
-                .map_err(|e| format!("Failed to flush state for node {}: {:?}", i, e))?;
-        }
-        Ok(())
+        self.ensure_built()
     }
 
     /// Submit a transaction to a specific node.
@@ -1107,6 +1150,12 @@ impl ChaosClusterHandle {
 
     /// Run consensus steps on all non-crashed nodes.
     pub fn step_with_faults(&mut self, ticks: usize, current_time_ms: u64) -> usize {
+        // R150: ensure the single-owner handoff has happened (idempotent) so the
+        // harnesses exist. Tests normally trigger this via `flush_state` first.
+        if let Err(e) = self.ensure_built() {
+            eprintln!("[T222] Failed to build cluster before stepping: {}", e);
+            return 0;
+        }
         self.update_faults(current_time_ms);
 
         let mut executed = 0;
