@@ -2136,11 +2136,23 @@ pub struct BinaryConsensusLoopInboundStats {
     pub outbound_proposal_epoch_unauthorized_total: u64,
     pub outbound_proposal_authorization_exhausted_total: u64,
     pub outbound_proposal_authority_stale_before_effect_total: u64,
+    /// Run 422 D7 / P2a: a signing-capable Proposal/Vote authority was present
+    /// but NO current-authorization owner was wired (reachable only under the
+    /// test-only `LocalFixtureUnsigned` policy). The Proposal is refused
+    /// fail-closed BEFORE signing — presence of a P/V authority requires a
+    /// present, coherent current-authorization owner.
+    pub outbound_proposal_authority_present_without_owner_total: u64,
     pub outbound_vote_current_state_unavailable_total: u64,
     pub outbound_vote_authority_superseded_total: u64,
     pub outbound_vote_epoch_unauthorized_total: u64,
     pub outbound_vote_authorization_exhausted_total: u64,
     pub outbound_vote_authority_stale_before_effect_total: u64,
+    /// Run 422 D7 / P2a: a signing-capable Proposal/Vote authority was present
+    /// but NO current-authorization owner was wired (reachable only under the
+    /// test-only `LocalFixtureUnsigned` policy). The Vote is refused fail-closed
+    /// BEFORE signing — presence of a P/V authority requires a present, coherent
+    /// current-authorization owner.
+    pub outbound_vote_authority_present_without_owner_total: u64,
     // Run 422 D7-B2: current-authorization enforcement at the cached
     // late-peer-connect RE-EMISSION boundary
     // (`maybe_reemit_on_late_peer_connect`). Cached B9 Proposal / B10 Vote
@@ -3960,6 +3972,11 @@ fn maybe_reemit_on_late_peer_connect(
                 .saturating_add(1)
         },
         |s| {
+            s.outbound_proposal_authority_present_without_owner_total = s
+                .outbound_proposal_authority_present_without_owner_total
+                .saturating_add(1)
+        },
+        |s| {
             s.outbound_proposal_reemit_missing_provenance_total = s
                 .outbound_proposal_reemit_missing_provenance_total
                 .saturating_add(1)
@@ -4053,6 +4070,11 @@ fn maybe_reemit_on_late_peer_connect(
             |s| {
                 s.outbound_vote_current_state_unavailable_total = s
                     .outbound_vote_current_state_unavailable_total
+                    .saturating_add(1)
+            },
+            |s| {
+                s.outbound_vote_authority_present_without_owner_total = s
+                    .outbound_vote_authority_present_without_owner_total
                     .saturating_add(1)
             },
             |s| {
@@ -5579,6 +5601,10 @@ fn admit_outbound_action<'a>(
     record_reject: fn(&mut BinaryConsensusLoopInboundStats, &FreshnessError),
     record_epoch_unauthorized: fn(&mut BinaryConsensusLoopInboundStats),
     record_no_snapshot_unavailable: fn(&mut BinaryConsensusLoopInboundStats),
+    // Run 422 D7 / P2a: records the fail-closed refusal when a signing-capable
+    // `pv_authority` is present but no current-authorization owner is wired
+    // (reachable only under the test-only `LocalFixtureUnsigned` policy).
+    record_authority_present_without_owner: fn(&mut BinaryConsensusLoopInboundStats),
     inbound_stats: &mut BinaryConsensusLoopInboundStats,
 ) -> OutboundAuthAdmission<'a> {
     match current_auth {
@@ -5613,15 +5639,24 @@ fn admit_outbound_action<'a>(
                 // unavailable. Reject before signing; never infer the founding
                 // epoch from an absent snapshot.
                 record_no_snapshot_unavailable(inbound_stats);
-                OutboundAuthAdmission::Rejected
-            } else {
-                // Test-only LocalFixtureUnsigned passthrough: behaviour is
-                // exactly as before — sign (or pass through unsigned) with the
-                // supplied authority, with no current-authorization ticket.
-                OutboundAuthAdmission::Admitted {
-                    signer_ctx: pv_authority,
-                    ticket: None,
+                return OutboundAuthAdmission::Rejected;
+            }
+            // Test-only LocalFixtureUnsigned (never production). The ONLY
+            // legitimate behaviour here is the genuinely-unsigned passthrough,
+            // which carries NO Proposal/Vote authority. Run 422 D7 / P2a: a
+            // present, signing-capable `pv_authority` with NO current-
+            // authorization owner must refuse fail-closed BEFORE signing —
+            // presence of a P/V authority requires a present, coherent owner and
+            // is never signed through a bare authority with no owner admission.
+            match pv_authority {
+                Some(_) => {
+                    record_authority_present_without_owner(inbound_stats);
+                    OutboundAuthAdmission::Rejected
                 }
+                None => OutboundAuthAdmission::Admitted {
+                    signer_ctx: None,
+                    ticket: None,
+                },
             }
         }
     }
@@ -5717,6 +5752,10 @@ fn admit_cached_reemission<'a>(
     record_reject: fn(&mut BinaryConsensusLoopInboundStats, &FreshnessError),
     record_epoch_unauthorized: fn(&mut BinaryConsensusLoopInboundStats),
     record_no_snapshot_unavailable: fn(&mut BinaryConsensusLoopInboundStats),
+    // Run 422 D7 / P2a: records the fail-closed refusal when a signing-capable
+    // `pv_authority` is present but no current-authorization owner is wired
+    // (reachable only under the test-only `LocalFixtureUnsigned` policy).
+    record_authority_present_without_owner: fn(&mut BinaryConsensusLoopInboundStats),
     record_missing_provenance: fn(&mut BinaryConsensusLoopInboundStats),
     record_provenance_rejected: fn(&mut BinaryConsensusLoopInboundStats),
     inbound_stats: &mut BinaryConsensusLoopInboundStats,
@@ -5780,15 +5819,25 @@ fn admit_cached_reemission<'a>(
                 // epoch from an absent snapshot, and never let a supplied
                 // `pv_authority` substitute.
                 record_no_snapshot_unavailable(inbound_stats);
-                CachedReemitAdmission::Rejected
-            } else {
-                // Test-only LocalFixtureUnsigned passthrough: behaviour is
-                // exactly as before D7-B2 — sign (or pass through unsigned) with
-                // the supplied authority, with no current-authorization ticket.
-                CachedReemitAdmission::Admitted {
-                    signer_ctx: pv_authority,
-                    fresh_ticket: None,
+                return CachedReemitAdmission::Rejected;
+            }
+            // Test-only LocalFixtureUnsigned (never production). The ONLY
+            // legitimate behaviour here is the genuinely-unsigned passthrough,
+            // which carries NO Proposal/Vote authority. Run 422 D7 / P2a: a
+            // present, signing-capable `pv_authority` with NO current-
+            // authorization owner must refuse fail-closed BEFORE signing —
+            // presence of a P/V authority requires a present, coherent owner; a
+            // cached re-emission is never signed through a bare authority with
+            // no owner admission.
+            match pv_authority {
+                Some(_) => {
+                    record_authority_present_without_owner(inbound_stats);
+                    CachedReemitAdmission::Rejected
                 }
+                None => CachedReemitAdmission::Admitted {
+                    signer_ctx: None,
+                    fresh_ticket: None,
+                },
             }
         }
     }
@@ -5858,6 +5907,11 @@ fn forward_actions_to_facade(
                     |s| {
                         s.outbound_proposal_current_state_unavailable_total = s
                             .outbound_proposal_current_state_unavailable_total
+                            .saturating_add(1)
+                    },
+                    |s| {
+                        s.outbound_proposal_authority_present_without_owner_total = s
+                            .outbound_proposal_authority_present_without_owner_total
                             .saturating_add(1)
                     },
                     inbound_stats,
@@ -5930,6 +5984,11 @@ fn forward_actions_to_facade(
                             .outbound_vote_current_state_unavailable_total
                             .saturating_add(1)
                     },
+                    |s| {
+                        s.outbound_vote_authority_present_without_owner_total = s
+                            .outbound_vote_authority_present_without_owner_total
+                            .saturating_add(1)
+                    },
                     inbound_stats,
                 ) {
                     OutboundAuthAdmission::Admitted { signer_ctx, ticket } => {
@@ -5995,6 +6054,11 @@ fn forward_actions_to_facade(
                     |s| {
                         s.outbound_vote_current_state_unavailable_total = s
                             .outbound_vote_current_state_unavailable_total
+                            .saturating_add(1)
+                    },
+                    |s| {
+                        s.outbound_vote_authority_present_without_owner_total = s
+                            .outbound_vote_authority_present_without_owner_total
                             .saturating_add(1)
                     },
                     inbound_stats,
@@ -15457,6 +15521,51 @@ mod tests {
                     reemitted_for_view,
                     observed_peer: last_known_peers.contains(&peer),
                 }
+            }
+
+            // ====== Run 422 D7 / P2a: cached-reemission missing-owner =========
+            // A present signer-bearing `pv_authority` with NO current-
+            // authorization owner refuses fail-closed at the cached re-emission
+            // owner-admission boundary (before provenance/journal/signing), even
+            // though `run_reemit` DOES wire a journal. The cached proposal gates
+            // the re-emission, so its refusal returns before the paired vote is
+            // attempted (vote counter stays 0 here; the vote arm of the SAME
+            // `admit_cached_reemission` None-branch is the identical code the
+            // immediate-path control exercises for votes).
+            #[test]
+            fn d7b2_p2a_localfixture_unsigned_signer_no_owner_refuses_cached_reemit() {
+                let fixture = make_fixture(4);
+                let domain = d6_control_domain();
+                let pv = make_ctx_v2(&fixture, Some(ValidatorId(0)), domain.clone());
+                // Build a coherent snapshot ONLY to mint valid cache provenance;
+                // the owner is NOT wired into the re-emission (current_auth=None).
+                let snap = coherent_snapshot_for(&pv);
+                let out = run_reemit(
+                    None,
+                    Some(&pv),
+                    ConsensusVerificationPolicy::LocalFixtureUnsigned,
+                    |view| {
+                        (
+                            Some(cached_proposal(0, view, prov(&snap))),
+                            Some(cached_vote(0, view, prov(&snap))),
+                        )
+                    },
+                );
+                assert_eq!(
+                    out.stats.outbound_proposal_authority_present_without_owner_total,
+                    1
+                );
+                assert_eq!(
+                    out.stats.outbound_vote_authority_present_without_owner_total,
+                    0
+                );
+                assert_eq!(out.stats.outbound_proposal_late_peer_reemits, 0);
+                assert_eq!(out.stats.outbound_vote_late_peer_reemits, 0);
+                assert_eq!(out.stats.outbound_proposal_signing_success, 0);
+                assert_eq!(out.stats.outbound_vote_signing_success, 0);
+                assert_eq!(out.facade.nproposals(), 0);
+                assert_eq!(out.facade.nbroadcast_votes(), 0);
+                assert_eq!(out.facade.ndirected_votes(), 0);
             }
 
             // ================= POSITIVE: both families ========================
@@ -28190,16 +28299,23 @@ mod tests {
                         assert_eq!(stats.outbound_vote_wire_chain_mismatch, 0);
                     }
 
-                    // LocalFixtureUnsigned is NOT an exemption once a signer is
-                    // supplied: a supplied signer + no journal still refuses.
+                    // Run 422 D7 / P2a (migrated from the superseded
+                    // `..._still_refuses_missing_journal`). LocalFixtureUnsigned
+                    // is NOT a permissive signing path: a supplied signer-bearing
+                    // authority with NO current-authorization owner now refuses
+                    // fail-closed at the owner-admission boundary, BEFORE the
+                    // journal guard. The original journal-guard intent is
+                    // preserved under its correct (wired-snapshot, Required)
+                    // context by `ca_a_{proposal,vote}_required_missing_journal_*`.
                     #[test]
-                    fn ca_a_localfixture_unsigned_with_signer_still_refuses_missing_journal() {
+                    fn ca_a_localfixture_unsigned_with_signer_refuses_missing_owner_before_journal() {
                         let fixture = make_fixture(4);
                         let (pv, c) = recording_pv(&fixture);
                         let facade = OutboundRecorder::default();
                         let mut stats = BinaryConsensusLoopInboundStats::default();
                         // No current-authorization snapshot, LocalFixtureUnsigned
-                        // policy, but a REAL signer supplied via `pv_authority`.
+                        // policy, a REAL signer supplied via `pv_authority`, no
+                        // journal.
                         forward_actions_to_facade(
                             vec![proposal_action(0), broadcast_vote_action(0)],
                             &facade,
@@ -28209,16 +28325,26 @@ mod tests {
                             None,
                             ConsensusVerificationPolicy::LocalFixtureUnsigned,
                         );
-                        assert_eq!(stats.outbound_proposal_journal_unavailable_total, 1);
-                        assert_eq!(stats.outbound_vote_journal_unavailable_total, 1);
+                        // P2a owner-admission refusal fires BEFORE the journal
+                        // guard: the new counter increments and the journal-
+                        // unavailable counter is never reached.
+                        assert_eq!(stats.outbound_proposal_authority_present_without_owner_total, 1);
+                        assert_eq!(stats.outbound_vote_authority_present_without_owner_total, 1);
+                        assert_eq!(stats.outbound_proposal_journal_unavailable_total, 0);
+                        assert_eq!(stats.outbound_vote_journal_unavailable_total, 0);
+                        // No signer call, no signing success, no delivery.
                         assert_eq!(c.proposal_calls.load(SeqCst), 0);
                         assert_eq!(c.vote_calls.load(SeqCst), 0);
+                        assert_eq!(stats.outbound_proposal_signing_success, 0);
+                        assert_eq!(stats.outbound_vote_signing_success, 0);
+                        assert_eq!(stats.outbound_proposals_sent, 0);
+                        assert_eq!(stats.outbound_votes_sent, 0);
                         assert!(facade.proposals.lock().unwrap().is_empty());
                         assert!(facade.broadcast_votes.lock().unwrap().is_empty());
 
-                        // Control: the SAME LocalFixtureUnsigned+signer path DOES
-                        // sign once a journal is supplied (proving the refusal was
-                        // the journal, not the policy).
+                        // Control: a wired journal does NOT rescue a missing owner
+                        // — the P2a refusal still fires before any signing (owner
+                        // absence, not the journal, is the gate).
                         let facade2 = OutboundRecorder::default();
                         let mut stats2 = BinaryConsensusLoopInboundStats::default();
                         let journal = fresh_signing_journal();
@@ -28231,8 +28357,67 @@ mod tests {
                             Some(&journal),
                             ConsensusVerificationPolicy::LocalFixtureUnsigned,
                         );
-                        assert_eq!(stats2.outbound_proposal_signing_success, 1);
-                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                        assert_eq!(stats2.outbound_proposal_authority_present_without_owner_total, 1);
+                        assert_eq!(stats2.outbound_proposal_signing_success, 0);
+                        assert_eq!(stats2.outbound_proposal_journal_unavailable_total, 0);
+                        assert_eq!(c.proposal_calls.load(SeqCst), 0);
+                        assert!(facade2.proposals.lock().unwrap().is_empty());
+                    }
+
+                    // Run 422 D7 / P2a — dedicated immediate-path control across
+                    // ALL three outbound families, plus preservation of the
+                    // genuinely-unsigned passthrough.
+                    #[test]
+                    fn ca_a_p2a_immediate_refuses_authority_without_owner_all_families() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let facade = OutboundRecorder::default();
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        forward_actions_to_facade(
+                            vec![
+                                proposal_action(0),
+                                broadcast_vote_action(0),
+                                send_vote_to_action(ValidatorId(3), 0),
+                            ],
+                            &facade,
+                            &mut stats,
+                            None,       // no current-authorization owner
+                            Some(&pv),  // present, signer-bearing P/V authority
+                            None,
+                            ConsensusVerificationPolicy::LocalFixtureUnsigned,
+                        );
+                        // One Proposal + two Votes (broadcast + directed) each
+                        // refused at the owner-admission boundary before signing.
+                        assert_eq!(stats.outbound_proposal_authority_present_without_owner_total, 1);
+                        assert_eq!(stats.outbound_vote_authority_present_without_owner_total, 2);
+                        assert_eq!(c.proposal_calls.load(SeqCst), 0);
+                        assert_eq!(c.vote_calls.load(SeqCst), 0);
+                        assert_eq!(stats.outbound_proposals_sent, 0);
+                        assert_eq!(stats.outbound_votes_sent, 0);
+                        assert_eq!(stats.outbound_send_vote_to, 0);
+                        assert_eq!(stats.outbound_proposal_signing_success, 0);
+                        assert_eq!(stats.outbound_vote_signing_success, 0);
+                        assert!(facade.proposals.lock().unwrap().is_empty());
+                        assert!(facade.broadcast_votes.lock().unwrap().is_empty());
+                        assert!(facade.directed_votes.lock().unwrap().is_empty());
+
+                        // Preserved positive: the genuinely-unsigned
+                        // LocalFixtureUnsigned passthrough (NO authority, NO owner)
+                        // is UNCHANGED — the proposal is forwarded unsigned exactly
+                        // as before, with no new refusal counter.
+                        let facade2 = OutboundRecorder::default();
+                        let mut stats2 = BinaryConsensusLoopInboundStats::default();
+                        forward_actions_to_facade(
+                            vec![proposal_action(0)],
+                            &facade2,
+                            &mut stats2,
+                            None,
+                            None, // genuinely unsigned: no authority
+                            None,
+                            ConsensusVerificationPolicy::LocalFixtureUnsigned,
+                        );
+                        assert_eq!(stats2.outbound_proposal_authority_present_without_owner_total, 0);
+                        assert_eq!(stats2.outbound_proposals_sent, 1);
                         assert_eq!(facade2.proposals.lock().unwrap().len(), 1);
                     }
 
