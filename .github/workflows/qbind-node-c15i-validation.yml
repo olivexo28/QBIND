@@ -1,0 +1,103 @@
+# C15(i) required-persistence single-owner candidate — combined default + test-utils validation.
+#
+# Purpose (R152): give the C15(i) correction (R149 fail-closed persistent initializer
+# + R150 single-owner harnesses) a repeatable CI gate that runs BOTH the default
+# configuration AND the `test-utils` configuration — the latter being the only one that
+# builds and runs the `t166_testnet_alpha_cluster_harness` target and the gated
+# worker-owned observation seam / genuine persistent-execution witness. On a default
+# `cargo test` the t166 target is skipped (it `required-features = ["test-utils"]`), so a
+# default-only gate would silently lose T166's 23 non-ignored cases. This workflow runs
+# the explicit targets (not test discovery) in two distinct, non-optional jobs.
+#
+# Scope: adds ONLY this workflow. It changes no source/test file, no Cargo manifest or
+# lockfile, no existing workflow, no branch protection, and requests only read-only
+# permissions. It performs ordinary isolated developer tests on a standard hosted runner;
+# no deployment, release, signing, activation, or network launch.
+name: qbind-node C15(i) validation
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+# Minimal, read-only. No write scopes; no packages/id-token/deployments.
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Default configuration (no features). Must stay green independently of the
+  # test-utils job; both jobs always run and their failures are visible.
+  # ---------------------------------------------------------------------------
+  default-suite:
+    name: default suite (qbind-node)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout (PR / main ref under test)
+        uses: actions/checkout@v4
+
+      - name: Install the R150-accepted Rust toolchain (1.97.0)
+        # The C15(i) candidate's accepted combined acceptance was produced on
+        # rustc/cargo 1.97.0. There is no repository rust-toolchain file, so the
+        # tested version is pinned explicitly here rather than substituting a
+        # different `stable`. A fresh runner performs normal `--locked` dependency
+        # resolution (no offline cache is assumed).
+        run: |
+          rustup toolchain install 1.97.0 --profile minimal
+          rustup default 1.97.0
+          rustc --version
+          cargo --version
+
+      - name: Default — locked non-test check (lib + bins)
+        run: cargo check -p qbind-node --lib --bins --locked
+
+      - name: Default — locked library tests (includes the five C15(i) controls)
+        run: cargo test -p qbind-node --lib --locked
+
+      - name: Default — locked persistent cluster harnesses (explicit targets)
+        # Explicit targets (not test discovery). `--no-fail-fast` so all three
+        # harness targets run and every failure is reported. Pre-existing
+        # `#[ignore]` cases stay ignored (no include-ignored flag is passed).
+        run: >-
+          cargo test -p qbind-node
+          --test t221_dag_coupling_cluster_tests
+          --test t222_consensus_chaos_harness
+          --test t238_multi_region_latency_harness
+          --locked --no-fail-fast
+
+  # ---------------------------------------------------------------------------
+  # `test-utils` configuration. This is the configuration that compiles and runs
+  # the T166 harness and the gated observation seam / persistent-execution
+  # witness. Required: without it, T166's coverage is silently lost.
+  # ---------------------------------------------------------------------------
+  test-utils-suite:
+    name: test-utils suite (qbind-node, incl. T166)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout (PR / main ref under test)
+        uses: actions/checkout@v4
+
+      - name: Install the R150-accepted Rust toolchain (1.97.0)
+        run: |
+          rustup toolchain install 1.97.0 --profile minimal
+          rustup default 1.97.0
+          rustc --version
+          cargo --version
+
+      - name: test-utils — locked non-test check (lib + bins)
+        run: cargo check -p qbind-node --lib --bins --features test-utils --locked
+
+      - name: test-utils — locked library tests (controls + persistent-execution witness)
+        run: cargo test -p qbind-node --lib --features test-utils --locked
+
+      - name: test-utils — locked T166 harness target (explicit; gated seam + witness)
+        # Explicitly runs the feature-gated T166 target that a default `cargo test`
+        # would skip. Pre-existing `#[ignore]` cases remain ignored.
+        run: >-
+          cargo test -p qbind-node
+          --test t166_testnet_alpha_cluster_harness
+          --features test-utils --locked
