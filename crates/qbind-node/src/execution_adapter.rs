@@ -968,6 +968,14 @@ impl SingleThreadExecutionService {
                 break;
             }
 
+            // R167 (test-only): deterministic receive-boundary observation for the
+            // internal supervised-idle-close candidate. Absent from non-test builds;
+            // in tests it is a no-op unless a gate is installed on THIS worker thread
+            // (only the supervised candidate's test spawns install one), so legacy
+            // worker threads are unaffected.
+            #[cfg(test)]
+            supervised_idle_close::recv_boundary_test_hook();
+
             // Receive next task (blocking)
             match receiver.recv() {
                 Ok(task) => {
@@ -2087,5 +2095,595 @@ mod tests {
         assert!(debug_str.contains("SingleThreadExecutionService"));
         assert!(debug_str.contains("queue_len"));
         assert!(debug_str.contains("shutdown"));
+    }
+}
+
+/// R167 — C05 first supervised idle close on the REAL memory-only NonceOnly worker.
+///
+/// This is an **internal, opt-in, unwired candidate** (Option B + restricted P1 from
+/// the R166/R167 decision). It drives the actual production
+/// [`SingleThreadExecutionService::worker_loop_nonce_only`] receive path on a real
+/// spawned worker thread; it is NOT a shadow worker and NOT a public API. It is kept
+/// off every production caller (simulator, harnesses, binaries) and off the legacy
+/// `AsyncExecutionService` trait surface:
+///
+/// * One **non-clonable owner** ([`SupervisedNonceOwner`]) retains the sole worker
+///   `JoinHandle`; a submit-only [`SupervisedSubmitView`] shares admission without
+///   exposing `shutdown(&self)`, the observer seam, or any raw
+///   `Arc<SingleThreadExecutionService>`.
+/// * **Eligibility (restricted P1):** only a worker with ZERO successful admissions
+///   over its lifetime may be closed. The first successful enqueue, the eligibility
+///   check, and removal of the sole sender are serialized under one lock. A prior
+///   admission always refuses the limited close and leaves admission + supervision
+///   unchanged.
+/// * **Wake:** an eligible close removes the sole task sender, disconnecting the
+///   channel and waking the real receive path — no flag, no task, no sentinel, no
+///   external sender drop.
+/// * **Termination:** a bounded observation reports `Pending`/`ReadyToJoin` from a
+///   readiness signal only; a separate, possibly-blocking `join` consumes the handle
+///   and supplies the authoritative normal/panic result. Readiness is not an observed
+///   join. A duplicate join is refused.
+///
+/// The legacy sender path, nonblocking `submit_block`, `shutdown(&self)`, `Drop`, the
+/// public trait and error variants, the C15(i) persistent constructors, and the
+/// shipping VM-v0 opener are all untouched. This candidate opens no storage and
+/// supports only memory-only `NonceOnly`; any other configuration is refused before a
+/// channel is created or a worker spawned. Busy-drain/custody, persistent write/flush
+/// propagation, durable completion, reuse authorization, and restart-safe quarantine
+/// remain out of scope (separate obligations).
+mod supervised_idle_close {
+    #![allow(dead_code)]
+
+    use std::sync::atomic::{AtomicBool, AtomicU64};
+    use std::sync::{Arc, Condvar, Mutex};
+    use std::thread::{self, JoinHandle};
+    use std::time::{Duration, Instant};
+
+    use crossbeam_channel::{bounded, Sender, TrySendError};
+
+    use crate::node_config::ExecutionProfile;
+
+    use super::{ExecTask, QbindBlock, SingleThreadExecutionService, SingleThreadExecutionServiceConfig};
+
+    /// Generous failsafe for test waits; a healthy run never approaches it.
+    const FAILSAFE: Duration = Duration::from_secs(10);
+
+    // ----------------------------------------------------------------------
+    // Readiness signal (latching, bounded wait)
+    // ----------------------------------------------------------------------
+
+    /// A latching one-shot signal. Used for the worker's exit *readiness* (fired by a
+    /// drop-guard on the worker body) and, in tests, for deterministic rendezvous.
+    struct Signal {
+        state: Mutex<bool>,
+        cv: Condvar,
+    }
+    impl Signal {
+        fn new() -> Self {
+            Signal { state: Mutex::new(false), cv: Condvar::new() }
+        }
+        fn fire(&self) {
+            let mut g = self.state.lock().unwrap();
+            *g = true;
+            self.cv.notify_all();
+        }
+        /// Block until fired. Returns true if fired, false if `timeout` elapsed.
+        fn wait(&self, timeout: Duration) -> bool {
+            let g = self.state.lock().unwrap();
+            let (_g, res) = self.cv.wait_timeout_while(g, timeout, |fired| !*fired).unwrap();
+            !res.timed_out()
+        }
+    }
+
+    /// Fires a readiness `Signal` when the worker body returns (normal OR panic unwind).
+    /// Readiness is NOT an observed join; the authoritative result comes from `join`.
+    struct FireOnDrop(Arc<Signal>);
+    impl Drop for FireOnDrop {
+        fn drop(&mut self) {
+            self.0.fire();
+        }
+    }
+
+    // ----------------------------------------------------------------------
+    // Public-ish (crate-internal) outcome vocabulary
+    // ----------------------------------------------------------------------
+
+    /// Why the supervised entry refused to start.
+    #[derive(Debug)]
+    enum SupervisedInitError {
+        /// Only the memory-only `NonceOnly` profile is supported on this path.
+        UnsupportedProfile,
+        /// A persistent backend (`state_dir = Some`) is not supported here.
+        UnsupportedPersistentState,
+        /// The worker thread failed to spawn.
+        WorkerSpawn { source: std::io::Error },
+    }
+
+    /// Outcome of a supervised-view submission (mirrors the legacy mapping, on a
+    /// SEPARATE path — the legacy nonblocking `submit_block` is untouched).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum SubmitOutcome {
+        Admitted,
+        QueueFull,
+        ShuttingDown,
+    }
+
+    /// Why the limited close was refused.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum CloseRefused {
+        /// A prior successful admission makes this worker ineligible for the limited
+        /// close; admission and supervision are left unchanged.
+        Admitted,
+    }
+
+    /// Bounded observation of the worker's exit readiness. Never a termination claim.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Readiness {
+        Pending,
+        ReadyToJoin,
+    }
+
+    /// Authoritative termination evidence from an actual join.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum TermEvidence {
+        Normal,
+        Panic,
+    }
+
+    /// Result of requesting a join through the owner.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum JoinOutcome {
+        Terminated(TermEvidence),
+        /// The sole handle was already consumed by a prior join.
+        AlreadyJoined,
+    }
+
+    // ----------------------------------------------------------------------
+    // Shared admission gate (one serialization boundary)
+    // ----------------------------------------------------------------------
+
+    struct GateInner {
+        /// The SOLE task sender. The owner's eligible close `take`s it (drop →
+        /// channel disconnect → the real receive path wakes). The view never removes
+        /// it; losing all views cannot drop it while the owner holds the gate.
+        sender: Option<Sender<ExecTask>>,
+        /// Set true on the FIRST successful enqueue, under this lock.
+        admitted: bool,
+    }
+
+    /// The shared admission gate. The owner and the submit view both hold an
+    /// `Arc<SupervisedGate>`, but only the owner has the capability to remove the
+    /// sender (close); the view can only enqueue. The single `Mutex` serializes a
+    /// successful enqueue, the never-admitted eligibility check, and sender removal.
+    struct SupervisedGate {
+        inner: Mutex<GateInner>,
+    }
+
+    /// Submit-only shared view. Clonable so admission can be shared, but it exposes
+    /// only `submit`; no shutdown, no observer, no sender removal, no raw service Arc.
+    #[derive(Clone)]
+    struct SupervisedSubmitView {
+        gate: Arc<SupervisedGate>,
+    }
+    impl SupervisedSubmitView {
+        fn submit(&self, block: QbindBlock) -> SubmitOutcome {
+            let mut inner = self.gate.inner.lock().unwrap();
+            match inner.sender.as_ref() {
+                None => SubmitOutcome::ShuttingDown,
+                Some(tx) => {
+                    let task = ExecTask { block, submitted_at: Instant::now() };
+                    match tx.try_send(task) {
+                        Ok(()) => {
+                            inner.admitted = true; // record the first/each successful enqueue
+                            SubmitOutcome::Admitted
+                        }
+                        Err(TrySendError::Full(_)) => SubmitOutcome::QueueFull,
+                        Err(TrySendError::Disconnected(_)) => SubmitOutcome::ShuttingDown,
+                    }
+                }
+            }
+        }
+    }
+
+    /// The non-clonable supervising owner: sole holder of the worker `JoinHandle` and
+    /// the only party that may request the limited close.
+    struct SupervisedNonceOwner {
+        gate: Arc<SupervisedGate>,
+        handle: Option<JoinHandle<()>>,
+        ready: Arc<Signal>,
+        joined: Option<TermEvidence>,
+    }
+    impl SupervisedNonceOwner {
+        /// Limited close: eligible ONLY if the worker never had a successful admission.
+        /// On eligibility, removes the sole sender (disconnect → wakes the real receive
+        /// path). On a prior admission, refuses and leaves admission + supervision
+        /// unchanged. The eligibility check and sender removal are serialized with
+        /// enqueue under the gate lock.
+        fn try_close_idle(&self) -> Result<(), CloseRefused> {
+            let mut inner = self.gate.inner.lock().unwrap();
+            if inner.admitted {
+                return Err(CloseRefused::Admitted); // state unchanged
+            }
+            inner.sender = None; // remove the sole sender under the same serialization
+            Ok(())
+        }
+
+        /// Bounded readiness observation; retains the handle. Never a join.
+        fn observe_ready(&self, deadline: Duration) -> Readiness {
+            if self.ready.wait(deadline) {
+                Readiness::ReadyToJoin
+            } else {
+                Readiness::Pending
+            }
+        }
+
+        /// The authoritative, possibly-blocking join. Consumes the sole handle once;
+        /// a second call cannot obtain a join.
+        fn join(&mut self) -> JoinOutcome {
+            match self.handle.take() {
+                Some(h) => {
+                    let ev = match h.join() {
+                        Ok(()) => TermEvidence::Normal,
+                        Err(_) => TermEvidence::Panic,
+                    };
+                    self.joined = Some(ev);
+                    JoinOutcome::Terminated(ev)
+                }
+                None => JoinOutcome::AlreadyJoined,
+            }
+        }
+
+        fn is_admitted(&self) -> bool {
+            self.gate.inner.lock().unwrap().admitted
+        }
+        fn sender_present(&self) -> bool {
+            self.gate.inner.lock().unwrap().sender.is_some()
+        }
+    }
+
+    // ----------------------------------------------------------------------
+    // Spawn core — reuses the actual NonceOnly worker receive path
+    // ----------------------------------------------------------------------
+
+    /// Shared spawn core. Rejects unsupported configurations BEFORE creating a channel
+    /// or spawning. `worker_prelude` runs at the very start of the worker thread
+    /// (production: a no-op; tests: installs a receive-boundary gate).
+    fn spawn_core<F>(
+        config: &SingleThreadExecutionServiceConfig,
+        worker_prelude: F,
+    ) -> Result<(SupervisedNonceOwner, SupervisedSubmitView), SupervisedInitError>
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        // Refuse unsupported configurations before opening storage or spawning.
+        match config.execution_profile {
+            ExecutionProfile::NonceOnly => {}
+            _ => return Err(SupervisedInitError::UnsupportedProfile),
+        }
+        if config.state_dir.is_some() {
+            return Err(SupervisedInitError::UnsupportedPersistentState);
+        }
+
+        let (tx, rx) = bounded::<ExecTask>(config.queue_capacity);
+        let shutdown = Arc::new(AtomicBool::new(false)); // moved to worker; owner closes via sender removal
+        let queue_len = Arc::new(AtomicU64::new(0));
+        let parallel_config = config.parallel_config.clone();
+        let ready = Arc::new(Signal::new());
+        let ready_w = Arc::clone(&ready);
+
+        let handle = thread::Builder::new()
+            .name("qbind-exec-worker".to_string())
+            .spawn(move || {
+                worker_prelude();
+                // Readiness fires when the real worker body returns (normal or panic).
+                let _fire = FireOnDrop(ready_w);
+                let mut current_height: u64 = 0;
+                // The ACTUAL production NonceOnly receive path.
+                SingleThreadExecutionService::worker_loop_nonce_only(
+                    rx,
+                    shutdown,
+                    queue_len,
+                    None,
+                    parallel_config,
+                    &mut current_height,
+                );
+            })
+            .map_err(|source| SupervisedInitError::WorkerSpawn { source })?;
+
+        let gate = Arc::new(SupervisedGate {
+            inner: Mutex::new(GateInner { sender: Some(tx), admitted: false }),
+        });
+        let owner = SupervisedNonceOwner {
+            gate: Arc::clone(&gate),
+            handle: Some(handle),
+            ready,
+            joined: None,
+        };
+        let view = SupervisedSubmitView { gate };
+        Ok((owner, view))
+    }
+
+    /// Internal opt-in supervised entry (memory-only NonceOnly). Unwired; no caller.
+    fn spawn_supervised_nonce_only(
+        config: &SingleThreadExecutionServiceConfig,
+    ) -> Result<(SupervisedNonceOwner, SupervisedSubmitView), SupervisedInitError> {
+        spawn_core(config, || {})
+    }
+
+    // ----------------------------------------------------------------------
+    // Test-only deterministic receive-boundary instrumentation (per-visit)
+    // ----------------------------------------------------------------------
+
+    /// A deterministic, PER-VISIT gate at the real worker's receive boundary. On each
+    /// loop iteration the worker announces it has reached the boundary (one token per
+    /// visit) and then waits for one release token, so a test can observe *successive*
+    /// visits distinctly — a latching signal cannot. `await_visit`/`release_one` are the
+    /// test side; `worker_visit` is the worker side.
+    #[cfg(test)]
+    struct RecvBoundaryGate {
+        reached_tx: crossbeam_channel::Sender<()>,
+        reached_rx: crossbeam_channel::Receiver<()>,
+        release_tx: crossbeam_channel::Sender<()>,
+        release_rx: crossbeam_channel::Receiver<()>,
+    }
+    #[cfg(test)]
+    impl RecvBoundaryGate {
+        fn new() -> Self {
+            let (reached_tx, reached_rx) = crossbeam_channel::unbounded();
+            let (release_tx, release_rx) = crossbeam_channel::unbounded();
+            RecvBoundaryGate { reached_tx, reached_rx, release_tx, release_rx }
+        }
+        /// Test side: block until the worker reports reaching the boundary once more.
+        fn await_visit(&self) {
+            self.reached_rx
+                .recv_timeout(FAILSAFE)
+                .expect("worker reached the receive boundary");
+        }
+        /// Test side: release exactly one held visit so the worker proceeds past it.
+        fn release_one(&self) {
+            self.release_tx.send(()).expect("release one boundary visit");
+        }
+        /// Worker side: announce this visit and wait (bounded) for one release token.
+        fn worker_visit(&self) {
+            let _ = self.reached_tx.send(());
+            let _ = self.release_rx.recv_timeout(FAILSAFE);
+        }
+    }
+
+    #[cfg(test)]
+    thread_local! {
+        static RECV_GATE: std::cell::RefCell<Option<Arc<RecvBoundaryGate>>> =
+            const { std::cell::RefCell::new(None) };
+    }
+    #[cfg(test)]
+    fn install_recv_gate(gate: Arc<RecvBoundaryGate>) {
+        RECV_GATE.with(|g| *g.borrow_mut() = Some(gate));
+    }
+
+    /// Called from the real `worker_loop_nonce_only` immediately before each blocking
+    /// `receiver.recv()` (test builds only). A no-op unless a gate was installed on this
+    /// worker thread, so legacy workers are unaffected. Each call is one boundary visit.
+    #[cfg(test)]
+    pub(super) fn recv_boundary_test_hook() {
+        let gate = RECV_GATE.with(|g| g.borrow().clone());
+        if let Some(gate) = gate {
+            gate.worker_visit();
+        }
+    }
+
+    #[cfg(test)]
+    fn spawn_supervised_nonce_only_with_gate(
+        config: &SingleThreadExecutionServiceConfig,
+        gate: Arc<RecvBoundaryGate>,
+    ) -> Result<(SupervisedNonceOwner, SupervisedSubmitView), SupervisedInitError> {
+        spawn_core(config, move || install_recv_gate(gate))
+    }
+
+    #[cfg(test)]
+    impl SupervisedNonceOwner {
+        /// Test-only, well-accounted teardown step: unconditionally remove the sole
+        /// sender (disconnecting the real receive path). This is NOT the
+        /// eligibility-gated close. The readiness observation and the actual join are
+        /// performed SEPARATELY by the test, so every join — including teardown —
+        /// follows a bounded readiness check. The non-test owner algorithm is unchanged.
+        fn teardown_remove_sender(&self) {
+            let mut inner = self.gate.inner.lock().unwrap();
+            inner.sender = None;
+        }
+    }
+
+    // ----------------------------------------------------------------------
+    // Real-worker lifecycle controls (memory-only NonceOnly)
+    // ----------------------------------------------------------------------
+
+    #[cfg(test)]
+    use qbind_wire::consensus::{BlockHeader, BlockProposal};
+
+    #[cfg(test)]
+    fn make_proposal(height: u64) -> Arc<BlockProposal> {
+        Arc::new(BlockProposal {
+            header: BlockHeader {
+                version: 1,
+                chain_id: 1337,
+                epoch: 0,
+                height,
+                round: 0,
+                parent_block_id: [0u8; 32],
+                payload_hash: [height as u8; 32],
+                proposer_index: 0,
+                suite_id: 0,
+                tx_count: 0,
+                timestamp: 1704067200 + height,
+                payload_kind: 0,
+                next_epoch: 0,
+                batch_commitment: [0u8; 32],
+            },
+            qc: None,
+            txs: Vec::new(),
+            signature: Vec::new(),
+        })
+    }
+
+    #[cfg(test)]
+    fn nonce_config() -> SingleThreadExecutionServiceConfig {
+        // Default is memory-only NonceOnly (state_dir None).
+        SingleThreadExecutionServiceConfig::default()
+    }
+
+    /// Control 1: a never-admitted real worker reaches the receive boundary; the owner
+    /// close takes the sole sender; a bounded readiness observation precedes the actual
+    /// normal join, which is verified separately. Post-close submit is refused through
+    /// the same view, owner + view still alive. No task, sentinel, or external drop.
+    #[cfg(test)]
+    #[test]
+    fn never_admitted_idle_close_and_actual_join() {
+        let gate = Arc::new(RecvBoundaryGate::new());
+        let (mut owner, view) =
+            spawn_supervised_nonce_only_with_gate(&nonce_config(), Arc::clone(&gate)).expect("spawn");
+
+        gate.await_visit(); // the real worker reached the receive boundary (held there)
+        assert_eq!(owner.try_close_idle(), Ok(()), "never-admitted worker is eligible");
+        gate.release_one(); // worker proceeds into recv → disconnect → exit
+
+        // Bounded readiness observation BEFORE the actual join; then join separately.
+        assert_eq!(owner.observe_ready(FAILSAFE), Readiness::ReadyToJoin);
+        assert_eq!(
+            owner.join(),
+            JoinOutcome::Terminated(TermEvidence::Normal),
+            "the sole owner obtains the actual normal join"
+        );
+        assert_eq!(
+            view.submit(QbindBlock::empty(make_proposal(1))),
+            SubmitOutcome::ShuttingDown,
+            "post-close submit is refused through the same live view"
+        );
+    }
+
+    /// Control 2: hold the never-admitted real worker at the boundary, close through the
+    /// owner, and observe a bounded wait return Pending with the handle retained; release
+    /// the gate, observe readiness, then a real join through the SAME owner. Admission
+    /// stays closed and a second join cannot be obtained.
+    #[cfg(test)]
+    #[test]
+    fn pending_wait_then_actual_join_same_owner() {
+        let gate = Arc::new(RecvBoundaryGate::new());
+        let (mut owner, view) =
+            spawn_supervised_nonce_only_with_gate(&nonce_config(), Arc::clone(&gate)).expect("spawn");
+
+        gate.await_visit(); // worker reached and is held at the boundary
+        assert_eq!(owner.try_close_idle(), Ok(()), "eligible close removes the sole sender");
+
+        // Worker is deterministically held at the boundary → not terminated → pending.
+        assert_eq!(owner.observe_ready(Duration::from_millis(100)), Readiness::Pending);
+        assert!(owner.handle.is_some(), "a pending observation retains the handle");
+
+        gate.release_one(); // let the worker proceed to recv → disconnect → exit
+        // Bounded readiness observation BEFORE the actual join; then join separately.
+        assert_eq!(owner.observe_ready(FAILSAFE), Readiness::ReadyToJoin);
+        assert_eq!(owner.join(), JoinOutcome::Terminated(TermEvidence::Normal));
+
+        assert_eq!(
+            view.submit(QbindBlock::empty(make_proposal(2))),
+            SubmitOutcome::ShuttingDown,
+            "admission stays closed after the join"
+        );
+        assert_eq!(owner.join(), JoinOutcome::AlreadyJoined, "a second join cannot be obtained");
+    }
+
+    /// Control 3: after one real successful admission, independently observe a DISTINCT
+    /// second visit to the real receive boundary (the worker handled the one inert item
+    /// to the loop boundary under the controlled schedule — no success/persistence/
+    /// eligibility is claimed from it). AFTER that observation the same owner still
+    /// refuses the limited close, and the refusal leaves the sender, the sticky
+    /// prior-admission state, and supervision intact. A separate, well-accounted teardown
+    /// (explicit sender cleanup + gate release) precedes a bounded readiness observation
+    /// and the actual join.
+    #[cfg(test)]
+    #[test]
+    fn refuse_close_after_real_admission() {
+        let gate = Arc::new(RecvBoundaryGate::new());
+        let (mut owner, view) =
+            spawn_supervised_nonce_only_with_gate(&nonce_config(), Arc::clone(&gate)).expect("spawn");
+
+        gate.await_visit(); // first boundary visit, before any item
+        assert_eq!(
+            view.submit(QbindBlock::empty(make_proposal(1))),
+            SubmitOutcome::Admitted,
+            "one real successful admission on the actual worker path"
+        );
+        gate.release_one(); // worker receives and handles the one inert item on the real path
+
+        // DISTINCT second visit: the worker returned to the receive boundary after
+        // handling the item. (Narrow claim: handled-to-loop-boundary only.)
+        gate.await_visit();
+
+        // After that observation the limited close still refuses, leaving everything intact.
+        assert_eq!(
+            owner.try_close_idle(),
+            Err(CloseRefused::Admitted),
+            "a prior admission still refuses the limited close after the 2nd visit"
+        );
+        assert!(owner.sender_present(), "a refused close leaves the sole sender intact");
+        assert!(owner.is_admitted(), "sticky prior-admission eligibility state remains");
+        assert!(owner.handle.is_some(), "supervision (the join handle) is retained");
+
+        // Separate, well-accounted teardown: explicit sender cleanup + gate release,
+        // then a bounded readiness observation, then the actual join (verified separately).
+        owner.teardown_remove_sender();
+        gate.release_one(); // release the held second visit → worker proceeds → disconnect → exit
+        assert_eq!(owner.observe_ready(FAILSAFE), Readiness::ReadyToJoin);
+        assert_eq!(owner.join(), JoinOutcome::Terminated(TermEvidence::Normal));
+    }
+
+    /// Control 4: the serialization yields the selected results in both positions —
+    /// close-first (eligible; later submit refused) and admission-first (close refused).
+    /// Every actual join follows a bounded readiness observation, including teardown.
+    #[cfg(test)]
+    #[test]
+    fn serialization_close_first_and_admission_first() {
+        // close-first: eligible close removes the sender before any admission.
+        {
+            let (mut owner, view) = spawn_supervised_nonce_only(&nonce_config()).expect("spawn");
+            assert_eq!(owner.try_close_idle(), Ok(()));
+            assert_eq!(
+                view.submit(QbindBlock::empty(make_proposal(1))),
+                SubmitOutcome::ShuttingDown,
+                "submit after a close-first is refused"
+            );
+            assert!(!owner.is_admitted(), "no admission recorded after a close-first");
+            assert_eq!(owner.observe_ready(FAILSAFE), Readiness::ReadyToJoin);
+            assert_eq!(owner.join(), JoinOutcome::Terminated(TermEvidence::Normal));
+        }
+        // admission-first: a prior successful admission refuses the close; teardown joins.
+        {
+            let (mut owner, view) = spawn_supervised_nonce_only(&nonce_config()).expect("spawn");
+            assert_eq!(view.submit(QbindBlock::empty(make_proposal(2))), SubmitOutcome::Admitted);
+            assert_eq!(owner.try_close_idle(), Err(CloseRefused::Admitted));
+            owner.teardown_remove_sender();
+            assert_eq!(owner.observe_ready(FAILSAFE), Readiness::ReadyToJoin);
+            assert_eq!(owner.join(), JoinOutcome::Terminated(TermEvidence::Normal));
+        }
+    }
+
+    /// Control 5: unsupported configurations are refused before a channel is created or a
+    /// worker is spawned. No backend is opened.
+    #[cfg(test)]
+    #[test]
+    fn unsupported_config_refuses_before_spawn() {
+        let mut vmv0 = SingleThreadExecutionServiceConfig::default();
+        vmv0.execution_profile = ExecutionProfile::VmV0;
+        match spawn_supervised_nonce_only(&vmv0) {
+            Err(SupervisedInitError::UnsupportedProfile) => {}
+            Err(e) => panic!("expected UnsupportedProfile, got a different error: {:?}", e),
+            Ok(_) => panic!("expected UnsupportedProfile refusal, but a worker was created"),
+        }
+
+        let mut persistent = SingleThreadExecutionServiceConfig::default();
+        persistent.state_dir = Some(std::path::PathBuf::from("/tmp/r167-should-not-open"));
+        match spawn_supervised_nonce_only(&persistent) {
+            Err(SupervisedInitError::UnsupportedPersistentState) => {}
+            Err(e) => panic!("expected UnsupportedPersistentState, got a different error: {:?}", e),
+            Ok(_) => panic!("expected UnsupportedPersistentState refusal, but a worker was created"),
+        }
     }
 }
