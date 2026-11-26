@@ -1,0 +1,206 @@
+# C15(i) required-persistence single-owner candidate — combined default + test-utils validation.
+#
+# Purpose (R152): give the C15(i) correction (R149 fail-closed persistent initializer
+# + R150 single-owner harnesses) a repeatable CI gate that runs BOTH the default
+# configuration AND the `test-utils` configuration — the latter being the only one that
+# builds and runs the `t166_testnet_alpha_cluster_harness` target and the gated
+# worker-owned observation seam / genuine persistent-execution witness. On a default
+# `cargo test` the t166 target is skipped (it `required-features = ["test-utils"]`), so a
+# default-only gate would silently lose T166's 23 non-ignored cases. This workflow runs
+# the explicit targets (not test discovery) in two distinct, non-optional jobs.
+#
+# R154 (hosted native-build compatibility): the locked vendored RocksDB 8.10.0
+# (`librocksdb-sys`) does not compile under the very newest GCC/libstdc++ (reduced
+# transitive `<cstdint>` inclusion), which is what `ubuntu-latest` resolved to on the
+# R153 hosted run. This workflow therefore pins the explicitly-named `ubuntu-24.04`
+# runner and selects the GCC/G++ 12 major pair (`CC=gcc-12` / `CXX=g++-12`) for the
+# native build. Each job fails closed if that pair is unavailable or not major 12 — it
+# never silently falls back to another compiler. This is a compatibility hypothesis,
+# UNPROVEN until a hosted run passes; it is not build reproducibility and does not
+# patch, upgrade, or substitute any dependency. The accepted Rust toolchain pin
+# (1.97.0) and the six cargo commands are unchanged.
+#
+# Scope: adds/changes ONLY this workflow. It changes no source/test file, no Cargo
+# manifest or lockfile, no vendored dependency, no other workflow, no branch protection,
+# and requests only read-only permissions. It performs ordinary isolated developer tests
+# on a standard hosted runner; no deployment, release, signing, activation, or launch.
+name: qbind-node C15(i) validation
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+# Minimal, read-only. No write scopes; no packages/id-token/deployments.
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Default configuration (no features). Must stay green independently of the
+  # test-utils job; both jobs always run and their failures are visible.
+  # ---------------------------------------------------------------------------
+  default-suite:
+    name: default suite (qbind-node)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    # R154: select the RocksDB-8.10-compatible native C/C++ compiler pair for the
+    # whole job (cc-rs reads CC/CXX). The preflight step below verifies these exist
+    # and are major 12, and that no more-specific cc-rs override shadows them.
+    env:
+      CC: gcc-12
+      CXX: g++-12
+    steps:
+      - name: Checkout (PR / main ref under test)
+        uses: actions/checkout@v4
+
+      - name: Install the R150-accepted Rust toolchain (1.97.0)
+        # The C15(i) candidate's accepted combined acceptance was produced on
+        # rustc/cargo 1.97.0. There is no repository rust-toolchain file, so the
+        # tested version is pinned explicitly here rather than substituting a
+        # different `stable`. A fresh runner performs normal `--locked` dependency
+        # resolution (no offline cache is assumed).
+        run: |
+          rustup toolchain install 1.97.0 --profile minimal
+          rustup default 1.97.0
+          rustc --version
+          cargo --version
+
+      - name: Verify native C/C++ toolchain (gcc-12 / g++-12) and record provenance
+        # R155 fail-closed preflight: record runner image / OS; confirm the job's
+        # effective CC/CXX equal gcc-12/g++-12 (the pair Cargo consumes); reject any
+        # PRESENT higher-priority cc-rs override (even one set to an empty value),
+        # reporting the variable name only; then confirm gcc-12/g++-12 exist and are
+        # major 12. No full-environment dump, no credentials. Any failure is a hard
+        # exit (no silent compiler fallback).
+        run: |
+          echo "Runner image: ${ImageOS:-unknown} / ${ImageVersion:-unknown} (RUNNER_OS=${RUNNER_OS:-unknown})"
+          if [ -r /etc/os-release ]; then . /etc/os-release; echo "OS: ${PRETTY_NAME:-unknown} (VERSION_ID=${VERSION_ID:-unknown})"; fi
+          uname -srm
+          # (1) Effective-selection equality: CC/CXX are the values Cargo + cc-rs
+          #     consume. Verify they are exactly the intended pair BEFORE resolving
+          #     executables or majors, so the checks below describe what Cargo will use.
+          [ "${CC:-}" = "gcc-12" ] || { echo "FATAL: effective CC is not gcc-12 (CC=${CC:-<unset>})"; exit 1; }
+          [ "${CXX:-}" = "g++-12" ] || { echo "FATAL: effective CXX is not g++-12 (CXX=${CXX:-<unset>})"; exit 1; }
+          # (2) Reject any PRESENT higher-priority cc-rs override, INCLUDING one set to
+          #     an empty value: the pinned cc crate consults the first *present* such
+          #     variable ahead of CC/CXX, and an empty value selects no compiler (so the
+          #     native default would be used). printenv success == present (and it reads
+          #     the hyphenated names, which are not valid shell identifiers). Report the
+          #     variable NAME only — never its value.
+          for v in CC_x86_64_unknown_linux_gnu CXX_x86_64_unknown_linux_gnu \
+                   CC_x86_64-unknown-linux-gnu CXX_x86_64-unknown-linux-gnu \
+                   TARGET_CC TARGET_CXX HOST_CC HOST_CXX; do
+            if printenv "$v" >/dev/null 2>&1; then
+              echo "FATAL: higher-priority cc-rs override ${v} is set (value withheld); it would shadow CC=gcc-12 / CXX=g++-12"; exit 1
+            fi
+          done
+          # (3) The selected pair must exist and be major 12 — fail closed, no fallback.
+          command -v gcc-12
+          command -v g++-12
+          gcc-12 --version | head -n1
+          g++-12 --version | head -n1
+          cc_major="$(gcc-12 -dumpversion | cut -d. -f1)"
+          cxx_major="$(g++-12 -dumpversion | cut -d. -f1)"
+          echo "gcc-12 major=${cc_major} ; g++-12 major=${cxx_major}"
+          [ "${cc_major}" = "12" ] || { echo "FATAL: CC gcc-12 is not major version 12 (got ${cc_major})"; exit 1; }
+          [ "${cxx_major}" = "12" ] || { echo "FATAL: CXX g++-12 is not major version 12 (got ${cxx_major})"; exit 1; }
+          echo "Effective selection verified: CC=${CC} ($(command -v gcc-12)) ; CXX=${CXX} ($(command -v g++-12))"
+
+      - name: Default — locked non-test check (lib + bins)
+        run: cargo check -p qbind-node --lib --bins --locked
+
+      - name: Default — locked library tests (includes the five C15(i) controls)
+        run: cargo test -p qbind-node --lib --locked
+
+      - name: Default — locked persistent cluster harnesses (explicit targets)
+        # Explicit targets (not test discovery). `--no-fail-fast` so all three
+        # harness targets run and every failure is reported. Pre-existing
+        # `#[ignore]` cases stay ignored (no include-ignored flag is passed).
+        run: >-
+          cargo test -p qbind-node
+          --test t221_dag_coupling_cluster_tests
+          --test t222_consensus_chaos_harness
+          --test t238_multi_region_latency_harness
+          --locked --no-fail-fast
+
+  # ---------------------------------------------------------------------------
+  # `test-utils` configuration. This is the configuration that compiles and runs
+  # the T166 harness and the gated observation seam / persistent-execution
+  # witness. Required: without it, T166's coverage is silently lost.
+  # ---------------------------------------------------------------------------
+  test-utils-suite:
+    name: test-utils suite (qbind-node, incl. T166)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    # R154: same RocksDB-8.10-compatible native compiler selection as the default job.
+    env:
+      CC: gcc-12
+      CXX: g++-12
+    steps:
+      - name: Checkout (PR / main ref under test)
+        uses: actions/checkout@v4
+
+      - name: Install the R150-accepted Rust toolchain (1.97.0)
+        run: |
+          rustup toolchain install 1.97.0 --profile minimal
+          rustup default 1.97.0
+          rustc --version
+          cargo --version
+
+      - name: Verify native C/C++ toolchain (gcc-12 / g++-12) and record provenance
+        # R155 fail-closed preflight (same as the default job): record runner image /
+        # OS; confirm the job's effective CC/CXX equal gcc-12/g++-12 (the pair Cargo
+        # consumes); reject any PRESENT higher-priority cc-rs override (even one set to
+        # an empty value), reporting the variable name only; then confirm gcc-12/g++-12
+        # exist and are major 12. No full-environment dump, no credentials. Hard-exit on
+        # any failure (no silent compiler fallback).
+        run: |
+          echo "Runner image: ${ImageOS:-unknown} / ${ImageVersion:-unknown} (RUNNER_OS=${RUNNER_OS:-unknown})"
+          if [ -r /etc/os-release ]; then . /etc/os-release; echo "OS: ${PRETTY_NAME:-unknown} (VERSION_ID=${VERSION_ID:-unknown})"; fi
+          uname -srm
+          # (1) Effective-selection equality: CC/CXX are the values Cargo + cc-rs
+          #     consume. Verify they are exactly the intended pair BEFORE resolving
+          #     executables or majors, so the checks below describe what Cargo will use.
+          [ "${CC:-}" = "gcc-12" ] || { echo "FATAL: effective CC is not gcc-12 (CC=${CC:-<unset>})"; exit 1; }
+          [ "${CXX:-}" = "g++-12" ] || { echo "FATAL: effective CXX is not g++-12 (CXX=${CXX:-<unset>})"; exit 1; }
+          # (2) Reject any PRESENT higher-priority cc-rs override, INCLUDING one set to
+          #     an empty value: the pinned cc crate consults the first *present* such
+          #     variable ahead of CC/CXX, and an empty value selects no compiler (so the
+          #     native default would be used). printenv success == present (and it reads
+          #     the hyphenated names, which are not valid shell identifiers). Report the
+          #     variable NAME only — never its value.
+          for v in CC_x86_64_unknown_linux_gnu CXX_x86_64_unknown_linux_gnu \
+                   CC_x86_64-unknown-linux-gnu CXX_x86_64-unknown-linux-gnu \
+                   TARGET_CC TARGET_CXX HOST_CC HOST_CXX; do
+            if printenv "$v" >/dev/null 2>&1; then
+              echo "FATAL: higher-priority cc-rs override ${v} is set (value withheld); it would shadow CC=gcc-12 / CXX=g++-12"; exit 1
+            fi
+          done
+          # (3) The selected pair must exist and be major 12 — fail closed, no fallback.
+          command -v gcc-12
+          command -v g++-12
+          gcc-12 --version | head -n1
+          g++-12 --version | head -n1
+          cc_major="$(gcc-12 -dumpversion | cut -d. -f1)"
+          cxx_major="$(g++-12 -dumpversion | cut -d. -f1)"
+          echo "gcc-12 major=${cc_major} ; g++-12 major=${cxx_major}"
+          [ "${cc_major}" = "12" ] || { echo "FATAL: CC gcc-12 is not major version 12 (got ${cc_major})"; exit 1; }
+          [ "${cxx_major}" = "12" ] || { echo "FATAL: CXX g++-12 is not major version 12 (got ${cxx_major})"; exit 1; }
+          echo "Effective selection verified: CC=${CC} ($(command -v gcc-12)) ; CXX=${CXX} ($(command -v g++-12))"
+
+      - name: test-utils — locked non-test check (lib + bins)
+        run: cargo check -p qbind-node --lib --bins --features test-utils --locked
+
+      - name: test-utils — locked library tests (controls + persistent-execution witness)
+        run: cargo test -p qbind-node --lib --features test-utils --locked
+
+      - name: test-utils — locked T166 harness target (explicit; gated seam + witness)
+        # Explicitly runs the feature-gated T166 target that a default `cargo test`
+        # would skip. Pre-existing `#[ignore]` cases remain ignored.
+        run: >-
+          cargo test -p qbind-node
+          --test t166_testnet_alpha_cluster_harness
+          --features test-utils --locked
