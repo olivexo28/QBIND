@@ -123,6 +123,21 @@ name = "run_422_retained_decision_observation_tests"
 path = "tests/run_422_retained_decision_observation_tests.rs"
 required-features = ["test-utils"]
 
+# R150 — the T166 TestNet Alpha cluster harness now reads post-execution state
+# ONLY through the execution service's worker-owned backend, via the `test-utils`-
+# gated observation seam (`observe_account_state` / `observe_flush`). An
+# integration test crate cannot reach library-only `cfg(test)` helpers, so this
+# single harness requires the pre-existing `test-utils` feature: on a default
+# build the target is skipped (an INTENTIONAL, DISCLOSED default-suite coverage
+# relocation — see the R150 report), and `cargo test --features test-utils`
+# builds and runs the full T166 suite (its existing `#[ignore]` cases stay
+# ignored). t221/t222/t238 are NOT gated (pre-funding alone suffices; they stay
+# in the default suite). This adds no production access or new feature.
+[[test]]
+name = "t166_testnet_alpha_cluster_harness"
+path = "tests/t166_testnet_alpha_cluster_harness.rs"
+required-features = ["test-utils"]
+
 [[test]]
 name = "run_422_mandatory_timeout_policy_tests"
 path = "tests/run_422_mandatory_timeout_policy_tests.rs"
