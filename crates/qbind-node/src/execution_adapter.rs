@@ -2419,19 +2419,42 @@ mod supervised_idle_close {
     /// visit) and then waits for one release token, so a test can observe *successive*
     /// visits distinctly — a latching signal cannot. `await_visit`/`release_one` are the
     /// test side; `worker_visit` is the worker side.
+    /// R172: the unique marker carried by the ONE intentional guarded-worker panic, so
+    /// the expected worker panic is identifiable in stderr separately from any unrelated
+    /// output. The control asserts success through the owner's actual join, never via an
+    /// outer `#[should_panic]`.
+    #[cfg(test)]
+    const R172_GUARDED_WORKER_PANIC_MARKER: &str =
+        "R172-INTENTIONAL-GUARDED-NONCE-WORKER-PANIC-after-readiness-guard";
+
     #[cfg(test)]
     struct RecvBoundaryGate {
         reached_tx: crossbeam_channel::Sender<()>,
         reached_rx: crossbeam_channel::Receiver<()>,
         release_tx: crossbeam_channel::Sender<()>,
         release_rx: crossbeam_channel::Receiver<()>,
+        // R172: per-worker, opt-in one-shot fault arm + a consumption ack. Disarmed by
+        // default, so every other control's release behavior is byte-for-byte unchanged.
+        // This is NOT a global panic hook and holds no shared admission/readiness lock.
+        fault_armed: std::sync::atomic::AtomicBool,
+        fault_ack_tx: crossbeam_channel::Sender<()>,
+        fault_ack_rx: crossbeam_channel::Receiver<()>,
     }
     #[cfg(test)]
     impl RecvBoundaryGate {
         fn new() -> Self {
             let (reached_tx, reached_rx) = crossbeam_channel::unbounded();
             let (release_tx, release_rx) = crossbeam_channel::unbounded();
-            RecvBoundaryGate { reached_tx, reached_rx, release_tx, release_rx }
+            let (fault_ack_tx, fault_ack_rx) = crossbeam_channel::unbounded();
+            RecvBoundaryGate {
+                reached_tx,
+                reached_rx,
+                release_tx,
+                release_rx,
+                fault_armed: std::sync::atomic::AtomicBool::new(false),
+                fault_ack_tx,
+                fault_ack_rx,
+            }
         }
         /// Test side: block until the worker reports reaching the boundary once more.
         fn await_visit(&self) {
@@ -2444,9 +2467,32 @@ mod supervised_idle_close {
             self.release_tx.send(()).expect("release one boundary visit");
         }
         /// Worker side: announce this visit and wait (bounded) for one release token.
+        /// R172: after the release, if (and only if) this worker's fault has been armed,
+        /// announce consumption (a deterministic fixture ack) and panic deliberately —
+        /// INSIDE the guarded worker body, where the `FireOnDrop` readiness guard is
+        /// already installed, so the unwind fires readiness and the retained owner's join
+        /// observes `Panic`. No shared admission or readiness lock is held here, and no
+        /// global panic hook is used. Disarmed by default, so every other control
+        /// proceeds exactly as before.
         fn worker_visit(&self) {
             let _ = self.reached_tx.send(());
             let _ = self.release_rx.recv_timeout(FAILSAFE);
+            if self.fault_armed.load(std::sync::atomic::Ordering::SeqCst) {
+                let _ = self.fault_ack_tx.send(());
+                panic!("{}", R172_GUARDED_WORKER_PANIC_MARKER);
+            }
+        }
+        /// Test side: arm this worker's one-shot fault. Set BEFORE the matching
+        /// `release_one`, so the worker observes it just after the release token.
+        fn arm_fault(&self) {
+            self.fault_armed.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        /// Test side: block (bounded) until the worker acknowledges consuming the fault
+        /// command — deterministic proof the expected command was taken.
+        fn await_fault_ack(&self) {
+            self.fault_ack_rx
+                .recv_timeout(FAILSAFE)
+                .expect("worker consumed the armed fault command");
         }
     }
 
@@ -2685,5 +2731,212 @@ mod supervised_idle_close {
             Err(e) => panic!("expected UnsupportedPersistentState, got a different error: {:?}", e),
             Ok(_) => panic!("expected UnsupportedPersistentState refusal, but a worker was created"),
         }
+    }
+
+    // ----------------------------------------------------------------------
+    // R171: owner-abandonment characterization (memory-only NonceOnly worker)
+    //
+    // These two controls characterize the CURRENT behavior when the sole
+    // supervising owner — the only holder of the worker `JoinHandle` — is
+    // consumed (dropped with its original handle still inside) while a submit
+    // view survives. The owner is dropped WHOLE: no handle is taken out first,
+    // and no side reference to the shared admission gate or the task sender is
+    // retained. The only capabilities kept alive are the sole submit view and an
+    // independent clone of ONLY the readiness signal.
+    //
+    // After abandonment there is NO owner, hence NO observed join. Every
+    // post-abandonment observation here is strictly `exit-readiness` (the
+    // worker body returned, firing the drop-guard signal) and is NOT a
+    // termination claim, a normal-versus-panic result, an execution-success
+    // claim, a durability claim, or any reuse authorization. The pre-close
+    // `Admitted` outcome in control 1 documents an UNQUALIFIED current behavior
+    // of the unwired candidate and does NOT approve it as a shipping policy; a
+    // future owner-disposal policy is a separate design decision.
+    //
+    // Cleanup bound / gate watchdog: the deterministic `RecvBoundaryGate` is a
+    // pair of unbounded crossbeam rendezvous channels whose worker side waits
+    // with `recv_timeout(FAILSAFE)` (10 s), and whose `await_visit` likewise
+    // waits bounded. On the SUCCESS path each control explicitly drops the last
+    // view (disconnecting the sole sender) and releases the held boundary visit,
+    // so the detached worker proceeds into `recv()`, observes the disconnect,
+    // and exits. On a FAILURE (panic) path, unwinding drops the local `view`
+    // (sender disconnect) and the local gate handle, and the worker's
+    // `recv_timeout(FAILSAFE)` watchdog releases it within the bounded limit so
+    // no detached worker is left blocked indefinitely. Abandonment keeps no
+    // side gate/sender reference, so the sole sender's lifetime is governed only
+    // by the surviving view (control 1) or was already removed at close
+    // (control 2).
+
+    /// R171 control 1 — abandoned BEFORE close: a surviving submit view can still
+    /// admit one inert item after the intact owner (handle inside) is dropped,
+    /// prior to any close or admission. The worker handles the item through to a
+    /// distinct second receive-boundary entry under the controlled schedule;
+    /// dropping the last view then disconnects the sole sender and the detached
+    /// worker reaches bounded exit-readiness, observed only through the
+    /// independent cloned signal. No join, no termination/durability/reuse claim.
+    #[cfg(test)]
+    #[test]
+    fn owner_dropped_before_close_surviving_view_still_admits() {
+        let gate = Arc::new(RecvBoundaryGate::new());
+        let (owner, view) =
+            spawn_supervised_nonce_only_with_gate(&nonce_config(), Arc::clone(&gate)).expect("spawn");
+
+        gate.await_visit(); // the real worker reached the first receive boundary (held)
+
+        // Keep the sole submit view and an INDEPENDENT clone of ONLY the readiness
+        // signal. Then consume the intact owner WHOLE — its original join handle
+        // still inside — before any close or admission. No side reference to the
+        // shared admission gate or the task sender is retained.
+        let ready_clone = Arc::clone(&owner.ready);
+        assert!(owner.handle.is_some(), "the owner is abandoned with its sole handle still attached");
+        drop(owner); // detaches the worker handle; the view still holds the gate + sole sender
+
+        // The surviving view still admits one inert item (CURRENT, unqualified
+        // behavior of the unwired candidate — not a shipping-policy approval).
+        assert_eq!(
+            view.submit(QbindBlock::empty(make_proposal(1))),
+            SubmitOutcome::Admitted,
+            "a surviving view admits one inert item after the intact owner is dropped before close"
+        );
+
+        gate.release_one(); // worker receives and handles the one inert item on the real path
+
+        // DISTINCT second receive-boundary entry: the worker returned to the
+        // boundary after handling the item (handled-to-loop-boundary only — no
+        // success/persistence/eligibility is claimed from it).
+        gate.await_visit();
+
+        // Drop the last view → the sole sender disconnects; release the held 2nd
+        // visit → the detached worker proceeds into recv(), sees the disconnect,
+        // and exits. Observe bounded exit-readiness via the independent cloned
+        // signal ONLY — there is no owner and therefore no observed join.
+        drop(view);
+        gate.release_one();
+        assert!(
+            ready_clone.wait(FAILSAFE),
+            "bounded exit-readiness via the independent cloned signal (no observed join)"
+        );
+    }
+
+    /// R171 control 2 — abandoned AFTER an accepted idle close: the qualified
+    /// close on a never-admitted worker removes the sole sender; dropping the
+    /// owner (handle inside) before any join leaves the surviving view refusing
+    /// submission with `ShuttingDown`. Sender removal already happened at close.
+    /// Releasing the worker reaches bounded exit-readiness, observed only through
+    /// the independent cloned signal. No join, no termination/durability/reuse claim.
+    #[cfg(test)]
+    #[test]
+    fn owner_dropped_after_accepted_close_surviving_view_refuses() {
+        let gate = Arc::new(RecvBoundaryGate::new());
+        let (owner, view) =
+            spawn_supervised_nonce_only_with_gate(&nonce_config(), Arc::clone(&gate)).expect("spawn");
+
+        gate.await_visit(); // the real worker reached the first receive boundary (held)
+
+        // Accept the qualified close on this never-admitted worker. The close
+        // removes the sole sender under the gate lock.
+        assert_eq!(owner.try_close_idle(), Ok(()), "never-admitted worker is eligible for the idle close");
+        assert!(!owner.sender_present(), "sender removal already happened at close");
+
+        // Keep the submit view and an INDEPENDENT clone of ONLY the readiness
+        // signal; consume the intact owner WHOLE (handle inside) BEFORE joining.
+        // No side reference to the gate or the (already-removed) sender is kept.
+        let ready_clone = Arc::clone(&owner.ready);
+        assert!(owner.handle.is_some(), "the owner is abandoned with its sole handle still attached");
+        drop(owner); // abandon before any join → no observed join is possible
+
+        // The surviving view refuses submission: the sole sender was removed at close.
+        assert_eq!(
+            view.submit(QbindBlock::empty(make_proposal(1))),
+            SubmitOutcome::ShuttingDown,
+            "the surviving view refuses submission after an accepted idle close"
+        );
+
+        // Drop the last view and release the held worker; the sender was already
+        // gone at close, so recv() sees the disconnect and the worker exits.
+        // Observe bounded exit-readiness via the independent cloned signal ONLY.
+        drop(view);
+        gate.release_one();
+        assert!(
+            ready_clone.wait(FAILSAFE),
+            "bounded exit-readiness via the independent cloned signal (no observed join)"
+        );
+    }
+
+    // ----------------------------------------------------------------------
+    // R172: guarded worker panic with the owner RETAINED (memory-only NonceOnly)
+    // ----------------------------------------------------------------------
+
+    /// R172 control 8 — a guarded abnormal worker exit observed through the RETAINED
+    /// owner's actual join. A never-admitted real `NonceOnly` worker (no admission, no
+    /// close request) is driven to its first real receive boundary; an explicit,
+    /// per-worker, test-only fault command makes it panic **inside the guarded worker
+    /// body** — after the `FireOnDrop` readiness guard is installed — so the unwind fires
+    /// readiness and the SAME owner obtains authoritative `Terminated(Panic)` from the
+    /// real `JoinHandle::join` (a repeat join reports `AlreadyJoined`). After the join the
+    /// sole sender is STILL present and no admission was ever recorded, yet a submit
+    /// returns `ShuttingDown` because the receiver was lost to the unwind — the identical
+    /// outcome to an accepted idle close arising from a DIFFERENT internal state.
+    ///
+    /// Characterization only: beyond the single observed join this claims no
+    /// normal-versus-panic distribution, settlement, durability, reuse, or owner-disposal
+    /// / fault policy. The fault is a per-worker arm consumed with a deterministic ack and
+    /// a unique panic marker (identifiable in stderr); it holds no shared admission or
+    /// readiness lock and installs no global panic hook. Success is asserted on the owner,
+    /// never via an outer `#[should_panic]`. The bounded readiness wait is a diagnostic
+    /// window and does NOT bound Rust's actual join.
+    #[cfg(test)]
+    #[test]
+    fn guarded_worker_panic_owner_retained_join_observes_panic() {
+        let gate = Arc::new(RecvBoundaryGate::new());
+        let (mut owner, view) =
+            spawn_supervised_nonce_only_with_gate(&nonce_config(), Arc::clone(&gate)).expect("spawn");
+
+        // Live owner + view, zero admissions, no close request.
+        assert!(!owner.is_admitted(), "no admission before the fault");
+        assert!(owner.sender_present(), "the sole sender is present before the fault");
+
+        gate.await_visit(); // the real worker reached the first receive boundary (held)
+
+        // Arm this worker's one-shot fault BEFORE releasing, then release the held visit.
+        // The worker consumes the command (deterministic ack) and panics inside the
+        // guarded body — after the readiness guard, holding no admission/readiness lock.
+        gate.arm_fault();
+        gate.release_one();
+        gate.await_fault_ack(); // deterministic proof the expected fault command was consumed
+
+        // Bounded readiness while the SAME owner still holds the handle (a diagnostic
+        // window — it does NOT bound Rust's actual join).
+        assert_eq!(owner.observe_ready(FAILSAFE), Readiness::ReadyToJoin);
+        assert!(owner.handle.is_some(), "the retained owner still holds its sole handle");
+
+        // Authoritative termination evidence from the ACTUAL join: Panic. The repeat join
+        // cannot obtain the (already consumed) handle.
+        assert_eq!(
+            owner.join(),
+            JoinOutcome::Terminated(TermEvidence::Panic),
+            "the retained owner's real join observes the guarded worker panic"
+        );
+        assert_eq!(owner.join(), JoinOutcome::AlreadyJoined, "a second join cannot be obtained");
+
+        // After join, before cleanup: the sole sender is STILL present and no admission
+        // was ever recorded — yet a submit returns ShuttingDown because the receiver was
+        // lost when the worker unwound. Same outcome as an idle close, DIFFERENT state.
+        assert!(owner.sender_present(), "the sole sender remains present after the panic join");
+        assert!(!owner.is_admitted(), "no admission was recorded");
+        assert_eq!(
+            view.submit(QbindBlock::empty(make_proposal(1))),
+            SubmitOutcome::ShuttingDown,
+            "submit maps the now-disconnected receiver to ShuttingDown with the sender still present"
+        );
+        // The disconnected-receiver refusal leaves the gate state unchanged.
+        assert!(owner.sender_present(), "sender still present after the refused submit");
+        assert!(!owner.is_admitted(), "still no admission after the refused submit");
+
+        // Explicit fixture cleanup (success path): drop the last view and the gate; the
+        // worker already terminated via the observed panic. On a failure path the gate's
+        // recv_timeout(FAILSAFE) watchdog plus the unwinding sender-drop bound cleanup.
+        drop(view);
+        drop(gate);
     }
 }
