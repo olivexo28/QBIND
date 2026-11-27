@@ -2939,4 +2939,210 @@ mod supervised_idle_close {
         drop(view);
         drop(gate);
     }
+
+    // ----------------------------------------------------------------------
+    // R177: Option A — distinct controller + surviving supervisor (test-only)
+    //
+    // Models an explicit, supported *controller withdrawal* while a single
+    // supervisor survives. The supervisor holds the ACTUAL SupervisedNonceOwner
+    // (the shared gate, the sole JoinHandle, and the disposition). The controller
+    // is a distinct, non-clonable capability bound to its paired worker; its only
+    // power is to request a withdrawal, which commits the never-admitted fence
+    // through the supervisor's real `try_close_idle`. A successful withdrawal
+    // CONSUMES (retires) the controller ONLY after the fence commits; a refused
+    // withdrawal returns the controller unconsumed and publishes no success. These
+    // are deterministic serial schedules, not concurrent-contention evidence. The
+    // never-admitted cutoff here removes the sole sender; a general admission-state
+    // fence independent of sender removal is a separate design. Final-supervisor
+    // loss, poison/blocked-gate handling, and any disposition record that outlives
+    // the supervisor are OUT OF SCOPE (R176 §2/§5). No non-test byte is changed.
+    // ----------------------------------------------------------------------
+
+    #[cfg(test)]
+    static R177_WORKER_SEQ: AtomicU64 = AtomicU64::new(1);
+
+    /// A distinct, non-clonable controller capability bound to one worker. It is not
+    /// `Clone`/`Copy`, so it is move-only: a successful withdrawal consumes it.
+    #[cfg(test)]
+    struct TestController {
+        worker_id: u64,
+    }
+
+    /// Outcome of an explicit controller withdrawal. `Refused` carries the controller
+    /// back, so the capability is preserved (unconsumed) on refusal.
+    #[cfg(test)]
+    enum WithdrawOutcome {
+        Retired,
+        Refused(TestController),
+    }
+
+    /// The surviving supervisor: sole holder of the real owner (gate + sole JoinHandle +
+    /// disposition), plus a test-local record of the withdrawal disposition. It outlives
+    /// controller withdrawal and is the only party that observes readiness and performs
+    /// the consume-once join.
+    #[cfg(test)]
+    struct TestSupervisor {
+        owner: SupervisedNonceOwner,
+        worker_id: u64,
+        controller_retired: bool,
+    }
+    #[cfg(test)]
+    impl TestSupervisor {
+        /// Execute an explicit withdrawal requested by `controller` (which must be the one
+        /// bound to this supervisor's worker). The never-admitted cutoff is the real
+        /// `try_close_idle`: on `Ok` the fence has committed (sole sender removed under the
+        /// enqueue lock) and the controller is retired (consumed by move + state flag); on
+        /// `Err(Admitted)` the restricted withdrawal is refused, the controller is returned
+        /// unconsumed, and no success is published. A refusal leaves state unchanged.
+        fn withdraw(&mut self, controller: TestController) -> WithdrawOutcome {
+            assert_eq!(
+                controller.worker_id, self.worker_id,
+                "the controller must be bound to its paired worker"
+            );
+            match self.owner.try_close_idle() {
+                Ok(()) => {
+                    self.controller_retired = true; // directly-checked retirement state
+                    // `controller` is dropped here → retired ONLY after the fence committed
+                    WithdrawOutcome::Retired
+                }
+                Err(CloseRefused::Admitted) => WithdrawOutcome::Refused(controller),
+            }
+        }
+        fn controller_retired(&self) -> bool {
+            self.controller_retired
+        }
+        fn sender_present(&self) -> bool {
+            self.owner.sender_present()
+        }
+        fn is_admitted(&self) -> bool {
+            self.owner.is_admitted()
+        }
+        fn handle_present(&self) -> bool {
+            self.owner.handle.is_some()
+        }
+        fn observe_ready(&self, deadline: Duration) -> Readiness {
+            self.owner.observe_ready(deadline)
+        }
+        fn join(&mut self) -> JoinOutcome {
+            self.owner.join()
+        }
+        fn teardown_remove_sender(&self) {
+            self.owner.teardown_remove_sender();
+        }
+    }
+
+    /// Spawn the real memory-only NonceOnly worker and split the result into a surviving
+    /// supervisor, a distinct bound controller, and the submit view.
+    #[cfg(test)]
+    fn spawn_controller_supervisor_with_gate(
+        config: &SingleThreadExecutionServiceConfig,
+        gate: Arc<RecvBoundaryGate>,
+    ) -> Result<(TestSupervisor, TestController, SupervisedSubmitView), SupervisedInitError> {
+        let (owner, view) = spawn_supervised_nonce_only_with_gate(config, gate)?;
+        let worker_id = R177_WORKER_SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let supervisor = TestSupervisor { owner, worker_id, controller_retired: false };
+        let controller = TestController { worker_id };
+        Ok((supervisor, controller, view))
+    }
+
+    /// R177 control 9 — WITHDRAWAL-FIRST. On a never-admitted real worker the controller
+    /// withdraws under the actual enqueue cutoff; the controller retires ONLY after the
+    /// fence commits; a pre-existing view then refuses; and the SAME supervisor still holds
+    /// the sole handle and separately observes the actual normal join. Withdrawal and
+    /// joined termination are reported as DISTINCT observations.
+    #[cfg(test)]
+    #[test]
+    fn controller_withdrawal_first_supervisor_retains_handle_and_joins() {
+        let gate = Arc::new(RecvBoundaryGate::new());
+        let (mut supervisor, controller, view) =
+            spawn_controller_supervisor_with_gate(&nonce_config(), Arc::clone(&gate)).expect("spawn");
+
+        gate.await_visit(); // real worker held at the first receive boundary; no lifetime admission
+        assert!(!supervisor.is_admitted(), "never-admitted precondition");
+        assert!(supervisor.sender_present(), "sender present before withdrawal");
+
+        // Explicit withdrawal under the actual cutoff; success retires the controller
+        // (consumed by move) ONLY after the fence commits.
+        match supervisor.withdraw(controller) {
+            WithdrawOutcome::Retired => {}
+            WithdrawOutcome::Refused(_) => panic!("a never-admitted withdrawal must commit the fence"),
+        }
+
+        // Fence committed: sender removed; controller retired; a pre-existing view refuses;
+        // the SAME supervisor still holds the original sole handle.
+        assert!(!supervisor.sender_present(), "the withdrawal cutoff removed the sole sender");
+        assert!(supervisor.controller_retired(), "the controller retired after the fence committed");
+        assert_eq!(
+            view.submit(QbindBlock::empty(make_proposal(1))),
+            SubmitOutcome::ShuttingDown,
+            "a pre-existing view refuses after the withdrawal cutoff"
+        );
+        assert!(supervisor.handle_present(), "the surviving supervisor retains the sole join handle");
+
+        // Distinct observation: release the held worker, observe bounded readiness, then
+        // obtain the actual normal join through the SAME supervisor.
+        gate.release_one();
+        assert_eq!(supervisor.observe_ready(FAILSAFE), Readiness::ReadyToJoin);
+        assert_eq!(
+            supervisor.join(),
+            JoinOutcome::Terminated(TermEvidence::Normal),
+            "the surviving supervisor obtains the actual normal join after withdrawal"
+        );
+        assert_eq!(supervisor.join(), JoinOutcome::AlreadyJoined, "a second join cannot be obtained");
+    }
+
+    /// R177 control 10 — SUBMIT-FIRST. One real admission precedes the withdrawal attempt.
+    /// The authoritative inert body is retained UPSTREAM (the real `submit` consumes its
+    /// own body and returns only an outcome — R176 Correction A), so the custodian still
+    /// holds an authoritative body afterward. The restricted withdrawal is then refused
+    /// (`Err(Admitted)` via the controller), and the controller, the sender, the original
+    /// handle, and the sticky prior-admission state all remain intact. A separate, bounded
+    /// teardown performs the actual join on the retained handle. This establishes a refusal
+    /// of restricted withdrawal only; it asserts no admitted-work settlement or start/drain.
+    #[cfg(test)]
+    #[test]
+    fn controller_submit_first_withdrawal_refused_controller_and_handle_intact() {
+        let gate = Arc::new(RecvBoundaryGate::new());
+        let (mut supervisor, controller, view) =
+            spawn_controller_supervisor_with_gate(&nonce_config(), Arc::clone(&gate)).expect("spawn");
+
+        // R79: the custodian retains its OWN authoritative inert body, independent of the
+        // body handed to `submit` (which consumes it and returns only an outcome).
+        let authoritative_body = QbindBlock::empty(make_proposal(7));
+
+        gate.await_visit(); // first boundary visit, before any item
+        assert_eq!(
+            view.submit(QbindBlock::empty(make_proposal(7))),
+            SubmitOutcome::Admitted,
+            "one real successful admission on the actual worker path"
+        );
+        gate.release_one(); // worker receives and handles the one inert item
+        gate.await_visit(); // distinct second visit (handled-to-loop-boundary)
+
+        // The restricted withdrawal is refused by the sticky prior admission; the controller
+        // is returned unconsumed and no success is published.
+        let controller = match supervisor.withdraw(controller) {
+            WithdrawOutcome::Refused(c) => c,
+            WithdrawOutcome::Retired => panic!("a prior admission must refuse the restricted withdrawal"),
+        };
+        assert!(!supervisor.controller_retired(), "a refused withdrawal does not retire the controller");
+        assert!(supervisor.sender_present(), "a refused withdrawal leaves the sole sender intact");
+        assert!(supervisor.is_admitted(), "sticky prior-admission state remains true");
+        assert!(supervisor.handle_present(), "the supervisor retains the sole join handle");
+        // The upstream custodian still holds its authoritative body (submit returned none).
+        assert_eq!(authoritative_body.height(), 7, "the custodian retains its own authoritative body");
+
+        // The returned controller is still usable: a second attempt is still refused.
+        let _controller = match supervisor.withdraw(controller) {
+            WithdrawOutcome::Refused(c) => c,
+            WithdrawOutcome::Retired => panic!("still admitted: the withdrawal stays refused"),
+        };
+
+        // Separate, bounded teardown on the retained handle: remove the sender, release the
+        // held visit, observe readiness, then the actual join.
+        supervisor.teardown_remove_sender();
+        gate.release_one();
+        assert_eq!(supervisor.observe_ready(FAILSAFE), Readiness::ReadyToJoin);
+        assert_eq!(supervisor.join(), JoinOutcome::Terminated(TermEvidence::Normal));
+    }
 }
