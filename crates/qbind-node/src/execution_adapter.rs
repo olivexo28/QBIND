@@ -3355,4 +3355,363 @@ mod supervised_idle_close {
             assert_eq!(supervisor.join(), JoinOutcome::Terminated(TermEvidence::Normal));
         }
     }
+
+    // ----------------------------------------------------------------------
+    // R184 — private, unwired restricted controller-withdrawal candidate
+    // ----------------------------------------------------------------------
+    //
+    // Additive implementation of the R183 decision packet (option B). NON-TEST private
+    // items: a move-only `WithdrawalController` bound to one worker by the gate
+    // allocation's identity (a `Weak<SupervisedGate>` used for identity ONLY — never
+    // upgraded), issued ONLY by a live spawn through ONE shared issuance core; a
+    // `WithdrawalOutcome`; and `SupervisedNonceOwner::withdraw`, whose OWN short critical
+    // section mirrors the enqueue serialization. The surviving supervisor is the existing
+    // owner, which keeps the sole join handle (`withdraw` never moves or joins it).
+    //
+    // Precedence (matches R183): the wrong-worker identity check runs BEFORE any gate is
+    // locked or changed; then, under the SAME mutex as enqueue, a poisoned acquisition,
+    // sticky prior admission, and an already-absent sender are each a distinct,
+    // NON-consuming outcome. ONLY a fresh, eligible present-sender removal commits a
+    // withdrawal and consumes the token; `WrongWorker`, `PoisonedGate`, `Admitted`, and
+    // `AlreadyFenced` each return the SAME token unconsumed.
+    //
+    // No existing item is modified; `try_close_idle`, `submit`, the gate types, and the
+    // eleven integrated controls are byte-identical. Unwired: no production caller, no
+    // public API, no trait/error change. OUT OF SCOPE (R183 §2.4): queued-start drain,
+    // admitted-work settlement, external disposition record, final-supervisor loss,
+    // lost-handle recovery, general submit-poison policy, durable quarantine, controller
+    // reuse/transfer, persistence, activation.
+
+    /// Opaque, non-clonable withdrawal capability bound to exactly one supervised worker.
+    /// Move-only (NOT `Clone`/`Copy`): a committed withdrawal consumes it. Carries
+    /// identity ONLY — a `Weak<SupervisedGate>` that is NEVER upgraded (no `upgrade()` is
+    /// exposed or used), so it cannot extend the life of the gate value, the sole sender,
+    /// or the worker. The constructor is private to this module and is reachable ONLY via
+    /// `spawn_nonce_only_with_controller_core`; there is no `Default`/public constructor,
+    /// no reissue, and no transfer. Identity is always issued from a LIVE, non-empty gate
+    /// allocation, so the `Weak::new()` empty-pointer `ptr_eq` hazard cannot arise.
+    struct WithdrawalController {
+        gate_id: std::sync::Weak<SupervisedGate>, // identity only; never upgraded
+    }
+
+    /// Outcome of an explicit, identity-checked controller withdrawal. Every non-success
+    /// variant RETURNS the controller (unconsumed); only `Withdrawn` consumes it. No
+    /// `#[derive(Debug)]`: `WithdrawalController` is intentionally opaque/non-`Debug`, and
+    /// callers/tests match the outcome rather than format it.
+    enum WithdrawalOutcome {
+        /// Never admitted AND the sole sender was present → removed under the enqueue lock
+        /// (a fresh fence committed now). The controller is CONSUMED (retired).
+        Withdrawn,
+        /// The controller is not bound to this worker → refused BEFORE any lock; the SAME
+        /// controller is returned, usable on its own worker.
+        WrongWorker(WithdrawalController),
+        /// A prior successful admission → restricted withdrawal refused; controller, sole
+        /// sender, sticky admission, and sole handle all preserved; controller returned.
+        Admitted(WithdrawalController),
+        /// Never admitted, but the sole sender was ALREADY absent → an already-fenced
+        /// request; NO fresh fence; controller returned (no false success).
+        AlreadyFenced(WithdrawalController),
+        /// The gate mutex was POISONED → acquisition FAILED; NO confirmed fence; controller
+        /// returned with the cutoff UNCONFIRMED. The poisoned guard is NOT inspected here.
+        PoisonedGate(WithdrawalController),
+    }
+
+    impl SupervisedNonceOwner {
+        /// This worker's gate identity — a `Weak` downgraded from the live gate `Arc`.
+        /// Used ONLY for `Weak::ptr_eq` identity comparison; never upgraded.
+        fn gate_identity(&self) -> std::sync::Weak<SupervisedGate> {
+            std::sync::Arc::downgrade(&self.gate)
+        }
+
+        /// Explicit, identity-checked restricted withdrawal requested by `controller`.
+        /// MAY BLOCK on the gate mutex (an ordinary method, NOT a destructor); a short
+        /// critical section gives NO acquisition time bound. It NEVER joins or moves the
+        /// worker handle, and NEVER panics on a poisoned mutex. The identity check runs
+        /// BEFORE any lock, so a wrong worker is refused with no gate locked or changed.
+        /// ONLY an eligible, never-admitted, present-sender removal commits a fresh fence
+        /// and consumes the token; wrong-worker, poisoned, prior-admission, and
+        /// already-fenced each return the SAME token unconsumed.
+        fn withdraw(&self, controller: WithdrawalController) -> WithdrawalOutcome {
+            // (1) Identity FIRST — no lock taken, no state changed on mismatch.
+            if !std::sync::Weak::ptr_eq(&controller.gate_id, &self.gate_identity()) {
+                return WithdrawalOutcome::WrongWorker(controller);
+            }
+            // (2) Same serialization boundary as enqueue. Poison is a typed, non-panicking
+            //     UNCONFIRMED outcome; the poisoned guard is deliberately NOT inspected.
+            let mut inner = match self.gate.inner.lock() {
+                Ok(guard) => guard,
+                Err(_poisoned) => return WithdrawalOutcome::PoisonedGate(controller),
+            };
+            if inner.admitted {
+                return WithdrawalOutcome::Admitted(controller); // sticky; state unchanged
+            }
+            if inner.sender.is_none() {
+                return WithdrawalOutcome::AlreadyFenced(controller); // already fenced; no false success
+            }
+            inner.sender = None; // the fresh, eligible never-admitted fence commits here
+            drop(inner);
+            // `controller` is dropped here → CONSUMED only AFTER the fence committed.
+            WithdrawalOutcome::Withdrawn
+        }
+    }
+
+    /// Shared issuance core (prelude-aware): spawn the real memory-only `NonceOnly` worker
+    /// and issue its single bound controller through ONE code path, so the normal entry
+    /// and the test-gated wrapper cannot diverge (no second token constructor). The
+    /// controller's identity is downgraded from the SAME live gate `Arc` the owner holds,
+    /// so it is non-empty and worker-exact.
+    fn spawn_nonce_only_with_controller_core<F>(
+        config: &SingleThreadExecutionServiceConfig,
+        worker_prelude: F,
+    ) -> Result<(SupervisedNonceOwner, SupervisedSubmitView, WithdrawalController), SupervisedInitError>
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        let (owner, view) = spawn_core(config, worker_prelude)?;
+        let controller = WithdrawalController { gate_id: std::sync::Arc::downgrade(&owner.gate) };
+        Ok((owner, view, controller))
+    }
+
+    /// Normal, ungated private entry (memory-only `NonceOnly`). Unwired; no caller.
+    /// Supplies a no-op worker prelude and issues the controller through the shared core.
+    fn spawn_supervised_nonce_only_with_controller(
+        config: &SingleThreadExecutionServiceConfig,
+    ) -> Result<(SupervisedNonceOwner, SupervisedSubmitView, WithdrawalController), SupervisedInitError> {
+        spawn_nonce_only_with_controller_core(config, || {})
+    }
+
+    /// Test-only wrapper that installs the deterministic receive-boundary gate as the
+    /// worker prelude and issues the controller through the SAME shared core — NOT a
+    /// separate token constructor.
+    #[cfg(test)]
+    fn spawn_supervised_nonce_only_with_controller_gated(
+        config: &SingleThreadExecutionServiceConfig,
+        gate: Arc<RecvBoundaryGate>,
+    ) -> Result<(SupervisedNonceOwner, SupervisedSubmitView, WithdrawalController), SupervisedInitError> {
+        spawn_nonce_only_with_controller_core(config, move || install_recv_gate(gate))
+    }
+
+    #[cfg(test)]
+    impl WithdrawalController {
+        /// Test-only identity check: is this controller bound to `owner`'s worker gate?
+        /// Uses the same `Weak::ptr_eq` identity the production `withdraw` uses.
+        fn is_bound_to(&self, owner: &SupervisedNonceOwner) -> bool {
+            std::sync::Weak::ptr_eq(&self.gate_id, &owner.gate_identity())
+        }
+    }
+
+    // ----------------------------------------------------------------------
+    // R184 acceptance controls AC-1..AC-6 (exercise the REAL new private entry).
+    // Deterministic rendezvous via the existing `RecvBoundaryGate`; no sleeps/time
+    // bounds as a witness. AC-1/AC-3/AC-6 exercise the NORMAL UNGATED entry.
+    // (The R182 `real_gate_contention_both_winner_orders` witness overlaps the OLD close
+    // path; it supplies NO direct overlap observation for this new `withdraw` method —
+    // AC-1..AC-6 are deterministic SERIAL schedules.)
+    // ----------------------------------------------------------------------
+
+    /// AC-1 — WRONG-WORKER refusal, BOTH directions, refused BEFORE any gate change; each
+    /// returned token then succeeds on its OWN worker; both workers untouched by the
+    /// mismatched calls. Exercises the normal ungated entry; cleans up via proper closes
+    /// (the successful withdrawals) and joined observations.
+    #[cfg(test)]
+    #[test]
+    fn ac1_wrong_worker_refused_token_returned_and_usable() {
+        // Normal ungated entry: each real worker parks on its empty receive queue (never
+        // admitted), so no receive-boundary gate is needed.
+        let (mut o1, _v1, c1) =
+            spawn_supervised_nonce_only_with_controller(&nonce_config()).expect("spawn w1");
+        let (mut o2, _v2, c2) =
+            spawn_supervised_nonce_only_with_controller(&nonce_config()).expect("spawn w2");
+
+        // Both wrong-worker directions: refused with NO gate locked or changed; token back.
+        let c2 = match o1.withdraw(c2) {
+            WithdrawalOutcome::WrongWorker(c) => c,
+            _ => panic!("c2 is not bound to w1 → must be WrongWorker"),
+        };
+        let c1 = match o2.withdraw(c1) {
+            WithdrawalOutcome::WrongWorker(c) => c,
+            _ => panic!("c1 is not bound to w2 → must be WrongWorker"),
+        };
+        // Both workers untouched by the mismatched calls.
+        assert!(o1.sender_present() && !o1.is_admitted() && o1.handle.is_some());
+        assert!(o2.sender_present() && !o2.is_admitted() && o2.handle.is_some());
+        // Returned tokens still carry their own workers' identity...
+        assert!(c1.is_bound_to(&o1) && c2.is_bound_to(&o2));
+        // ...and succeed there: a fresh eligible removal commits and consumes the token.
+        match o1.withdraw(c1) {
+            WithdrawalOutcome::Withdrawn => {}
+            _ => panic!("c1 on its own worker w1 must withdraw"),
+        }
+        match o2.withdraw(c2) {
+            WithdrawalOutcome::Withdrawn => {}
+            _ => panic!("c2 on its own worker w2 must withdraw"),
+        }
+        // Proper closes committed (both senders removed) → joined observations, separately.
+        assert!(!o1.sender_present() && !o2.sender_present());
+        assert_eq!(o1.observe_ready(FAILSAFE), Readiness::ReadyToJoin);
+        assert_eq!(o1.join(), JoinOutcome::Terminated(TermEvidence::Normal));
+        assert_eq!(o2.observe_ready(FAILSAFE), Readiness::ReadyToJoin);
+        assert_eq!(o2.join(), JoinOutcome::Terminated(TermEvidence::Normal));
+    }
+
+    /// AC-2 — explicit WITHDRAWAL WINS on a never-admitted worker (fresh eligible removal,
+    /// token consumed); a pre-existing view then refuses through the real submit path; the
+    /// supervisor retains the sole handle and separately observes the actual normal join.
+    #[cfg(test)]
+    #[test]
+    fn ac2_withdrawal_wins_then_submit_refused_and_joins() {
+        let gate = Arc::new(RecvBoundaryGate::new());
+        let (mut owner, view, controller) =
+            spawn_supervised_nonce_only_with_controller_gated(&nonce_config(), Arc::clone(&gate))
+                .expect("spawn");
+        gate.await_visit(); // real worker held at the first receive boundary; never admitted
+        assert!(!owner.is_admitted() && owner.sender_present());
+
+        match owner.withdraw(controller) {
+            WithdrawalOutcome::Withdrawn => {} // token consumed only AFTER the fence committed
+            _ => panic!("a never-admitted bound withdrawal must commit the fence"),
+        }
+        assert!(!owner.sender_present() && !owner.is_admitted() && owner.handle.is_some());
+        // The pre-existing view now refuses through the real submit path.
+        assert_eq!(
+            view.submit(QbindBlock::empty(make_proposal(1))),
+            SubmitOutcome::ShuttingDown
+        );
+        // Release the held worker so it reaches the disconnected recv; then join, separately.
+        gate.release_one();
+        assert_eq!(owner.observe_ready(FAILSAFE), Readiness::ReadyToJoin);
+        assert_eq!(owner.join(), JoinOutcome::Terminated(TermEvidence::Normal));
+    }
+
+    /// AC-3 — PRIOR ADMISSION refuses the restricted withdrawal and preserves the
+    /// controller, sole sender, sticky admission, and sole handle; R79 authoritative body
+    /// retained upstream; scoped fixture cleanup is kept separate from withdrawal policy.
+    /// Exercises the normal ungated entry.
+    #[cfg(test)]
+    #[test]
+    fn ac3_prior_admission_refuses_and_preserves_controller() {
+        let (mut owner, view, controller) =
+            spawn_supervised_nonce_only_with_controller(&nonce_config()).expect("spawn");
+        // R79: retain an authoritative inert body upstream, independent of the submitted
+        // body (the real submit consumes its own body).
+        let authoritative_body = QbindBlock::empty(make_proposal(7));
+        assert_eq!(
+            view.submit(QbindBlock::empty(make_proposal(7))),
+            SubmitOutcome::Admitted
+        );
+
+        let returned = match owner.withdraw(controller) {
+            WithdrawalOutcome::Admitted(c) => c, // refused; controller returned UNCONSUMED
+            _ => panic!("a prior admission must refuse the restricted withdrawal"),
+        };
+        assert!(owner.is_admitted() && owner.sender_present() && owner.handle.is_some());
+        assert!(returned.is_bound_to(&owner), "the refused controller is the same bound token");
+        assert_eq!(authoritative_body.height(), 7, "the custodian retains its own authoritative body");
+
+        // Scoped fixture cleanup (distinct from withdrawal policy).
+        drop(returned);
+        owner.teardown_remove_sender();
+        assert_eq!(owner.observe_ready(FAILSAFE), Readiness::ReadyToJoin);
+        assert_eq!(owner.join(), JoinOutcome::Terminated(TermEvidence::Normal));
+    }
+
+    /// AC-4 — ALREADY-FENCED reported DISTINCTLY (never a false `Withdrawn`) when a token
+    /// is presented AFTER an OLD owner-side close has removed the sole sender; the token is
+    /// returned; the supervisor retains the sole handle and later observes the actual join.
+    #[cfg(test)]
+    #[test]
+    fn ac4_already_fenced_after_old_close_is_distinct() {
+        let gate = Arc::new(RecvBoundaryGate::new());
+        let (mut owner, _view, controller) =
+            spawn_supervised_nonce_only_with_controller_gated(&nonce_config(), Arc::clone(&gate))
+                .expect("spawn");
+        gate.await_visit();
+        assert!(!owner.is_admitted() && owner.sender_present());
+        // The OLD owner-side close removes the sole sender (never admitted → Ok).
+        assert!(owner.try_close_idle().is_ok());
+        assert!(!owner.sender_present());
+        // The NEW withdraw now reports already-fenced — NOT a fresh success.
+        let returned = match owner.withdraw(controller) {
+            WithdrawalOutcome::AlreadyFenced(c) => c,
+            _ => panic!("an already-absent sender must report AlreadyFenced, not Withdrawn"),
+        };
+        assert!(returned.is_bound_to(&owner));
+        assert!(!owner.sender_present() && !owner.is_admitted() && owner.handle.is_some());
+        // Cleanup: release the held worker → disconnected recv → exit → join.
+        drop(returned);
+        gate.release_one();
+        assert_eq!(owner.observe_ready(FAILSAFE), Readiness::ReadyToJoin);
+        assert_eq!(owner.join(), JoinOutcome::Terminated(TermEvidence::Normal));
+    }
+
+    /// AC-5 — a POISONED gate gives NO false success: `withdraw` returns `PoisonedGate`
+    /// (unconfirmed cutoff) without inspecting the poisoned guard; the returned token keeps
+    /// its worker identity, the original sole handle is intact, and the sender/admission
+    /// state is unchanged. The poisoned guard is used via `PoisonError::into_inner` ONLY in
+    /// test inspection/teardown, AFTER the outcome is obtained; production poison is not
+    /// repaired. An intentional unwind message is emitted by the poisoning helper.
+    #[cfg(test)]
+    #[test]
+    fn ac5_poisoned_gate_no_false_success_and_token_returned() {
+        let gate = Arc::new(RecvBoundaryGate::new());
+        let (mut owner, _view, controller) =
+            spawn_supervised_nonce_only_with_controller_gated(&nonce_config(), Arc::clone(&gate))
+                .expect("spawn");
+        gate.await_visit(); // worker held at the boundary; never admitted; sender present
+
+        // Intentionally poison the SAME gate mutex: a helper thread acquires the gate guard
+        // and panics while holding it (std marks the mutex poisoned on unwind). Join it
+        // (bounded: it panics immediately after locking) and expect the panic.
+        let poison_gate = Arc::clone(&owner.gate);
+        let poisoner = std::thread::spawn(move || {
+            let _held = poison_gate.inner.lock().unwrap();
+            panic!("R184-INTENTIONAL-GATE-POISON");
+        });
+        assert!(poisoner.join().is_err(), "the poisoning helper panicked while holding the gate");
+
+        // Production withdraw: typed, non-panicking unconfirmed outcome; guard NOT inspected.
+        let returned = match owner.withdraw(controller) {
+            WithdrawalOutcome::PoisonedGate(c) => c,
+            _ => panic!("a poisoned gate must yield PoisonedGate, never a false success"),
+        };
+        assert!(returned.is_bound_to(&owner), "the returned token keeps its worker identity");
+        assert!(owner.handle.is_some(), "the supervisor retains the original sole handle");
+
+        // Test-only inspection/teardown via `into_inner` ONLY now (after the outcome). This
+        // does NOT repair production poison — it is fixture cleanup on a doomed worker.
+        {
+            let mut guard = match owner.gate.inner.lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
+            assert!(guard.sender.is_some(), "the unconfirmed cutoff left the sole sender present");
+            assert!(!guard.admitted, "admission state is unchanged (never admitted)");
+            guard.sender = None; // fixture teardown: remove the sender (guard released next)
+        }
+        drop(returned);
+        gate.release_one(); // release the worker's receive-boundary gate → disconnected recv → exit
+        assert_eq!(owner.observe_ready(FAILSAFE), Readiness::ReadyToJoin);
+        assert_eq!(owner.join(), JoinOutcome::Terminated(TermEvidence::Normal));
+    }
+
+    /// AC-6 — dropping the controller alone is INERT: the sole sender stays live, no fence
+    /// commits, and there is no withdrawal/join evidence. A SEPARATE explicit owner-side
+    /// close then removes the sender before the bounded readiness and the actual join.
+    /// Exercises the normal ungated entry.
+    #[cfg(test)]
+    #[test]
+    fn ac6_controller_drop_is_inert_then_explicit_close_joins() {
+        let (mut owner, _view, controller) =
+            spawn_supervised_nonce_only_with_controller(&nonce_config()).expect("spawn");
+        // Dropping the controller commits no fence and yields no withdrawal/join evidence.
+        drop(controller);
+        assert!(owner.sender_present(), "controller drop leaves the sole sender live");
+        assert!(!owner.is_admitted());
+        assert!(owner.handle.is_some());
+        // A SEPARATE explicit owner-side close removes the sender; then join, separately.
+        assert!(owner.try_close_idle().is_ok());
+        assert!(!owner.sender_present());
+        assert_eq!(owner.observe_ready(FAILSAFE), Readiness::ReadyToJoin);
+        assert_eq!(owner.join(), JoinOutcome::Terminated(TermEvidence::Normal));
+    }
 }
