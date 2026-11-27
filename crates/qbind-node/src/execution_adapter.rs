@@ -3436,12 +3436,21 @@ mod supervised_idle_close {
             if !std::sync::Weak::ptr_eq(&controller.gate_id, &self.gate_identity()) {
                 return WithdrawalOutcome::WrongWorker(controller);
             }
+            // R187: opt-in contention probe — AFTER the worker-identity comparison and BEFORE
+            // ordinary gate acquisition; a no-op unless a probe is installed on this thread, so
+            // wrong-worker refusal (which touches no gate) and every production path are unaffected.
+            #[cfg(test)]
+            contention_probe_entry(&self.gate);
             // (2) Same serialization boundary as enqueue. Poison is a typed, non-panicking
             //     UNCONFIRMED outcome; the poisoned guard is deliberately NOT inspected.
             let mut inner = match self.gate.inner.lock() {
                 Ok(guard) => guard,
                 Err(_poisoned) => return WithdrawalOutcome::PoisonedGate(controller),
             };
+            // R187: opt-in holder hook — AFTER the real clean guard is obtained and BEFORE reading
+            // prior admission or sender state; a no-op unless a hold is installed on this thread.
+            #[cfg(test)]
+            contention_hold_after_lock();
             if inner.admitted {
                 return WithdrawalOutcome::Admitted(controller); // sticky; state unchanged
             }
@@ -3713,5 +3722,134 @@ mod supervised_idle_close {
         assert!(!owner.sender_present());
         assert_eq!(owner.observe_ready(FAILSAFE), Readiness::ReadyToJoin);
         assert_eq!(owner.join(), JoinOutcome::Terminated(TermEvidence::Normal));
+    }
+
+    /// R187 — witness real same-gate contention between the NEW `SupervisedNonceOwner::withdraw`
+    /// and the real `SupervisedSubmitView::submit`, in BOTH winner orders, through the real private
+    /// constructor `spawn_supervised_nonce_only_with_controller` (no old test supervisor). In each
+    /// order a holder thread parks holding the ACTUAL gate guard (via the opt-in R182 hold hook)
+    /// while the competing operation, at its OWN method entry, finds the SAME gate
+    /// `try_lock -> WouldBlock` (the opt-in probe hook). For `withdraw` the probe fires only AFTER
+    /// the worker-identity check, so wrong-worker refusal (which touches no gate) is unaffected. The
+    /// positive probe proves overlap/contention at that instant; it does NOT prove the competing
+    /// ordinary blocking call had already parked, and asserts NO acquisition/join time bound.
+    /// Deterministic channels + bounded (FAILSAFE) fixture waits; no sleeps as the witness.
+    #[cfg(test)]
+    #[test]
+    fn withdraw_gate_contention_both_winner_orders() {
+        // ---- Withdrawal wins: the NEW withdraw holds the gate; a competing submit probes ----
+        {
+            let (mut owner, view, controller) =
+                spawn_supervised_nonce_only_with_controller(&nonce_config()).expect("spawn");
+            let (held_tx, held_rx) = crossbeam_channel::unbounded::<()>();
+            let (release_tx, release_rx) = crossbeam_channel::unbounded::<()>();
+            let (wb_tx, wb_rx) = crossbeam_channel::unbounded::<bool>();
+            let hold = Arc::new(ContentionHold { held_tx, release_rx });
+            let probe = Arc::new(ContentionProbe { wouldblock_tx: wb_tx });
+
+            // Holder thread: the NEW withdraw on a bound, never-admitted controller holds the real
+            // gate guard inside withdraw (after the identity check, before the cutoff) until released.
+            let holder = std::thread::spawn(move || {
+                install_contention_hold(hold);
+                let outcome = owner.withdraw(controller);
+                (owner, outcome)
+            });
+            held_rx
+                .recv_timeout(FAILSAFE)
+                .expect("withdraw acquired and holds the gate guard");
+
+            // Prober thread: the competing real submit; its entry try_locks the SAME gate
+            // (WouldBlock witnessed), then runs its ordinary blocking lock path.
+            let prober = std::thread::spawn(move || {
+                install_contention_probe(probe);
+                view.submit(QbindBlock::empty(make_proposal(1)))
+            });
+            assert!(
+                wb_rx.recv_timeout(FAILSAFE).expect("submit probe reported"),
+                "the competing submit encounters the SAME gate held (try_lock WouldBlock)"
+            );
+
+            // Release the holder; both calls now run their existing lock/result paths.
+            let _ = release_tx.send(());
+            let (mut owner, outcome) = holder.join().expect("holder joins");
+            let submit_outcome = prober.join().expect("prober joins");
+
+            match outcome {
+                WithdrawalOutcome::Withdrawn => {}
+                _ => panic!("a never-admitted bound withdrawal must commit the fence"),
+            }
+            assert!(!owner.sender_present(), "the cutoff removed the sole sender");
+            assert!(!owner.is_admitted(), "sticky admission stays false");
+            assert!(owner.handle.is_some(), "the owner retains the original sole handle");
+            assert_eq!(
+                submit_outcome,
+                SubmitOutcome::ShuttingDown,
+                "the competing submit is refused after the withdrawal cutoff"
+            );
+            // Bounded readiness, then the actual normal join, separately.
+            assert_eq!(owner.observe_ready(FAILSAFE), Readiness::ReadyToJoin);
+            assert_eq!(owner.join(), JoinOutcome::Terminated(TermEvidence::Normal));
+        }
+
+        // ---- Submit wins: the real submit holds the gate; a competing NEW withdraw probes ----
+        {
+            let (mut owner, view, controller) =
+                spawn_supervised_nonce_only_with_controller(&nonce_config()).expect("spawn");
+            // R79: retain an authoritative inert body upstream, independent of the body handed to
+            // the real enqueue (submit consumes its own body).
+            let authoritative_body = QbindBlock::empty(make_proposal(7));
+            let (held_tx, held_rx) = crossbeam_channel::unbounded::<()>();
+            let (release_tx, release_rx) = crossbeam_channel::unbounded::<()>();
+            let (wb_tx, wb_rx) = crossbeam_channel::unbounded::<bool>();
+            let hold = Arc::new(ContentionHold { held_tx, release_rx });
+            let probe = Arc::new(ContentionProbe { wouldblock_tx: wb_tx });
+
+            // Holder thread: the real submit holds the real gate guard inside submit (before
+            // enqueue) until released.
+            let holder = std::thread::spawn(move || {
+                install_contention_hold(hold);
+                view.submit(QbindBlock::empty(make_proposal(7)))
+            });
+            held_rx
+                .recv_timeout(FAILSAFE)
+                .expect("submit acquired and holds the gate guard");
+
+            // Prober thread: the competing NEW withdraw; its entry (AFTER the identity check)
+            // try_locks the SAME gate (WouldBlock witnessed), then runs its ordinary lock path.
+            let prober = std::thread::spawn(move || {
+                install_contention_probe(probe);
+                let outcome = owner.withdraw(controller);
+                (owner, outcome)
+            });
+            assert!(
+                wb_rx.recv_timeout(FAILSAFE).expect("withdraw probe reported"),
+                "the competing withdraw encounters the SAME gate held (try_lock WouldBlock)"
+            );
+
+            let _ = release_tx.send(());
+            let submit_outcome = holder.join().expect("holder joins");
+            let (mut owner, outcome) = prober.join().expect("prober joins");
+
+            assert_eq!(submit_outcome, SubmitOutcome::Admitted, "the holding submit admits the item");
+            let returned_controller = match outcome {
+                WithdrawalOutcome::Admitted(c) => c,
+                _ => panic!("a prior admission must refuse the withdrawal with Admitted(controller)"),
+            };
+            assert!(
+                returned_controller.is_bound_to(&owner),
+                "the refused withdrawal returns the original bound controller"
+            );
+            assert!(owner.is_admitted(), "sticky prior-admission is recorded");
+            assert!(owner.sender_present(), "the sole sender remains present after the refused withdrawal");
+            assert!(owner.handle.is_some(), "the owner retains the original sole handle");
+            assert_eq!(authoritative_body.height(), 7, "the custodian retains its own authoritative body");
+
+            // Fixture cleanup (distinct from the refusal): drop the returned controller, remove the
+            // sender, then bounded readiness and the actual join.
+            drop(returned_controller);
+            owner.teardown_remove_sender();
+            assert_eq!(owner.observe_ready(FAILSAFE), Readiness::ReadyToJoin);
+            assert_eq!(owner.join(), JoinOutcome::Terminated(TermEvidence::Normal));
+        }
     }
 }
