@@ -973,6 +973,13 @@ impl SingleThreadExecutionService {
             // in tests it is a no-op unless a gate is installed on THIS worker thread
             // (only the supervised candidate's test spawns install one), so legacy
             // worker threads are unaffected.
+            // R193 (test-only): independent top-of-loop state probe — reports the REAL worker's
+            // current height and the exercised sender's actual nonce, sampled directly from the live
+            // `state`, INDEPENDENTLY of the executor-result hook. Absent from non-test builds; a no-op
+            // unless the R193 fixture installed a gate. It witnesses the denied case (state unchanged)
+            // as well as the executed case (real nonce/height change).
+            #[cfg(test)]
+            supervised_idle_close::idle_state_probe_test_hook(*current_height, &state);
             #[cfg(test)]
             supervised_idle_close::recv_boundary_test_hook();
 
@@ -982,6 +989,23 @@ impl SingleThreadExecutionService {
                     // Update queue length
                     let len = receiver.len();
                     queue_len.store(len as u64, Ordering::Relaxed);
+
+                    // R191 (test-only): one-shot start-grant checkpoint, AFTER the real dequeue
+                    // and BEFORE the first execution effect. Absent from non-test builds; a no-op
+                    // unless THIS worker installed a start-grant gate (only the R191 fixture spawn
+                    // does), so legacy workers and every other test are unaffected. A denial skips
+                    // the executor AND the height update below (continue), so a dequeued occurrence
+                    // refused a start after the common cutoff reaches NO execute_* call.
+                    #[cfg(test)]
+                    if !supervised_idle_close::start_grant_test_hook(&task.block) {
+                        continue;
+                    }
+                    // R191 (test-only): independent executor-entry witness — fired at the SOLE site
+                    // immediately preceding both the executor call and the height update, so a count
+                    // of zero proves the executor was not entered (no receipts, no state mutation,
+                    // no height advance). No-op unless a gate is installed; independent of the grant.
+                    #[cfg(test)]
+                    supervised_idle_close::executor_entry_test_hook();
 
                     // Apply the block using T157 parallel executor
                     let block_start = Instant::now();
@@ -999,6 +1023,20 @@ impl SingleThreadExecutionService {
                             let success_count =
                                 receipts.iter().filter(|r| r.success).count() as u64;
                             let error_count = receipts.iter().filter(|r| !r.success).count() as u64;
+
+                            // R192 (test-only): independent execution-EFFECT witness, fired ONLY
+                            // after the real executor returned Ok, reporting the ACTUAL success/error
+                            // counts and the advanced height for THIS occurrence. Absent from non-test
+                            // builds; a no-op unless a start-grant gate is installed on this worker
+                            // (only the R192 fixture spawn installs one). It distinguishes a denied
+                            // occurrence (no entry, no effect) from a granted one (entry AND a real
+                            // state effect), so the zero-effect oracle in A1 is discriminating.
+                            #[cfg(test)]
+                            supervised_idle_close::executor_result_test_hook(
+                                success_count,
+                                error_count,
+                                *current_height,
+                            );
 
                             // Update metrics
                             if let Some(ref m) = metrics {
@@ -3850,6 +3888,671 @@ mod supervised_idle_close {
             owner.teardown_remove_sender();
             assert_eq!(owner.observe_ready(FAILSAFE), Readiness::ReadyToJoin);
             assert_eq!(owner.join(), JoinOutcome::Terminated(TermEvidence::Normal));
+        }
+    }
+
+    // ----------------------------------------------------------------------
+    // R194 — finish A1 state and body evidence for the C05 shutdown witness
+    // ----------------------------------------------------------------------
+    // Supersedes the (unpublished) R193 witness and completes its A1 evidence on three narrow points:
+    //  1. ORDERED A1 SNAPSHOTS. A1 now requires an ordered (initial → final) pair of independent
+    //     worker-state samples, keyed to the admitted occurrence: denial `(0,0) → (0,0)`, bypass
+    //     `(0,0) → (7,1)`. A baseline-only trace is explicitly rejected (the ordered predicate needs a
+    //     distinct post-decision sample), so loss of the post-denial sample fails the test. The
+    //     independent executor-entry and executor-result checks are kept.
+    //  2. COHERENT FIXTURE BODY. `state_changing_body` now builds a synthetic proposal whose
+    //     `header.tx_count` and raw `txs` list AGREE with the ordered decoded execution input (one
+    //     transaction, encoded with the same proposal-`txs` format the sim producer uses). The bound
+    //     proposal/body is checked at the actual dequeue, and the fixture committed id stays DISTINCT
+    //     from the block's self-derived `block_id`.
+    //  3. REFUSED LATE SUBMIT AS ITS OWN OCCURRENCE. The fresh post-admission-cutoff submit is bound
+    //     as a separate refused occurrence (own id + custodian): it submits a clone of its bound body,
+    //     asserts `ShuttingDown`, records `RefusedSubmission`, verifies exact retained content, and
+    //     asserts no second dequeue. This refused action is mirrored in BOTH A1 schedules (denial and
+    //     bypass) so the two compared schedules have identical pre-decision actions.
+    // The worker-loop call sites (unchanged from R193) are #[cfg(test)]; removing them and this block
+    // reconstructs the base adapter byte-for-byte. No non-test projection, existing control, call path,
+    // or workflow changes. OUT OF SCOPE: healthy drain, cancellation, retry/replay, durability, and any
+    // settlement/retirement authority (a test observation retires nothing; custody is retained until a
+    // separate authorized protocol). Final-supervisor loss stays UNQUALIFIED.
+
+    #[cfg(test)]
+    const R194_GRANTED_WORK_FAULT_MARKER: &str = "R194-INTENTIONAL-GRANTED-WORK-FAULT";
+    #[cfg(test)]
+    const R194_RENDEZVOUS_HARNESS_ERROR: &str = "R194-RENDEZVOUS-HARNESS-ERROR";
+    #[cfg(test)]
+    const R194_MISSING_GATE_HARNESS_ERROR: &str = "R194-MISSING-GATE-EVIDENCE-DURING-GRANT";
+    /// A committed-id marker clearly DISTINCT from any `[height; 32]` self-derived block id used here.
+    #[cfg(test)]
+    const R194_COMMITTED_ID: [u8; 32] = [0xC0u8; 32];
+
+    #[cfg(test)]
+    static R194_OCCURRENCE_SEQ: AtomicU64 = AtomicU64::new(1);
+
+    /// Per-worker, opt-in start-grant gate installed on the worker thread by the R194 fixture spawn
+    /// ONLY. It holds a `Weak<SupervisedGate>` — NOT a strong `Arc` — so the parked worker never keeps
+    /// the gate or its sole sender alive. The committed-cutoff read upgrades the weak reference
+    /// transiently and releases the strong reference before any wait/executor/receive. All worker→test
+    /// events carry the occurrence id. Waits are bounded by FAILSAFE; a broken rendezvous or missing
+    /// gate evidence panics with a HARNESS marker (never a silent deny/grant/release).
+    #[cfg(test)]
+    struct StartGrantGate {
+        occurrence_id: u64,
+        probe_sender: [u8; 32],
+        expected_body: QbindBlock,
+        supervised: Mutex<Option<std::sync::Weak<SupervisedGate>>>,
+        bypass_cutoff_enforcement: AtomicBool,
+        fault_armed: AtomicBool,
+        reached_tx: crossbeam_channel::Sender<u64>,
+        dequeue_body_tx: crossbeam_channel::Sender<(u64, bool)>, // (occ, dequeued == bound body)
+        grant_ack_tx: crossbeam_channel::Sender<u64>,
+        denial_tx: crossbeam_channel::Sender<u64>,
+        pre_effect_tx: crossbeam_channel::Sender<u64>,
+        executor_entered_tx: crossbeam_channel::Sender<u64>,
+        result_tx: crossbeam_channel::Sender<(u64, u64, u64, u64)>, // (occ, success, error, new_height)
+        fault_witness_tx: crossbeam_channel::Sender<u64>,
+        state_probe_tx: crossbeam_channel::Sender<(u64, u64, u64)>, // (occ, current_height, probe nonce)
+        decision_release_rx: crossbeam_channel::Receiver<()>,
+        pre_effect_release_rx: crossbeam_channel::Receiver<()>,
+    }
+    #[cfg(test)]
+    impl StartGrantGate {
+        fn set_supervised(&self, weak: std::sync::Weak<SupervisedGate>) {
+            *self.supervised.lock().unwrap() = Some(weak);
+        }
+        /// Read committed cutoff on the REAL gate under the SAME lock as enqueue/removal, via a
+        /// TRANSIENT weak upgrade whose strong reference is dropped before this returns. Missing gate
+        /// evidence during a grant attempt fails the fixture explicitly.
+        fn cutoff_committed(&self) -> bool {
+            let weak = self
+                .supervised
+                .lock()
+                .unwrap()
+                .clone()
+                .expect("R194: the weak supervised gate is installed before the grant decision");
+            match weak.upgrade() {
+                Some(strong) => {
+                    let committed = strong.inner.lock().unwrap().sender.is_none();
+                    drop(strong); // release the transient strong reference before any wait/executor
+                    committed
+                }
+                None => panic!("{}", R194_MISSING_GATE_HARNESS_ERROR),
+            }
+        }
+    }
+    #[cfg(test)]
+    thread_local! {
+        static START_GRANT_GATE: std::cell::RefCell<Option<Arc<StartGrantGate>>> =
+            const { std::cell::RefCell::new(None) };
+    }
+    #[cfg(test)]
+    fn install_start_grant_gate(gate: Arc<StartGrantGate>) {
+        START_GRANT_GATE.with(|g| *g.borrow_mut() = Some(gate));
+    }
+    #[cfg(test)]
+    fn current_start_grant_gate() -> Option<Arc<StartGrantGate>> {
+        START_GRANT_GATE.with(|g| g.borrow().clone())
+    }
+
+    /// Top-of-loop INDEPENDENT state probe (test builds only): reports the REAL worker's current
+    /// height and the exercised sender's actual nonce, sampled from the live `state`, independently of
+    /// the executor-result hook. No-op unless a gate is installed.
+    #[cfg(test)]
+    pub(super) fn idle_state_probe_test_hook(current_height: u64, state: &super::InMemoryState) {
+        if let Some(gate) = current_start_grant_gate() {
+            let nonce = qbind_ledger::get_account_nonce(state, &gate.probe_sender);
+            let _ = gate.state_probe_tx.send((gate.occurrence_id, current_height, nonce));
+        }
+    }
+
+    /// Called from the real worker BETWEEN the dequeue and the first execution effect (test builds
+    /// only). Receives the ACTUAL dequeued block and validates it (proposal + ordered decoded txs)
+    /// against the bound authoritative body, occurrence-keyed. Then reads committed cutoff on the real
+    /// gate (transient weak upgrade) and either issues an occurrence-keyed denial or grants. Returns
+    /// true → proceed; false → the worker skips the executor + height update. No gate → true (legacy).
+    /// A broken rendezvous panics (HARNESS).
+    #[cfg(test)]
+    pub(super) fn start_grant_test_hook(dequeued: &QbindBlock) -> bool {
+        let gate = match current_start_grant_gate() {
+            Some(g) => g,
+            None => return true,
+        };
+        let occ = gate.occurrence_id;
+        let _ = gate.reached_tx.send(occ);
+        let matched = bodies_identical(dequeued, &gate.expected_body);
+        let _ = gate.dequeue_body_tx.send((occ, matched));
+        if gate.decision_release_rx.recv_timeout(FAILSAFE).is_err() {
+            panic!("{}", R194_RENDEZVOUS_HARNESS_ERROR);
+        }
+        let committed = gate.cutoff_committed();
+        let bypass = gate.bypass_cutoff_enforcement.load(std::sync::atomic::Ordering::SeqCst);
+        if committed && !bypass {
+            let _ = gate.denial_tx.send(occ);
+            return false;
+        }
+        let _ = gate.grant_ack_tx.send(occ);
+        let _ = gate.pre_effect_tx.send(occ);
+        if gate.pre_effect_release_rx.recv_timeout(FAILSAFE).is_err() {
+            panic!("{}", R194_RENDEZVOUS_HARNESS_ERROR);
+        }
+        if gate.fault_armed.load(std::sync::atomic::Ordering::SeqCst) {
+            let _ = gate.fault_witness_tx.send(occ);
+            panic!("{}", R194_GRANTED_WORK_FAULT_MARKER);
+        }
+        true
+    }
+    /// Independent executor-ENTRY witness (test builds only). Occurrence-keyed; no-op unless gated.
+    #[cfg(test)]
+    pub(super) fn executor_entry_test_hook() {
+        if let Some(gate) = current_start_grant_gate() {
+            let _ = gate.executor_entered_tx.send(gate.occurrence_id);
+        }
+    }
+    /// Independent execution-EFFECT witness, AFTER the real executor returned Ok (test builds only).
+    #[cfg(test)]
+    pub(super) fn executor_result_test_hook(success_count: u64, error_count: u64, new_height: u64) {
+        if let Some(gate) = current_start_grant_gate() {
+            let _ = gate
+                .result_tx
+                .send((gate.occurrence_id, success_count, error_count, new_height));
+        }
+    }
+
+    /// One recorded disposition per occurrence (one-shot).
+    #[cfg(test)]
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    enum OccurrenceDisposition {
+        RefusedSubmission,
+        AdmittedUngranted,
+        GrantedEffectsUnknown,
+        TerminatedNormalUnsettled,
+        TerminatedPanicUnsettled,
+    }
+    /// A distinct upstream R79 custodian: retains the EXACT authoritative body and a fixture-supplied
+    /// committed id (DISTINCT from `block_id`), bound to a unique local occurrence, before submit.
+    #[cfg(test)]
+    struct OccurrenceCustodian {
+        occurrence_id: u64,
+        committed_id: [u8; 32],
+        body: QbindBlock,
+        disposition: Option<OccurrenceDisposition>,
+    }
+    #[cfg(test)]
+    impl OccurrenceCustodian {
+        fn bind(occurrence_id: u64, committed_id: [u8; 32], body: QbindBlock) -> Self {
+            OccurrenceCustodian { occurrence_id, committed_id, body, disposition: None }
+        }
+        fn record(&mut self, d: OccurrenceDisposition) {
+            assert!(self.disposition.is_none(), "one recorded disposition per occurrence");
+            self.disposition = Some(d);
+        }
+    }
+
+    /// The proposal-`txs` blob encoding used by the sim producer (`hotstuff_node_sim`): the existing
+    /// fixture encoding facility. sender‖nonce(le)‖payload_len(le)‖payload‖sig_len(le)‖sig‖suite_id(le).
+    #[cfg(test)]
+    fn encode_fixture_tx(tx: &super::QbindTransaction) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&tx.sender);
+        bytes.extend_from_slice(&tx.nonce.to_le_bytes());
+        bytes.extend_from_slice(&(tx.payload.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&tx.payload);
+        bytes.extend_from_slice(&(tx.signature.bytes.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&tx.signature.bytes);
+        bytes.extend_from_slice(&tx.suite_id.to_le_bytes());
+        bytes
+    }
+
+    /// The synthetic proposal's declared `tx_count` and raw `txs` list AGREE with the ordered decoded
+    /// execution input (each raw blob is the encoding of the corresponding decoded transaction).
+    #[cfg(test)]
+    fn body_is_coherent(b: &QbindBlock) -> bool {
+        b.proposal.header.tx_count as usize == b.txs.len()
+            && b.proposal.txs.len() == b.txs.len()
+            && b.proposal
+                .txs
+                .iter()
+                .zip(b.txs.iter())
+                .all(|(raw, tx)| *raw == encode_fixture_tx(tx))
+    }
+
+    /// Field-by-field, ORDERED body-content equality (NOT `tx_count()==tx_count()`): block id, parent,
+    /// view, the full proposal (stable authoritative bytes via `BlockProposal: PartialEq` — which now
+    /// includes a coherent `tx_count` and raw `txs` list), tx count, and each transaction's sender,
+    /// nonce, and payload bytes in order.
+    #[cfg(test)]
+    fn bodies_identical(a: &QbindBlock, b: &QbindBlock) -> bool {
+        if a.block_id != b.block_id || a.parent_id != b.parent_id || a.view != b.view {
+            return false;
+        }
+        if *a.proposal != *b.proposal {
+            return false;
+        }
+        if a.txs.len() != b.txs.len() {
+            return false;
+        }
+        a.txs
+            .iter()
+            .zip(b.txs.iter())
+            .all(|(x, y)| x.sender == y.sender && x.nonce == y.nonce && x.payload == y.payload)
+    }
+
+    /// Build ONE valid, deterministic, state-changing NonceOnly body: a single fresh-sender, nonce-0
+    /// transaction. The synthetic proposal is COHERENT — `header.tx_count == 1` and `proposal.txs`
+    /// carries the encoded blob of that one transaction — so the declared count/list agree with the
+    /// ordered decoded execution input. The real executor applies it (`success_count == 1`,
+    /// exercised-sender nonce 0→1, height → `height`). `height` stays well below `R194_COMMITTED_ID`'s
+    /// byte so `block_id = [height; 32]` is DISTINCT from the custodian's committed id.
+    #[cfg(test)]
+    fn state_changing_body(height: u64, sender_tag: u8) -> QbindBlock {
+        let tx = super::QbindTransaction::new([sender_tag; 32], 0, b"r194-state-change".to_vec());
+        let mut proposal = (*make_proposal(height)).clone();
+        proposal.header.tx_count = 1;
+        proposal.txs = vec![encode_fixture_tx(&tx)];
+        QbindBlock::new(Arc::new(proposal), vec![tx])
+    }
+
+    /// Drain all currently-available state-probe samples (occ, current_height, probe-sender nonce).
+    #[cfg(test)]
+    fn drain_state_probes(
+        rx: &crossbeam_channel::Receiver<(u64, u64, u64)>,
+    ) -> Vec<(u64, u64, u64)> {
+        let mut v = Vec::new();
+        while let Ok(p) = rx.try_recv() {
+            v.push(p);
+        }
+        v
+    }
+
+    /// Require an ORDERED (initial, final) pair of independent worker-state samples, all keyed to
+    /// `occ`. Returns `((init_height, init_nonce), (final_height, final_nonce))`, or `None` when fewer
+    /// than two samples exist (so a baseline-only trace is rejected) or any sample keys to a different
+    /// occurrence.
+    #[cfg(test)]
+    fn ordered_snapshots(
+        probes: &[(u64, u64, u64)],
+        occ: u64,
+    ) -> Option<((u64, u64), (u64, u64))> {
+        if probes.len() < 2 || !probes.iter().all(|(o, _, _)| *o == occ) {
+            return None;
+        }
+        let first = probes.first().unwrap();
+        let last = probes.last().unwrap();
+        Some(((first.1, first.2), (last.1, last.2)))
+    }
+
+    /// Spawn the real memory-only NonceOnly worker with the start-grant gate installed as the worker
+    /// prelude, then hand the gate the owner's WEAK gate identity (worker keeps neither gate nor sender
+    /// alive).
+    #[cfg(test)]
+    fn spawn_start_gated(
+        config: &SingleThreadExecutionServiceConfig,
+        gate: Arc<StartGrantGate>,
+    ) -> Result<(SupervisedNonceOwner, SupervisedSubmitView, WithdrawalController), SupervisedInitError>
+    {
+        let gate_for_prelude = Arc::clone(&gate);
+        let (owner, view, controller) =
+            spawn_nonce_only_with_controller_core(config, move || {
+                install_start_grant_gate(gate_for_prelude)
+            })?;
+        gate.set_supervised(owner.gate_identity());
+        Ok((owner, view, controller))
+    }
+
+    /// Test-side ends of a `StartGrantGate` (all worker→test events occurrence-keyed).
+    #[cfg(test)]
+    struct GateEnds {
+        reached_rx: crossbeam_channel::Receiver<u64>,
+        dequeue_body_rx: crossbeam_channel::Receiver<(u64, bool)>,
+        grant_ack_rx: crossbeam_channel::Receiver<u64>,
+        denial_rx: crossbeam_channel::Receiver<u64>,
+        pre_effect_rx: crossbeam_channel::Receiver<u64>,
+        executor_entered_rx: crossbeam_channel::Receiver<u64>,
+        result_rx: crossbeam_channel::Receiver<(u64, u64, u64, u64)>,
+        fault_witness_rx: crossbeam_channel::Receiver<u64>,
+        state_probe_rx: crossbeam_channel::Receiver<(u64, u64, u64)>,
+        decision_release_tx: crossbeam_channel::Sender<()>,
+        pre_effect_release_tx: crossbeam_channel::Sender<()>,
+    }
+    #[cfg(test)]
+    fn new_start_grant_gate(
+        occurrence_id: u64,
+        probe_sender: [u8; 32],
+        expected_body: QbindBlock,
+    ) -> (Arc<StartGrantGate>, GateEnds) {
+        let (reached_tx, reached_rx) = crossbeam_channel::unbounded::<u64>();
+        let (dequeue_body_tx, dequeue_body_rx) = crossbeam_channel::unbounded::<(u64, bool)>();
+        let (grant_ack_tx, grant_ack_rx) = crossbeam_channel::unbounded::<u64>();
+        let (denial_tx, denial_rx) = crossbeam_channel::unbounded::<u64>();
+        let (pre_effect_tx, pre_effect_rx) = crossbeam_channel::unbounded::<u64>();
+        let (executor_entered_tx, executor_entered_rx) = crossbeam_channel::unbounded::<u64>();
+        let (result_tx, result_rx) = crossbeam_channel::unbounded::<(u64, u64, u64, u64)>();
+        let (fault_witness_tx, fault_witness_rx) = crossbeam_channel::unbounded::<u64>();
+        let (state_probe_tx, state_probe_rx) = crossbeam_channel::unbounded::<(u64, u64, u64)>();
+        let (decision_release_tx, decision_release_rx) = crossbeam_channel::unbounded::<()>();
+        let (pre_effect_release_tx, pre_effect_release_rx) = crossbeam_channel::unbounded::<()>();
+        let gate = Arc::new(StartGrantGate {
+            occurrence_id,
+            probe_sender,
+            expected_body,
+            supervised: Mutex::new(None),
+            bypass_cutoff_enforcement: AtomicBool::new(false),
+            fault_armed: AtomicBool::new(false),
+            reached_tx,
+            dequeue_body_tx,
+            grant_ack_tx,
+            denial_tx,
+            pre_effect_tx,
+            executor_entered_tx,
+            result_tx,
+            fault_witness_tx,
+            state_probe_tx,
+            decision_release_rx,
+            pre_effect_release_rx,
+        });
+        let ends = GateEnds {
+            reached_rx,
+            dequeue_body_rx,
+            grant_ack_rx,
+            denial_rx,
+            pre_effect_rx,
+            executor_entered_rx,
+            result_rx,
+            fault_witness_rx,
+            state_probe_rx,
+            decision_release_tx,
+            pre_effect_release_tx,
+        };
+        (gate, ends)
+    }
+
+    /// A0 — zero admissions preserved; the start-grant/effect seam is inert when no gate is installed.
+    #[cfg(test)]
+    #[test]
+    fn r194_a0_zero_admission_preserved_seam_inert() {
+        let (mut owner, _view, controller) =
+            spawn_supervised_nonce_only_with_controller(&nonce_config()).expect("spawn");
+        assert!(!owner.is_admitted(), "never admitted");
+        match owner.withdraw(controller) {
+            WithdrawalOutcome::Withdrawn => {}
+            _ => panic!("A0: a never-admitted withdrawal must still commit the fence"),
+        }
+        assert!(!owner.sender_present() && !owner.is_admitted() && owner.handle.is_some());
+        assert_eq!(owner.observe_ready(FAILSAFE), Readiness::ReadyToJoin);
+        assert_eq!(owner.join(), JoinOutcome::Terminated(TermEvidence::Normal));
+    }
+
+    /// R194 ownership witness — idle disconnect WITHOUT explicit sender removal (unchanged from the
+    /// accepted R193 fix). Because the fixture holds only a WEAK gate reference, dropping the external
+    /// supervisor, view, and controller (WITHOUT `teardown_remove_sender`) drops the gate and its sole
+    /// sender → disconnect → wake, observed through a TEST-OWNED cloned readiness signal and a
+    /// TEST-OWNED handle. Final-supervisor loss remains UNQUALIFIED; this is a bounded idle-wake only.
+    #[cfg(test)]
+    #[test]
+    fn r194_idle_disconnect_without_explicit_sender_removal() {
+        let occ = R194_OCCURRENCE_SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let body = state_changing_body(11, 0xD1);
+        let (gate, _ends) = new_start_grant_gate(occ, [0xD1u8; 32], body);
+        let (mut owner, view, controller) =
+            spawn_start_gated(&nonce_config(), Arc::clone(&gate)).expect("spawn");
+        let ready_probe = Arc::clone(&owner.ready);
+        let handle = owner.handle.take().expect("the supervisor still holds the sole handle");
+        assert!(owner.sender_present(), "the sole sender is present before releasing external holders");
+        drop(owner);
+        drop(view);
+        drop(controller);
+        assert!(
+            ready_probe.wait(FAILSAFE),
+            "idle disconnect without explicit sender removal must wake the parked worker"
+        );
+        assert!(handle.join().is_ok(), "the worker joins normally after idle disconnect");
+    }
+
+    /// A1 — admit ONE tagged occurrence carrying a VALID, COHERENT state-changing body; acknowledge the
+    /// real dequeue AND validate the dequeued block against the bound body; commit the common cutoff;
+    /// bind a fresh post-cutoff submit as its OWN refused occurrence (ShuttingDown, exact body retained,
+    /// no second dequeue); then release the decision. The worker issues an occurrence-keyed denial →
+    /// zero entry, zero effect, and the ordered independent snapshots are `(0,0) → (0,0)`. NEGATIVE
+    /// CONTROL — the IDENTICAL pre-decision schedule (same body, same cutoff, same refused late submit)
+    /// with enforcement bypassed enters the executor and the ordered snapshots are `(0,0) → (7,1)`. A
+    /// baseline-only trace is rejected in both. Committed ids distinct from block_id; bodies retained.
+    #[cfg(test)]
+    #[test]
+    fn r194_a1_admitted_then_cutoff_then_denied_no_effect() {
+        // ---- Denied schedule ----
+        let occ = R194_OCCURRENCE_SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let canonical = state_changing_body(7, 0xA1);
+        assert_eq!(canonical.block_id, [7u8; 32], "self-derived block id is the payload hash");
+        assert!(body_is_coherent(&canonical), "fixture body: proposal count/txs agree with decoded input");
+        let (gate, ends) = new_start_grant_gate(occ, [0xA1u8; 32], canonical.clone());
+        let (mut owner, view, _controller) =
+            spawn_start_gated(&nonce_config(), Arc::clone(&gate)).expect("spawn");
+        let mut custodian = OccurrenceCustodian::bind(occ, R194_COMMITTED_ID, canonical.clone());
+        assert_ne!(custodian.committed_id, custodian.body.block_id, "committed id distinct from block_id");
+        assert_eq!(view.submit(canonical.clone()), SubmitOutcome::Admitted);
+        assert!(owner.is_admitted(), "sticky admission recorded");
+        assert_eq!(ends.reached_rx.recv_timeout(FAILSAFE).expect("A1: real dequeue acknowledged"), occ);
+        assert_eq!(
+            ends.dequeue_body_rx.recv_timeout(FAILSAFE).expect("A1: dequeue-body report"),
+            (occ, true),
+            "the ACTUAL dequeued task matches the bound coherent body"
+        );
+        owner.teardown_remove_sender();
+        assert!(!owner.sender_present(), "cutoff removed the sole sender");
+        // Fresh post-admission-cutoff submit, bound as its OWN refused occurrence.
+        let (late_disp, late_occ) = a1_refused_late_submit(&view);
+        assert_eq!(late_disp, OccurrenceDisposition::RefusedSubmission);
+        assert_ne!(late_occ, occ, "the refused late submit is a distinct occurrence");
+        ends.decision_release_tx.send(()).expect("release the grant decision");
+        assert_eq!(ends.denial_rx.recv_timeout(FAILSAFE).expect("A1: worker issued a denial"), occ);
+        assert_eq!(owner.observe_ready(FAILSAFE), Readiness::ReadyToJoin);
+        assert_eq!(owner.join(), JoinOutcome::Terminated(TermEvidence::Normal));
+        assert!(ends.executor_entered_rx.try_recv().is_err(), "A1: ZERO executor entry");
+        assert!(ends.result_rx.try_recv().is_err(), "A1: ZERO execution effect");
+        assert!(ends.grant_ack_rx.try_recv().is_err(), "A1: no grant acknowledged");
+        assert!(ends.reached_rx.try_recv().is_err(), "A1: no second dequeue (late submit refused)");
+        // ORDERED independent snapshots: a baseline-only trace is rejected; require (0,0) → (0,0).
+        let probes = drain_state_probes(&ends.state_probe_rx);
+        assert!(!probes.is_empty(), "A1: the independent state probe fired");
+        assert!(
+            ordered_snapshots(&probes[..1], occ).is_none(),
+            "A1: a baseline-only trace is rejected (ordered initial+final required)"
+        );
+        let (init, fin) = ordered_snapshots(&probes, occ).expect("A1: ordered baseline+final snapshots");
+        assert_eq!(init, (0, 0), "A1 denial baseline (height,nonce) = (0,0)");
+        assert_eq!(fin, (0, 0), "A1 denial post-decision (height,nonce) = (0,0)");
+        custodian.record(OccurrenceDisposition::AdmittedUngranted);
+        assert_eq!(custodian.disposition, Some(OccurrenceDisposition::AdmittedUngranted));
+        assert!(bodies_identical(&custodian.body, &canonical) && custodian.body.height() == 7);
+
+        // ---- NEGATIVE CONTROL: identical pre-decision schedule, enforcement bypassed ----
+        let occ2 = R194_OCCURRENCE_SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let body2 = state_changing_body(7, 0xA1);
+        assert!(body_is_coherent(&body2));
+        let (gate2, ends2) = new_start_grant_gate(occ2, [0xA1u8; 32], body2.clone());
+        gate2.bypass_cutoff_enforcement.store(true, std::sync::atomic::Ordering::SeqCst);
+        let (mut owner2, view2, _c2) =
+            spawn_start_gated(&nonce_config(), Arc::clone(&gate2)).expect("spawn");
+        assert_eq!(view2.submit(body2.clone()), SubmitOutcome::Admitted);
+        assert_eq!(ends2.reached_rx.recv_timeout(FAILSAFE).expect("dequeue ack (bypass)"), occ2);
+        assert_eq!(ends2.dequeue_body_rx.recv_timeout(FAILSAFE).expect("dequeue-body (bypass)"), (occ2, true));
+        owner2.teardown_remove_sender();
+        assert!(!owner2.sender_present());
+        // IDENTICAL pre-decision action: the same refused late submit, bound as its own occurrence.
+        let (late_disp2, late_occ2) = a1_refused_late_submit(&view2);
+        assert_eq!(late_disp2, OccurrenceDisposition::RefusedSubmission);
+        assert_ne!(late_occ2, occ2);
+        ends2.decision_release_tx.send(()).expect("release decision (bypass)");
+        assert_eq!(ends2.grant_ack_rx.recv_timeout(FAILSAFE).expect("bypass grants"), occ2);
+        assert_eq!(ends2.pre_effect_rx.recv_timeout(FAILSAFE).expect("held pre-effect"), occ2);
+        ends2.pre_effect_release_tx.send(()).expect("release pre-effect");
+        assert_eq!(ends2.executor_entered_rx.recv_timeout(FAILSAFE).expect("entered (bypass)"), occ2);
+        let (rocc, success, errors, height) =
+            ends2.result_rx.recv_timeout(FAILSAFE).expect("real effect observed (bypass)");
+        assert_eq!((rocc, success, errors, height), (occ2, 1, 0, 7), "bypass: real applied effect");
+        assert_eq!(owner2.observe_ready(FAILSAFE), Readiness::ReadyToJoin);
+        assert_eq!(owner2.join(), JoinOutcome::Terminated(TermEvidence::Normal));
+        assert!(ends2.reached_rx.try_recv().is_err(), "bypass: no second dequeue (late submit refused)");
+        let probes2 = drain_state_probes(&ends2.state_probe_rx);
+        assert!(
+            ordered_snapshots(&probes2[..1], occ2).is_none(),
+            "bypass: a baseline-only trace is rejected"
+        );
+        let (init2, fin2) = ordered_snapshots(&probes2, occ2).expect("bypass ordered snapshots");
+        assert_eq!(init2, (0, 0), "bypass baseline (0,0)");
+        assert_eq!(fin2, (7, 1), "bypass post-decision (7,1) — real nonce/height change");
+    }
+
+    /// Shared refused-late-submit action for both A1 schedules: bind a fresh occurrence, submit a clone
+    /// of its bound body AFTER the admitted-work cutoff, require `ShuttingDown`, record the refusal, and
+    /// verify the exact retained body. Returns `(disposition, occurrence_id)`.
+    #[cfg(test)]
+    fn a1_refused_late_submit(view: &SupervisedSubmitView) -> (OccurrenceDisposition, u64) {
+        let late_occ = R194_OCCURRENCE_SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let late_body = state_changing_body(7, 0xA1);
+        let mut late_custodian = OccurrenceCustodian::bind(late_occ, R194_COMMITTED_ID, late_body.clone());
+        assert_ne!(late_custodian.committed_id, late_custodian.body.block_id);
+        assert_eq!(
+            view.submit(late_body.clone()),
+            SubmitOutcome::ShuttingDown,
+            "a fresh submit after the admitted-work cutoff is refused, admitting nothing"
+        );
+        late_custodian.record(OccurrenceDisposition::RefusedSubmission);
+        assert!(
+            bodies_identical(&late_custodian.body, &late_body),
+            "the refused occurrence retains its exact body in custody"
+        );
+        (late_custodian.disposition.unwrap(), late_occ)
+    }
+
+    /// A2 — grant the one-shot start BEFORE the cutoff (occurrence-keyed ack + dequeued-body match);
+    /// held at pre-effect; cutoff committed; release → granted work enters the real executor AFTER
+    /// cutoff with a REAL effect (success 1, height 2), confirmed by the ordered probe `(0,0) → (2,1)`.
+    /// Disposition `GrantedEffectsUnknown`. Schedule unchanged from R193 (grant-ack order preserved).
+    #[cfg(test)]
+    #[test]
+    fn r194_a2_grant_before_cutoff_executes_after_cutoff() {
+        let occ = R194_OCCURRENCE_SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let canonical = state_changing_body(2, 0xB2);
+        assert!(body_is_coherent(&canonical));
+        let (gate, ends) = new_start_grant_gate(occ, [0xB2u8; 32], canonical.clone());
+        let (mut owner, view, _controller) =
+            spawn_start_gated(&nonce_config(), Arc::clone(&gate)).expect("spawn");
+        let mut custodian = OccurrenceCustodian::bind(occ, R194_COMMITTED_ID, canonical.clone());
+        assert_ne!(custodian.committed_id, custodian.body.block_id);
+        assert_eq!(view.submit(canonical.clone()), SubmitOutcome::Admitted);
+        assert_eq!(ends.reached_rx.recv_timeout(FAILSAFE).expect("A2: dequeue ack"), occ);
+        assert_eq!(ends.dequeue_body_rx.recv_timeout(FAILSAFE).expect("A2: dequeue-body"), (occ, true));
+        ends.decision_release_tx.send(()).expect("release decision");
+        assert_eq!(ends.grant_ack_rx.recv_timeout(FAILSAFE).expect("A2: grant acknowledged"), occ);
+        assert_eq!(ends.pre_effect_rx.recv_timeout(FAILSAFE).expect("held before first effect"), occ);
+        owner.teardown_remove_sender();
+        assert!(!owner.sender_present(), "cutoff committed while the grant is held");
+        ends.pre_effect_release_tx.send(()).expect("release past the pre-effect hold");
+        assert_eq!(ends.executor_entered_rx.recv_timeout(FAILSAFE).expect("entered after cutoff"), occ);
+        let (rocc, success, errors, height) =
+            ends.result_rx.recv_timeout(FAILSAFE).expect("A2: real effect after cutoff");
+        assert_eq!((rocc, success, errors, height), (occ, 1, 0, 2));
+        custodian.record(OccurrenceDisposition::GrantedEffectsUnknown);
+        assert!(bodies_identical(&custodian.body, &canonical));
+        assert_eq!(owner.observe_ready(FAILSAFE), Readiness::ReadyToJoin);
+        assert_eq!(owner.join(), JoinOutcome::Terminated(TermEvidence::Normal));
+        let probes = drain_state_probes(&ends.state_probe_rx);
+        let (init, fin) = ordered_snapshots(&probes, occ).expect("A2 ordered snapshots");
+        assert_eq!(init, (0, 0), "A2 baseline (0,0)");
+        assert_eq!(fin, (2, 1), "A2 post-cutoff execution (height 2, nonce 1)");
+    }
+
+    /// A3 — a NEW submit through the REAL view after an idle (never-admitted) cutoff returns
+    /// `ShuttingDown`, admits nothing, and the upstream custodian keeps the exact body (committed id
+    /// distinct from block_id).
+    #[cfg(test)]
+    #[test]
+    fn r194_a3_submit_after_idle_cutoff_refused() {
+        let occ = R194_OCCURRENCE_SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let (mut owner, view, _controller) =
+            spawn_supervised_nonce_only_with_controller(&nonce_config()).expect("spawn");
+        let canonical = state_changing_body(9, 0xA3);
+        let mut custodian = OccurrenceCustodian::bind(occ, R194_COMMITTED_ID, canonical.clone());
+        assert_ne!(custodian.committed_id, custodian.body.block_id);
+        assert!(owner.try_close_idle().is_ok(), "cutoff closes admission (never admitted)");
+        assert!(!owner.sender_present());
+        assert_eq!(
+            view.submit(canonical.clone()),
+            SubmitOutcome::ShuttingDown,
+            "A3: a new submit after the idle cutoff is refused, admitting nothing"
+        );
+        assert!(!owner.is_admitted(), "no admission from a refused submit");
+        custodian.record(OccurrenceDisposition::RefusedSubmission);
+        assert!(bodies_identical(&custodian.body, &canonical) && custodian.body.height() == 9);
+        assert_eq!(owner.observe_ready(FAILSAFE), Readiness::ReadyToJoin);
+        assert_eq!(owner.join(), JoinOutcome::Terminated(TermEvidence::Normal));
+    }
+
+    /// A4 — bounded wait and observed termination class on granted work (schedule unchanged from R193).
+    /// NORMAL: grant (ack) → held → bounded `Pending` with the ORIGINAL handle → cutoff → release →
+    /// real entry + effect → consuming join `Terminated(Normal)`. PANIC: an opt-in guarded fault is
+    /// witnessed (occurrence-keyed, pre-executor) and unwinds BEFORE entry → join `Terminated(Panic)`,
+    /// no entry/effect; repeat join `AlreadyJoined`. The dequeued block is validated against the bound body.
+    #[cfg(test)]
+    #[test]
+    fn r194_a4_bounded_wait_then_termination_normal_and_panic() {
+        // ---- Normal termination ----
+        {
+            let occ = R194_OCCURRENCE_SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let canonical = state_changing_body(5, 0xA4);
+            let (gate, ends) = new_start_grant_gate(occ, [0xA4u8; 32], canonical.clone());
+            let (mut owner, view, _controller) =
+                spawn_start_gated(&nonce_config(), Arc::clone(&gate)).expect("spawn");
+            let mut custodian = OccurrenceCustodian::bind(occ, R194_COMMITTED_ID, canonical.clone());
+            assert_eq!(view.submit(canonical.clone()), SubmitOutcome::Admitted);
+            assert_eq!(ends.reached_rx.recv_timeout(FAILSAFE).expect("dequeue ack"), occ);
+            assert_eq!(ends.dequeue_body_rx.recv_timeout(FAILSAFE).expect("dequeue-body"), (occ, true));
+            ends.decision_release_tx.send(()).expect("release decision");
+            assert_eq!(ends.grant_ack_rx.recv_timeout(FAILSAFE).expect("granted"), occ);
+            assert_eq!(ends.pre_effect_rx.recv_timeout(FAILSAFE).expect("held pre-effect"), occ);
+            assert_eq!(owner.observe_ready(Duration::from_millis(100)), Readiness::Pending);
+            assert!(owner.handle.is_some(), "the supervisor retains the original handle");
+            owner.teardown_remove_sender();
+            ends.pre_effect_release_tx.send(()).expect("release pre-effect");
+            assert_eq!(ends.executor_entered_rx.recv_timeout(FAILSAFE).expect("entered"), occ);
+            let (rocc, success, _errors, height) =
+                ends.result_rx.recv_timeout(FAILSAFE).expect("real effect");
+            assert_eq!((rocc, success, height), (occ, 1, 5));
+            assert_eq!(owner.observe_ready(FAILSAFE), Readiness::ReadyToJoin);
+            assert_eq!(owner.join(), JoinOutcome::Terminated(TermEvidence::Normal));
+            custodian.record(OccurrenceDisposition::TerminatedNormalUnsettled);
+            assert!(bodies_identical(&custodian.body, &canonical), "effects unsettled; exact body retained");
+        }
+        // ---- Panic termination (opt-in guarded fault on granted work) ----
+        {
+            let occ = R194_OCCURRENCE_SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let canonical = state_changing_body(6, 0xA5);
+            let (gate, ends) = new_start_grant_gate(occ, [0xA5u8; 32], canonical.clone());
+            gate.fault_armed.store(true, std::sync::atomic::Ordering::SeqCst);
+            let (mut owner, view, _controller) =
+                spawn_start_gated(&nonce_config(), Arc::clone(&gate)).expect("spawn");
+            let mut custodian = OccurrenceCustodian::bind(occ, R194_COMMITTED_ID, canonical.clone());
+            assert_eq!(view.submit(canonical.clone()), SubmitOutcome::Admitted);
+            assert_eq!(ends.reached_rx.recv_timeout(FAILSAFE).expect("dequeue ack"), occ);
+            assert_eq!(ends.dequeue_body_rx.recv_timeout(FAILSAFE).expect("dequeue-body"), (occ, true));
+            ends.decision_release_tx.send(()).expect("release decision");
+            assert_eq!(ends.grant_ack_rx.recv_timeout(FAILSAFE).expect("granted"), occ);
+            assert_eq!(ends.pre_effect_rx.recv_timeout(FAILSAFE).expect("held pre-effect"), occ);
+            owner.teardown_remove_sender();
+            ends.pre_effect_release_tx.send(()).expect("release pre-effect");
+            assert_eq!(
+                ends.fault_witness_rx.recv_timeout(FAILSAFE).expect("guarded fault fired"),
+                occ,
+                "the injected guarded fault is witnessed, occurrence-keyed, pre-executor"
+            );
+            assert_eq!(owner.observe_ready(FAILSAFE), Readiness::ReadyToJoin);
+            assert_eq!(owner.join(), JoinOutcome::Terminated(TermEvidence::Panic));
+            assert!(ends.executor_entered_rx.try_recv().is_err(), "the faulted grant never entered the executor");
+            assert!(ends.result_rx.try_recv().is_err(), "no effect from a faulted grant");
+            custodian.record(OccurrenceDisposition::TerminatedPanicUnsettled);
+            assert!(bodies_identical(&custodian.body, &canonical), "adverse outcome preserved; body retained");
+            assert_eq!(owner.join(), JoinOutcome::AlreadyJoined, "a repeat join obtains no result");
         }
     }
 }
