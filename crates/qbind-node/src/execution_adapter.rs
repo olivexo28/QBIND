@@ -981,6 +981,8 @@ impl SingleThreadExecutionService {
             #[cfg(test)]
             supervised_idle_close::idle_state_probe_test_hook(*current_height, &state);
             #[cfg(test)]
+            supervised_start_checkpoint::prod_state_probe_test_hook(*current_height, &state);
+            #[cfg(test)]
             supervised_idle_close::recv_boundary_test_hook();
 
             // Receive next task (blocking)
@@ -989,6 +991,35 @@ impl SingleThreadExecutionService {
                     // Update queue length
                     let len = receiver.len();
                     queue_len.store(len as u64, Ordering::Relaxed);
+
+                    // R198/R199 (production, opt-in): fail-closed start checkpoint for the private
+                    // supervised-start candidate. Worker MODE is explicit and independent of the
+                    // authority lookup: a legacy worker never entered candidate mode, so the decision
+                    // returns StartOutcome::Legacy with NO gate lock and existing behavior is
+                    // unchanged. A candidate worker (R199: entered candidate mode at spawn) consults
+                    // its per-worker Weak authority under the SAME mutex as admission and cutoff and
+                    // validates the dequeued work against the EXACT occurrence bound on the single
+                    // admission (R200: the block self-id AND the ordered execution input, so a dequeued
+                    // body sharing a self-id but carrying different execution input is denied here,
+                    // before effects); a Deny (candidate mode without installed authority / committed
+                    // cutoff / missing / poisoned / inconsistent occurrence / different execution input
+                    // / second one-shot entry) skips the executor AND the height update below
+                    // (continue), before any irreversible effect, with no fallback to legacy
+                    // execution. The pause/bypass/observe/fault hooks are #[cfg(test)] (deterministic
+                    // timing + enforcement-bypass discrimination only).
+                    #[cfg(test)]
+                    supervised_start_checkpoint::prod_decision_pause_test_hook(&task.block);
+                    let r198_start = supervised_start_checkpoint::prod_start_decision(&task.block);
+                    #[cfg(test)]
+                    let r198_start =
+                        supervised_start_checkpoint::prod_maybe_bypass_test_hook(r198_start);
+                    #[cfg(test)]
+                    supervised_start_checkpoint::prod_decision_observed_test_hook(r198_start);
+                    if matches!(r198_start, supervised_start_checkpoint::StartOutcome::Deny) {
+                        continue;
+                    }
+                    #[cfg(test)]
+                    supervised_start_checkpoint::prod_granted_pre_effect_test_hook();
 
                     // R191 (test-only): one-shot start-grant checkpoint, AFTER the real dequeue
                     // and BEFORE the first execution effect. Absent from non-test builds; a no-op
@@ -1006,6 +1037,8 @@ impl SingleThreadExecutionService {
                     // no height advance). No-op unless a gate is installed; independent of the grant.
                     #[cfg(test)]
                     supervised_idle_close::executor_entry_test_hook();
+                    #[cfg(test)]
+                    supervised_start_checkpoint::prod_executor_entry_test_hook();
 
                     // Apply the block using T157 parallel executor
                     let block_start = Instant::now();
@@ -1033,6 +1066,12 @@ impl SingleThreadExecutionService {
                             // state effect), so the zero-effect oracle in A1 is discriminating.
                             #[cfg(test)]
                             supervised_idle_close::executor_result_test_hook(
+                                success_count,
+                                error_count,
+                                *current_height,
+                            );
+                            #[cfg(test)]
+                            supervised_start_checkpoint::prod_executor_result_test_hook(
                                 success_count,
                                 error_count,
                                 *current_height,
@@ -4554,5 +4593,1657 @@ mod supervised_idle_close {
             assert!(bodies_identical(&custodian.body, &canonical), "adverse outcome preserved; body retained");
             assert_eq!(owner.join(), JoinOutcome::AlreadyJoined, "a repeat join obtains no result");
         }
+    }
+}
+
+// ============================================================================
+// R198 — private, unwired, memory-only NonceOnly production-build prototype:
+// explicit lifetime admission + fail-closed one-shot start decision at the shared
+// worker's pre-executor checkpoint (owner-authorized opt-in branch).
+// ============================================================================
+//
+// This is a LOCAL, UNWIRED prototype. It reuses the real `worker_loop_nonce_only`
+// through one owner-authorized opt-in production branch: `prod_start_decision()` is
+// compiled in all builds. R199: worker MODE is explicit and independent of the
+// authority lookup — a worker that never entered candidate mode returns
+// `StartOutcome::Legacy` WITHOUT taking any gate lock, so legacy memory-only workers
+// (and the VmV0 path, which uses a different loop) are behaviorally unchanged, while a
+// candidate worker whose authority is NOT installed FAILS CLOSED (Deny) rather than
+// silently running the legacy path. The candidate worker consults its per-worker
+// `Weak<SupervisedProdGate>` authority under the SAME mutex that serializes successful
+// enqueue, cutoff, and the one-shot start decision, and validates the dequeued work
+// against the EXACT generation-scoped occurrence bound on the single admission (R200:
+// the block self-id AND the ordered execution input — the self-id alone is insufficient,
+// since bodies can share a self-id while carrying different execution input whose effects
+// differ); a committed cutoff, a missing/poisoned authority, an inconsistent occurrence
+// (generation mismatch), different/missing execution input, or a second one-shot entry all
+// FAIL CLOSED (Deny) before the executor and the height update — never a fallback to legacy
+// execution. The candidate enforces ONE lifetime admission explicitly (even after a
+// dequeue frees queue capacity), keeps cutoff refusal distinct from capacity/lifetime
+// refusal, returns the refused body to the caller so upstream custody is preserved
+// exactly, and reports owner/submit poison as TYPED unresolved outcomes (never a silent
+// successful cutoff/admission). A distinct owner `close_admission` can cut off after
+// that single success. The worker keeps only a `Weak` across receive; the transient
+// strong ref + guard are released before any wait/executor/join. The pause/release
+// rendezvous, the enforcement bypass, the occurrence tamper, and the injected guarded
+// fault are all `#[cfg(test)]`. UNWIRED: no production caller, no authoritative
+// committed-ID / exact-body custody source, no settlement; final-supervisor loss
+// remains UNQUALIFIED; C05 OPEN.
+mod supervised_start_checkpoint {
+    #![allow(dead_code)]
+
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use std::sync::{Arc, Condvar, Mutex, Weak};
+    use std::thread::{self, JoinHandle};
+    use std::time::{Duration, Instant};
+
+    use crossbeam_channel::{bounded, Sender, TrySendError};
+
+    use crate::node_config::ExecutionProfile;
+    use super::{ExecTask, QbindBlock, SingleThreadExecutionService, SingleThreadExecutionServiceConfig};
+    #[cfg(test)]
+    use qbind_wire::consensus::{BlockHeader, BlockProposal};
+
+    #[cfg(test)]
+    const FAILSAFE: Duration = Duration::from_secs(10);
+    #[cfg(test)]
+    const R198_FAULT_MARKER: &str = "R198-INTENTIONAL-GRANTED-WORK-FAULT";
+    #[cfg(test)]
+    const R198_RENDEZVOUS_HARNESS_ERROR: &str = "R198-RENDEZVOUS-HARNESS-ERROR";
+    /// A committed-id marker distinct from any `[height; 32]` self-derived block id used here.
+    #[cfg(test)]
+    const R198_COMMITTED_ID: [u8; 32] = [0xC1u8; 32];
+
+    /// Per-spawn generation, binding an installed authority to exactly one gate.
+    static PROD_GENERATION_SEQ: AtomicU64 = AtomicU64::new(1);
+
+    /// The production decision returned at the shared-loop pre-executor checkpoint.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(super) enum StartOutcome {
+        /// No candidate authority installed on this worker → legacy behavior, no gate lock taken.
+        Legacy,
+        /// Candidate: start granted (cutoff not committed at the moment of decision).
+        Grant,
+        /// Candidate: fail-closed denial (committed cutoff / missing / poisoned / inconsistent
+        /// occurrence / second one-shot entry), returned BEFORE any irreversible effect.
+        Deny,
+    }
+
+    /// Latching one-shot signal (self-contained copy; mirrors the idle-close `Signal`).
+    struct ProdSignal {
+        state: Mutex<bool>,
+        cv: Condvar,
+    }
+    impl ProdSignal {
+        fn new() -> Self {
+            ProdSignal { state: Mutex::new(false), cv: Condvar::new() }
+        }
+        fn fire(&self) {
+            let mut g = self.state.lock().unwrap();
+            *g = true;
+            self.cv.notify_all();
+        }
+        fn wait(&self, timeout: Duration) -> bool {
+            let g = self.state.lock().unwrap();
+            let (_g, res) = self.cv.wait_timeout_while(g, timeout, |fired| !*fired).unwrap();
+            !res.timed_out()
+        }
+    }
+    struct FireProdReady(Arc<ProdSignal>);
+    impl Drop for FireProdReady {
+        fn drop(&mut self) {
+            self.0.fire();
+        }
+    }
+
+    #[derive(Debug)]
+    pub(super) enum ProdInitError {
+        UnsupportedProfile,
+        UnsupportedPersistentState,
+        WorkerSpawn { source: std::io::Error },
+    }
+
+    /// Candidate submit outcome. Cutoff (`ShuttingDown`), capacity (`QueueFull`), the lifetime
+    /// one-admission limit (`LifetimeExhausted`), and a poisoned gate (`Poisoned`) are DISTINCT
+    /// refusals. R199: every refusal returns the refused `QbindBlock` to the caller so upstream body
+    /// custody is preserved exactly (never dropped), and poison is a typed refusal — never a silent
+    /// admission.
+    #[derive(Debug)]
+    enum ProdSubmitOutcome {
+        Admitted,
+        QueueFull(QbindBlock),
+        ShuttingDown(QbindBlock),
+        LifetimeExhausted(QbindBlock),
+        Poisoned(QbindBlock),
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum ProdReadiness {
+        Pending,
+        ReadyToJoin,
+    }
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum ProdTerm {
+        Normal,
+        Panic,
+    }
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum ProdJoin {
+        Terminated(ProdTerm),
+        AlreadyJoined,
+    }
+
+    /// Candidate gate: successful enqueue, cutoff, and the one-shot grant decision all serialize on
+    /// `inner`. `admissions_used` enforces the lifetime bound; `closed` is the owner cutoff;
+    /// `grant_decided` makes the start decision one-shot.
+    struct ProdGateInner {
+        sender: Option<Sender<ExecTask>>,
+        admissions_used: u32,
+        closed: bool,
+        grant_decided: bool,
+        /// R200: the exact generation-scoped binding recorded on the single successful admission (the
+        /// admitting generation + the exact admitted-task encoding, incl. ordered execution input); the
+        /// pre-executor decision validates the dequeued work against it. `None` until an admission
+        /// binds it.
+        occurrence: Option<OccurrenceBinding>,
+    }
+    struct SupervisedProdGate {
+        inner: Mutex<ProdGateInner>,
+        generation: u64,
+    }
+
+    /// Per-worker authority: a `Weak` to the gate (never a strong/sender-owning ref) plus the
+    /// generation it is bound to (an inconsistent generation fails closed).
+    #[derive(Clone)]
+    struct ProdAuthority {
+        gate: Weak<SupervisedProdGate>,
+        generation: u64,
+    }
+
+    /// R199: the explicit per-worker mode, set at spawn INDEPENDENTLY of whether an authority is
+    /// installed. Legacy (the const default for every non-candidate worker) selects the existing
+    /// behavior with no gate lock; Candidate opts into the fail-closed decision even when the
+    /// authority is absent.
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum WorkerMode {
+        Legacy,
+        Candidate,
+    }
+
+    thread_local! {
+        static PROD_MODE: std::cell::Cell<WorkerMode> =
+            const { std::cell::Cell::new(WorkerMode::Legacy) };
+        static PROD_AUTHORITY: std::cell::RefCell<Option<ProdAuthority>> =
+            const { std::cell::RefCell::new(None) };
+    }
+    /// Enter candidate mode on this worker. Called by the candidate spawn prelude BEFORE (and
+    /// independently of) any authority install, so "deliberate candidate selection" is distinct from
+    /// "authority availability".
+    fn enter_candidate_mode() {
+        PROD_MODE.with(|c| c.set(WorkerMode::Candidate));
+    }
+    fn current_mode() -> WorkerMode {
+        PROD_MODE.with(|c| c.get())
+    }
+    fn install_prod_authority(a: ProdAuthority) {
+        PROD_AUTHORITY.with(|c| *c.borrow_mut() = Some(a));
+    }
+    fn current_authority() -> Option<ProdAuthority> {
+        PROD_AUTHORITY.with(|c| c.borrow().clone())
+    }
+
+    /// R200: the EXACT admitted-task occurrence encoding, derived IDENTICALLY at admission (bind, under
+    /// the gate lock) and at the pre-executor decision (validate, under the gate lock). It captures the
+    /// block's self-identity (block id / parent id / view) AND the ORDERED EXECUTION INPUT (every
+    /// decoded transaction's sender, nonce, payload, signature and suite id, in order) — because the
+    /// block's self-id ALONE is insufficient evidence: two coherent bodies can share a self-id while
+    /// carrying different execution input, whose effects differ. This is a candidate-only exact body
+    /// binding over the existing `QbindBlock` representation; it adds NO protocol identity and performs
+    /// NO consensus verification. Production.
+    fn occurrence_encoding(block: &QbindBlock) -> Vec<u8> {
+        let mut v = Vec::new();
+        v.extend_from_slice(&block.block_id);
+        v.extend_from_slice(&block.parent_id);
+        v.extend_from_slice(&block.view.to_le_bytes());
+        v.extend_from_slice(&(block.txs.len() as u64).to_le_bytes());
+        for tx in &block.txs {
+            v.extend_from_slice(&tx.sender);
+            v.extend_from_slice(&tx.nonce.to_le_bytes());
+            v.extend_from_slice(&(tx.payload.len() as u64).to_le_bytes());
+            v.extend_from_slice(&tx.payload);
+            v.extend_from_slice(&(tx.signature.bytes.len() as u64).to_le_bytes());
+            v.extend_from_slice(&tx.signature.bytes);
+            v.extend_from_slice(&tx.suite_id.to_le_bytes());
+        }
+        v
+    }
+
+    /// R200: the generation-scoped binding recorded on the single successful admission. It pins the
+    /// admitting generation AND the exact admitted-task encoding, so the decision can reject either a
+    /// cross-generation reuse or a dequeued body whose ordered execution input differs from the
+    /// admitted one (even when the block self-id matches).
+    #[derive(Clone)]
+    struct OccurrenceBinding {
+        generation: u64,
+        encoding: Vec<u8>,
+    }
+
+    /// PRODUCTION decision at the worker's pre-executor checkpoint (compiled in all builds). R199: a
+    /// worker that never entered candidate mode → `Legacy` with NO gate lock (unchanged legacy
+    /// behavior). A candidate worker with NO installed authority → `Deny` (fail-closed; never legacy).
+    /// Otherwise a one-shot, fail-closed read under the SAME mutex as admission/cutoff: a dead gate
+    /// (`upgrade` None), a generation mismatch, a poisoned mutex, a second entry, a missing occurrence
+    /// binding, or a binding that does not match the dequeued work each yield `Deny`; otherwise
+    /// `sender.is_none() || closed` ⇒ `Deny`, else `Grant`. The transient strong reference and the
+    /// guard are dropped before returning, so the worker holds no gate across the subsequent
+    /// wait/executor/join.
+    pub(super) fn prod_start_decision(dequeued: &QbindBlock) -> StartOutcome {
+        // R203 (test-only observation; no production effect): a function-scope trace declared FIRST, so
+        // it is dropped LAST — strictly after the mutex guard and the transient strong `Arc` on EVERY
+        // path, including the early fail-closed denials below. Each branch stores its class into the
+        // trace's pending cell from the SINGLE real authority lookup / Weak upgrade / mutex lock /
+        // occurrence check the decision itself performs (no duplicate probes). The pending class is
+        // emitted by the trace's `Drop`, which skips emission while `std::thread::panicking()` so a
+        // panic is never recorded as a normal decision class. Absent from every non-test build; the
+        // `#[cfg(test)]` branch stores add only braces around the unchanged `return StartOutcome::Deny`
+        // statements — stripping every `#[cfg(test)]` item yields the exact R200 decision projection.
+        #[cfg(test)]
+        let trace = RawClassTrace::new();
+        // R199: deliberate mode first — legacy workers take no lock and are behavior-neutral.
+        match current_mode() {
+            WorkerMode::Legacy => return StartOutcome::Legacy,
+            WorkerMode::Candidate => {}
+        }
+        // Candidate mode: a missing installation is a fail-closed denial, NOT legacy execution.
+        let auth = match current_authority() {
+            None => {
+                #[cfg(test)]
+                trace.set(DecisionClass::MissingAuthority);
+                return StartOutcome::Deny; // fail-closed: candidate mode, authority not installed
+            }
+            Some(a) => a,
+        };
+        let strong = match auth.gate.upgrade() {
+            None => {
+                #[cfg(test)]
+                trace.set(DecisionClass::DeadGate);
+                return StartOutcome::Deny; // fail-closed: dead Weak (missing gate)
+            }
+            Some(s) => s,
+        };
+        if strong.generation != auth.generation {
+            #[cfg(test)]
+            trace.set(DecisionClass::WrongGeneration);
+            return StartOutcome::Deny; // fail-closed: inconsistent occurrence
+        }
+        // R200: the EXACT admitted-task encoding of the actual dequeued work (self-id + ordered
+        // execution input), derived identically to the admission-time binding. Computed outside the
+        // lock.
+        let encoding = occurrence_encoding(dequeued);
+        let committed = {
+            let mut inner = match strong.inner.lock() {
+                Err(_) => {
+                    #[cfg(test)]
+                    trace.set(DecisionClass::Poisoned);
+                    return StartOutcome::Deny; // fail-closed: poisoned
+                }
+                Ok(g) => g,
+            };
+            if inner.grant_decided {
+                #[cfg(test)]
+                trace.set(DecisionClass::OneShot);
+                return StartOutcome::Deny; // one-shot: a second dequeue is denied
+            }
+            inner.grant_decided = true;
+            // R200: the dequeued work must match the EXACT occurrence bound on the single admission —
+            // both the admitting generation and the ordered execution input. A dequeued body sharing
+            // the block self-id but carrying different execution input is DENIED here, before effects.
+            match &inner.occurrence {
+                None => {
+                    #[cfg(test)]
+                    trace.set(DecisionClass::NoOccurrence);
+                    return StartOutcome::Deny; // fail-closed: no admitted occurrence
+                }
+                Some(b) if b.generation != strong.generation => {
+                    #[cfg(test)]
+                    trace.set(DecisionClass::OccurrenceMismatch);
+                    return StartOutcome::Deny; // cross-generation
+                }
+                Some(b) if b.encoding != encoding => {
+                    #[cfg(test)]
+                    trace.set(DecisionClass::OccurrenceMismatch);
+                    return StartOutcome::Deny; // different execution input
+                }
+                Some(_) => {}
+            }
+            inner.closed || inner.sender.is_none()
+        };
+        // R201 (test-only observation; no production effect): the VALIDATED generation-scoped admitted
+        // key from the successful mode+authority+generation+occurrence comparison above. Captured after
+        // the mutex is released and carried to test observers only on a real grant. Absent from every
+        // non-test build, so the production decision/return is byte-for-byte unchanged.
+        #[cfg(test)]
+        let checked_key = strong.generation;
+        drop(strong);
+        if committed {
+            #[cfg(test)]
+            trace.set(DecisionClass::CommittedCutoff);
+            StartOutcome::Deny
+        } else {
+            // R203 (test-only): the raw grant classification is stored in the trace and emitted by its
+            // `Drop` after this frame's resources unwind; the checked key is recorded for the grant/
+            // execution witnesses (also only after `strong` was dropped above).
+            #[cfg(test)]
+            trace.set(DecisionClass::Grant);
+            #[cfg(test)]
+            record_checked_key(checked_key);
+            StartOutcome::Grant
+        }
+    }
+
+    struct ProdSubmitView {
+        gate: Arc<SupervisedProdGate>,
+    }
+    impl ProdSubmitView {
+        /// Enqueue under the gate lock. R199: a poisoned gate is a TYPED `Poisoned` refusal first (the
+        /// body is never admitted). Then cutoff (`ShuttingDown`); then the explicit lifetime bound
+        /// (`LifetimeExhausted`) checked BEFORE `try_send` so a dequeue that freed capacity does NOT
+        /// re-open admission; then capacity (`QueueFull`). Every refusal returns the refused body so
+        /// the caller retains exact custody. On the single success the occurrence is bound.
+        fn submit(&self, block: QbindBlock) -> ProdSubmitOutcome {
+            let mut inner = match self.gate.inner.lock() {
+                Err(_) => return ProdSubmitOutcome::Poisoned(block), // typed; never a silent admission
+                Ok(g) => g,
+            };
+            if inner.closed {
+                return ProdSubmitOutcome::ShuttingDown(block);
+            }
+            if inner.sender.is_none() {
+                return ProdSubmitOutcome::ShuttingDown(block);
+            }
+            if inner.admissions_used >= 1 {
+                return ProdSubmitOutcome::LifetimeExhausted(block);
+            }
+            let encoding = occurrence_encoding(&block);
+            let generation = self.gate.generation;
+            let task = ExecTask { block, submitted_at: Instant::now() };
+            let tx = inner.sender.as_ref().unwrap();
+            match tx.try_send(task) {
+                Ok(()) => {
+                    inner.admissions_used += 1;
+                    // R200: bind the EXACT admitted task (generation + ordered execution input) on the
+                    // single success.
+                    inner.occurrence = Some(OccurrenceBinding { generation, encoding });
+                    ProdSubmitOutcome::Admitted
+                }
+                Err(TrySendError::Full(t)) => ProdSubmitOutcome::QueueFull(t.block),
+                Err(TrySendError::Disconnected(t)) => ProdSubmitOutcome::ShuttingDown(t.block),
+            }
+        }
+    }
+
+    /// R199: typed owner cutoff outcome. A poisoned gate is reported as `Poisoned` and is NOT treated
+    /// as a successful cutoff/settlement.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum ProdCloseOutcome {
+        Closed,
+        Poisoned,
+    }
+
+    struct ProdOwner {
+        gate: Arc<SupervisedProdGate>,
+        handle: Option<JoinHandle<()>>,
+        ready: Arc<ProdSignal>,
+    }
+    impl ProdOwner {
+        /// Distinct owner cutoff: close admission AND remove the sole sender under the gate lock —
+        /// permitted even AFTER the single successful admission (unlike `withdraw`/`try_close_idle`,
+        /// which stay byte-identical and refuse once admitted). R199: a poisoned gate yields
+        /// `ProdCloseOutcome::Poisoned` and changes nothing — never a silent successful cutoff.
+        fn close_admission(&self) -> ProdCloseOutcome {
+            match self.gate.inner.lock() {
+                Err(_) => ProdCloseOutcome::Poisoned,
+                Ok(mut inner) => {
+                    inner.closed = true;
+                    inner.sender = None;
+                    ProdCloseOutcome::Closed
+                }
+            }
+        }
+        /// Poison-tolerant reads (R200: test-gated diagnostics). The data behind a poisoned mutex is
+        /// not corrupted, so a FIXTURE may inspect it after a genuine poison via `into_inner` — but
+        /// such a read never qualifies contents for a production decision, and these accessors are not
+        /// compiled into a shipping build.
+        #[cfg(test)]
+        fn is_closed(&self) -> bool {
+            match self.gate.inner.lock() {
+                Ok(g) => g.closed,
+                Err(e) => e.into_inner().closed,
+            }
+        }
+        #[cfg(test)]
+        fn admissions_used(&self) -> u32 {
+            match self.gate.inner.lock() {
+                Ok(g) => g.admissions_used,
+                Err(e) => e.into_inner().admissions_used,
+            }
+        }
+        #[cfg(test)]
+        fn sender_present(&self) -> bool {
+            match self.gate.inner.lock() {
+                Ok(g) => g.sender.is_some(),
+                Err(e) => e.into_inner().sender.is_some(),
+            }
+        }
+        fn observe_ready(&self, deadline: Duration) -> ProdReadiness {
+            if self.ready.wait(deadline) {
+                ProdReadiness::ReadyToJoin
+            } else {
+                ProdReadiness::Pending
+            }
+        }
+        fn join(&mut self) -> ProdJoin {
+            match self.handle.take() {
+                Some(h) => ProdJoin::Terminated(match h.join() {
+                    Ok(()) => ProdTerm::Normal,
+                    Err(_) => ProdTerm::Panic,
+                }),
+                None => ProdJoin::AlreadyJoined,
+            }
+        }
+    }
+
+    /// R199/R200: how the candidate worker's authority is installed, INDEPENDENT of candidate mode
+    /// (which the prelude always enters). `Bound` is the ONLY production variant (authority bound to
+    /// the gate's own generation); the ordinary private `spawn_prod` selects only `Bound`. R200: the
+    /// fail-closed test overrides `Generation` (binds a wrong generation — inconsistent occurrence) and
+    /// `Absent` (enters candidate mode but installs NO authority) are `#[cfg(test)]`, so they are not
+    /// compiled into a shipping build.
+    enum AuthoritySpec {
+        Bound,
+        #[cfg(test)]
+        Generation(u64),
+        #[cfg(test)]
+        Absent,
+    }
+
+    /// Spawn the candidate worker on the REAL `worker_loop_nonce_only`. Refuses non-`NonceOnly` /
+    /// persistent configs BEFORE creating a channel or spawning (like `spawn_core`). The gate (with
+    /// the sole sender) is created first so a `Weak` authority can be installed by the prelude. R199:
+    /// the prelude ALWAYS enters candidate mode first, then installs the authority per `auth_spec`.
+    fn spawn_prod_core<F>(
+        config: &SingleThreadExecutionServiceConfig,
+        auth_spec: AuthoritySpec,
+        extra_prelude: F,
+    ) -> Result<(ProdOwner, ProdSubmitView), ProdInitError>
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        match config.execution_profile {
+            ExecutionProfile::NonceOnly => {}
+            _ => return Err(ProdInitError::UnsupportedProfile),
+        }
+        if config.state_dir.is_some() {
+            return Err(ProdInitError::UnsupportedPersistentState);
+        }
+
+        let (tx, rx) = bounded::<ExecTask>(config.queue_capacity);
+        let generation = PROD_GENERATION_SEQ.fetch_add(1, Ordering::SeqCst);
+        let gate = Arc::new(SupervisedProdGate {
+            inner: Mutex::new(ProdGateInner {
+                sender: Some(tx),
+                admissions_used: 0,
+                closed: false,
+                grant_decided: false,
+                occurrence: None,
+            }),
+            generation,
+        });
+        // R199: candidate mode is entered unconditionally; the authority is installed per spec (and
+        // may be absent in test, so a candidate worker without an authority still fails closed).
+        let authority_opt = match auth_spec {
+            AuthoritySpec::Bound => Some(ProdAuthority {
+                gate: Arc::downgrade(&gate),
+                generation,
+            }),
+            #[cfg(test)]
+            AuthoritySpec::Absent => None,
+            #[cfg(test)]
+            AuthoritySpec::Generation(g) => Some(ProdAuthority {
+                gate: Arc::downgrade(&gate),
+                generation: g,
+            }),
+        };
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let queue_len = Arc::new(AtomicU64::new(0));
+        let parallel_config = config.parallel_config.clone();
+        let ready = Arc::new(ProdSignal::new());
+        let ready_w = Arc::clone(&ready);
+
+        let handle = thread::Builder::new()
+            .name("qbind-exec-worker".to_string())
+            .spawn(move || {
+                // R199: enter candidate mode FIRST (deliberate selection), independent of whether an
+                // authority is installed. Capture no sender-owning strong reference.
+                enter_candidate_mode();
+                if let Some(authority) = authority_opt {
+                    install_prod_authority(authority);
+                }
+                extra_prelude();
+                let _fire = FireProdReady(ready_w);
+                let mut current_height: u64 = 0;
+                SingleThreadExecutionService::worker_loop_nonce_only(
+                    rx,
+                    shutdown,
+                    queue_len,
+                    None,
+                    parallel_config,
+                    &mut current_height,
+                );
+            })
+            .map_err(|source| ProdInitError::WorkerSpawn { source })?;
+
+        let owner = ProdOwner { gate: Arc::clone(&gate), handle: Some(handle), ready };
+        let view = ProdSubmitView { gate };
+        Ok((owner, view))
+    }
+
+    /// Ordinary production entry (unwired; no caller).
+    fn spawn_prod(
+        config: &SingleThreadExecutionServiceConfig,
+    ) -> Result<(ProdOwner, ProdSubmitView), ProdInitError> {
+        spawn_prod_core(config, AuthoritySpec::Bound, || {})
+    }
+
+    // ------------------------------------------------------------------------
+    // Test-only deterministic harness (pause/release, bypass, injected fault) and controls.
+    // The DECISION under test is the production `prod_start_decision`; only timing/observation,
+    // the enforcement bypass, and the guarded fault are test-gated.
+    // ------------------------------------------------------------------------
+
+    #[cfg(test)]
+    struct ProdHarness {
+        /// R201: the fixture body-fold label — DIAGNOSTIC only (before-decision rendezvous + state
+        /// probe + denial correlation). It is NOT a validated admission key.
+        occurrence_id: u64,
+        /// R201: the VALIDATED generation-scoped admitted key, recorded by the production decision only
+        /// on a real grant (0 = no checked grant: no validated key / a synthetic bypass / a denial).
+        checked_key: AtomicU64,
+        probe_sender: [u8; 32],
+        expected_body: QbindBlock,
+        bypass: AtomicBool,
+        fault_armed: AtomicBool,
+        reached_tx: crossbeam_channel::Sender<u64>,
+        decision_release_rx: crossbeam_channel::Receiver<()>,
+        dequeue_body_tx: crossbeam_channel::Sender<(u64, bool)>,
+        grant_ack_tx: crossbeam_channel::Sender<u64>,
+        denial_tx: crossbeam_channel::Sender<u64>,
+        pre_effect_tx: crossbeam_channel::Sender<u64>,
+        pre_effect_release_rx: crossbeam_channel::Receiver<()>,
+        fault_witness_tx: crossbeam_channel::Sender<u64>,
+        executor_entered_tx: crossbeam_channel::Sender<u64>,
+        result_tx: crossbeam_channel::Sender<(u64, u64, u64, u64)>,
+        state_probe_tx: crossbeam_channel::Sender<(u64, u64, u64)>,
+        /// R202: the RAW decision classification recorded by the production decision at its actual
+        /// source branch, BEFORE any enforcement-bypass rewrite — so the real outcome survives in the
+        /// trace even when a synthetic bypass later emits a Grant.
+        raw_class_tx: crossbeam_channel::Sender<DecisionClass>,
+    }
+    /// R202: the classification of the actual production decision branch (test-only observation; the
+    /// production decision's return stays `StartOutcome`). Distinguishes matched cutoff, the several
+    /// missing/unavailable-authority branches, and invalid-binding branches.
+    #[cfg(test)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum DecisionClass {
+        Grant,
+        CommittedCutoff,
+        MissingAuthority,
+        DeadGate,
+        WrongGeneration,
+        Poisoned,
+        OneShot,
+        NoOccurrence,
+        OccurrenceMismatch,
+    }
+    #[cfg(test)]
+    thread_local! {
+        static PROD_HARNESS: std::cell::RefCell<Option<Arc<ProdHarness>>> =
+            const { std::cell::RefCell::new(None) };
+    }
+    #[cfg(test)]
+    fn install_prod_harness(h: Arc<ProdHarness>) {
+        PROD_HARNESS.with(|c| *c.borrow_mut() = Some(h));
+    }
+    #[cfg(test)]
+    fn current_harness() -> Option<Arc<ProdHarness>> {
+        PROD_HARNESS.with(|c| c.borrow().clone())
+    }
+    /// R201 (test-only): the production decision calls this on a REAL grant to carry the validated
+    /// generation-scoped admitted key to the grant/execution witnesses. A synthetic bypass or a denial
+    /// never calls it, so `checked_key` stays 0 ("no checked grant").
+    #[cfg(test)]
+    fn record_checked_key(generation: u64) {
+        if let Some(h) = current_harness() {
+            h.checked_key.store(generation, Ordering::SeqCst);
+        }
+    }
+    /// R202 (test-only): emit a branch classification to the harness channel (a gate-free thread-local
+    /// send). R203: this is now invoked ONLY from `RawClassTrace::drop`, i.e. AFTER the decision frame's
+    /// mutex guard and transient strong `Arc` have dropped, on every path.
+    #[cfg(test)]
+    fn record_raw_class(class: DecisionClass) {
+        if let Some(h) = current_harness() {
+            let _ = h.raw_class_tx.send(class);
+        }
+    }
+    /// R203 (test-only): a function-scope trace that captures the decision's class at the real branch
+    /// and DEFERS emission to `Drop`. Declared as the first local in `prod_start_decision`, it is
+    /// destroyed LAST — strictly after the mutex guard and the transient strong `Arc` on every path,
+    /// including early fail-closed denials. `Drop` skips emission while the thread is unwinding, so a
+    /// panic is never recorded as a normal decision class. Absent from non-test builds.
+    #[cfg(test)]
+    struct RawClassTrace {
+        pending: std::cell::Cell<Option<DecisionClass>>,
+    }
+    #[cfg(test)]
+    impl RawClassTrace {
+        fn new() -> Self {
+            RawClassTrace { pending: std::cell::Cell::new(None) }
+        }
+        fn set(&self, class: DecisionClass) {
+            self.pending.set(Some(class));
+        }
+    }
+    #[cfg(test)]
+    impl Drop for RawClassTrace {
+        fn drop(&mut self) {
+            if std::thread::panicking() {
+                return; // never record a normal decision class during an unwind
+            }
+            if let Some(class) = self.pending.get() {
+                record_raw_class(class);
+            }
+        }
+    }
+
+    /// Top-of-loop independent state probe (test builds only): real height + exercised-sender nonce.
+    #[cfg(test)]
+    pub(super) fn prod_state_probe_test_hook(current_height: u64, state: &super::InMemoryState) {
+        if let Some(h) = current_harness() {
+            let nonce = qbind_ledger::get_account_nonce(state, &h.probe_sender);
+            let _ = h.state_probe_tx.send((h.occurrence_id, current_height, nonce));
+        }
+    }
+    /// Deterministic timing ONLY: announce the real dequeue + the bound-body match, then block until
+    /// the test releases the decision (so the test can commit — or not — the cutoff first).
+    #[cfg(test)]
+    pub(super) fn prod_decision_pause_test_hook(dequeued: &QbindBlock) {
+        if let Some(h) = current_harness() {
+            let _ = h.reached_tx.send(h.occurrence_id);
+            let _ = h.dequeue_body_tx.send((h.occurrence_id, bodies_identical(dequeued, &h.expected_body)));
+            if h.decision_release_rx.recv_timeout(FAILSAFE).is_err() {
+                panic!("{}", R198_RENDEZVOUS_HARNESS_ERROR);
+            }
+        }
+    }
+    /// Enforcement-bypass discrimination (test builds only): with the IDENTICAL cutoff-first schedule,
+    /// turn a production `Deny` into `Grant` to prove the zero-effect oracle has teeth. R201: this is a
+    /// SYNTHETIC grant — the real production decision denied and recorded NO checked key, so the grant/
+    /// execution witnesses below carry `checked_key == 0`, labelling the bypass as synthetic while the
+    /// real outcome is retained.
+    #[cfg(test)]
+    pub(super) fn prod_maybe_bypass_test_hook(out: StartOutcome) -> StartOutcome {
+        if let Some(h) = current_harness() {
+            if h.bypass.load(Ordering::SeqCst) && matches!(out, StartOutcome::Deny) {
+                return StartOutcome::Grant;
+            }
+        }
+        out
+    }
+    /// R201: witness of the (possibly bypassed) production outcome. A grant emits the VALIDATED checked
+    /// key (the generation recorded by the real decision; 0 for a synthetic bypass). A denial emits the
+    /// diagnostic fixture label on the DENIAL channel — explicit invalid/unavailable identity, never a
+    /// checked grant.
+    #[cfg(test)]
+    pub(super) fn prod_decision_observed_test_hook(out: StartOutcome) {
+        if let Some(h) = current_harness() {
+            match out {
+                StartOutcome::Grant => {
+                    let _ = h.grant_ack_tx.send(h.checked_key.load(Ordering::SeqCst));
+                }
+                StartOutcome::Deny => {
+                    let _ = h.denial_tx.send(h.occurrence_id);
+                }
+                StartOutcome::Legacy => {}
+            }
+        }
+    }
+    /// Granted work held at the pre-effect rendezvous (test builds only); explicit release, then an
+    /// opt-in guarded fault that unwinds BEFORE executor entry. R201: emits the checked key.
+    #[cfg(test)]
+    pub(super) fn prod_granted_pre_effect_test_hook() {
+        if let Some(h) = current_harness() {
+            let _ = h.pre_effect_tx.send(h.checked_key.load(Ordering::SeqCst));
+            if h.pre_effect_release_rx.recv_timeout(FAILSAFE).is_err() {
+                panic!("{}", R198_RENDEZVOUS_HARNESS_ERROR);
+            }
+            if h.fault_armed.load(Ordering::SeqCst) {
+                let _ = h.fault_witness_tx.send(h.checked_key.load(Ordering::SeqCst));
+                panic!("{}", R198_FAULT_MARKER);
+            }
+        }
+    }
+    /// Independent executor-ENTRY witness (test builds only). R201: emits the checked key.
+    #[cfg(test)]
+    pub(super) fn prod_executor_entry_test_hook() {
+        if let Some(h) = current_harness() {
+            let _ = h.executor_entered_tx.send(h.checked_key.load(Ordering::SeqCst));
+        }
+    }
+    /// Independent execution-EFFECT witness, after the executor returned Ok (test builds only).
+    /// R201: emits the checked key.
+    #[cfg(test)]
+    pub(super) fn prod_executor_result_test_hook(success_count: u64, error_count: u64, new_height: u64) {
+        if let Some(h) = current_harness() {
+            let _ = h.result_tx.send((
+                h.checked_key.load(Ordering::SeqCst),
+                success_count,
+                error_count,
+                new_height,
+            ));
+        }
+    }
+
+    #[cfg(test)]
+    fn bodies_identical(a: &QbindBlock, b: &QbindBlock) -> bool {
+        if a.block_id != b.block_id || a.parent_id != b.parent_id || a.view != b.view {
+            return false;
+        }
+        if *a.proposal != *b.proposal {
+            return false;
+        }
+        if a.txs.len() != b.txs.len() {
+            return false;
+        }
+        a.txs
+            .iter()
+            .zip(b.txs.iter())
+            .all(|(x, y)| x.sender == y.sender && x.nonce == y.nonce && x.payload == y.payload)
+    }
+    /// R201: FULL typed equality for refusal-custody assertions — the entire ordered decoded
+    /// transaction vector INCLUDING decoded `signature.bytes` and `suite_id` (which `bodies_identical`
+    /// omits), plus the full proposal and block metadata. A decoded-only difference (e.g. a substituted
+    /// decoded signature or suite) with an unchanged raw proposal is caught here but NOT by
+    /// `bodies_identical`.
+    #[cfg(test)]
+    fn bodies_fully_equal(a: &QbindBlock, b: &QbindBlock) -> bool {
+        if a.block_id != b.block_id || a.parent_id != b.parent_id || a.view != b.view {
+            return false;
+        }
+        if *a.proposal != *b.proposal {
+            return false;
+        }
+        if a.txs.len() != b.txs.len() {
+            return false;
+        }
+        a.txs.iter().zip(b.txs.iter()).all(|(x, y)| {
+            x.sender == y.sender
+                && x.nonce == y.nonce
+                && x.payload == y.payload
+                && x.signature.bytes == y.signature.bytes
+                && x.suite_id == y.suite_id
+        })
+    }
+    /// R201: a body identical to `base` EXCEPT the first decoded tx's signature bytes — the SAME raw
+    /// proposal (shared `Arc`) and the same block self-id, differing only in a decoded field.
+    #[cfg(test)]
+    fn with_decoded_signature(base: &QbindBlock, sig: Vec<u8>) -> QbindBlock {
+        let mut txs = base.txs.clone();
+        assert!(!txs.is_empty(), "fixture body must have a tx");
+        txs[0].signature.bytes = sig;
+        QbindBlock::new(base.proposal.clone(), txs)
+    }
+    /// R201: a body identical to `base` EXCEPT the first decoded tx's suite id — same raw proposal/self-id.
+    #[cfg(test)]
+    fn with_decoded_suite(base: &QbindBlock, suite_id: u16) -> QbindBlock {
+        let mut txs = base.txs.clone();
+        assert!(!txs.is_empty(), "fixture body must have a tx");
+        txs[0].suite_id = suite_id;
+        QbindBlock::new(base.proposal.clone(), txs)
+    }
+    #[cfg(test)]
+    fn encode_fixture_tx(tx: &super::QbindTransaction) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&tx.sender);
+        bytes.extend_from_slice(&tx.nonce.to_le_bytes());
+        bytes.extend_from_slice(&(tx.payload.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&tx.payload);
+        bytes.extend_from_slice(&(tx.signature.bytes.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&tx.signature.bytes);
+        bytes.extend_from_slice(&tx.suite_id.to_le_bytes());
+        bytes
+    }
+    /// One valid, coherent, state-changing NonceOnly body (fresh sender, nonce 0). `height` stays
+    /// below `R198_COMMITTED_ID`'s byte so `block_id = [height;32]` is distinct from the committed id.
+    /// Minimal synthetic proposal (mirrors the idle-close test helper).
+    #[cfg(test)]
+    fn make_r198_proposal(height: u64) -> Arc<BlockProposal> {
+        Arc::new(BlockProposal {
+            header: BlockHeader {
+                version: 1,
+                chain_id: 1337,
+                epoch: 0,
+                height,
+                round: 0,
+                parent_block_id: [0u8; 32],
+                payload_hash: [height as u8; 32],
+                proposer_index: 0,
+                suite_id: 0,
+                tx_count: 0,
+                timestamp: 1704067200 + height,
+                payload_kind: 0,
+                next_epoch: 0,
+                batch_commitment: [0u8; 32],
+            },
+            qc: None,
+            txs: Vec::new(),
+            signature: Vec::new(),
+        })
+    }
+    #[cfg(test)]
+    fn state_changing_body(height: u64, sender_tag: u8) -> QbindBlock {
+        let tx = super::QbindTransaction::new([sender_tag; 32], 0, b"r198-state-change".to_vec());
+        let mut proposal = (*make_r198_proposal(height)).clone();
+        proposal.header.tx_count = 1;
+        proposal.txs = vec![encode_fixture_tx(&tx)];
+        QbindBlock::new(Arc::new(proposal), vec![tx])
+    }
+    #[cfg(test)]
+    fn drain_state_probes(
+        rx: &crossbeam_channel::Receiver<(u64, u64, u64)>,
+    ) -> Vec<(u64, u64, u64)> {
+        let mut v = Vec::new();
+        while let Ok(p) = rx.try_recv() {
+            v.push(p);
+        }
+        v
+    }
+    #[cfg(test)]
+    fn ordered_snapshots(
+        probes: &[(u64, u64, u64)],
+        occ: u64,
+    ) -> Option<((u64, u64), (u64, u64))> {
+        if probes.len() < 2 || !probes.iter().all(|(o, _, _)| *o == occ) {
+            return None;
+        }
+        let first = probes.first().unwrap();
+        let last = probes.last().unwrap();
+        Some(((first.1, first.2), (last.1, last.2)))
+    }
+
+    /// R200: the witnessed occurrence key is DERIVED FROM THE FULL ORDERED EXECUTION-INPUT ENCODING of
+    /// the actual bound work (a 64-bit FNV-1a fold over `occurrence_encoding`), NOT merely the block
+    /// self-id — so two bodies that share a block self-id but carry different execution input get
+    /// DISTINCT witness keys. Non-cryptographic; a witness label only, not a decision primitive.
+    #[cfg(test)]
+    fn witness_id(block: &QbindBlock) -> u64 {
+        let enc = occurrence_encoding(block);
+        let mut acc: u64 = 0xcbf29ce484222325;
+        for b in &enc {
+            acc ^= *b as u64;
+            acc = acc.wrapping_mul(0x00000100000001b3);
+        }
+        acc
+    }
+
+    /// R200: distinct fixture ATTEMPT IDs for the separately-keyed refusal-custody controls — each
+    /// pre-bound before its submit and distinct from any admitted occurrence key.
+    #[cfg(test)]
+    const R200_ATTEMPT_CUTOFF: u64 = 0xA77E_0C07;
+    #[cfg(test)]
+    const R200_ATTEMPT_LIFETIME: u64 = 0xA77E_11FE;
+    #[cfg(test)]
+    const R200_ATTEMPT_POISON: u64 = 0xA77E_9015;
+
+    /// R199: the refusal disposition recorded for a non-admitted submit (distinct per refusal type).
+    #[cfg(test)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum RefusalDisposition {
+        Cutoff,
+        LifetimeExhausted,
+        QueueFull,
+        Poisoned,
+    }
+    /// R200 (R194 custody oracle, separately keyed): each refusal is bound to its own pre-submit fixture
+    /// ATTEMPT ID (distinct from the admitted occurrence) with a RETAINED pre-submit reference copy; on
+    /// refusal the RETURNED body is asserted byte-identical to that retained reference, the disposition
+    /// is typed, and the fixture committed id is kept distinct from the body's own block id.
+    #[cfg(test)]
+    struct RefusedCustody {
+        attempt_id: u64,
+        committed_id: [u8; 32],
+        reference: QbindBlock,
+        returned: QbindBlock,
+        disposition: RefusalDisposition,
+    }
+    #[cfg(test)]
+    fn bind_refusal(attempt_id: u64, reference: QbindBlock, outcome: ProdSubmitOutcome) -> RefusedCustody {
+        let (returned, disposition) = match outcome {
+            ProdSubmitOutcome::ShuttingDown(b) => (b, RefusalDisposition::Cutoff),
+            ProdSubmitOutcome::LifetimeExhausted(b) => (b, RefusalDisposition::LifetimeExhausted),
+            ProdSubmitOutcome::QueueFull(b) => (b, RefusalDisposition::QueueFull),
+            ProdSubmitOutcome::Poisoned(b) => (b, RefusalDisposition::Poisoned),
+            ProdSubmitOutcome::Admitted => panic!("Admitted is not a refusal"),
+        };
+        RefusedCustody { attempt_id, committed_id: R198_COMMITTED_ID, reference, returned, disposition }
+    }
+
+    /// R199/R200 test-only owner accessors: a gate handle for genuine-poison injection, the gate's
+    /// generation, and a tamper of the stored occurrence binding so the PRODUCTION decision's binding
+    /// comparison can be exercised with a VALID authority/gate/generation (mismatched or missing work).
+    #[cfg(test)]
+    impl ProdOwner {
+        fn gate_arc(&self) -> Arc<SupervisedProdGate> {
+            Arc::clone(&self.gate)
+        }
+        fn gate_generation(&self) -> u64 {
+            self.gate.generation
+        }
+        fn test_force_occurrence(&self, occ: Option<OccurrenceBinding>) {
+            let mut inner = self.gate.inner.lock().unwrap();
+            inner.occurrence = occ;
+        }
+    }
+
+    /// R200 test-only fault: admit (enqueue) `work` but bind the occurrence to `bound_ref`'s EXACT
+    /// execution-input encoding instead — modelling a dequeued body whose ordered execution input
+    /// differs from the admitted reference while (optionally) sharing the block self-id. The PRODUCTION
+    /// decision then re-derives the dequeued encoding and must DENY. This fault cannot arise from the
+    /// production `submit` (which binds exactly what it enqueues); it is injected only in tests.
+    #[cfg(test)]
+    impl ProdSubmitView {
+        fn test_admit_with_mismatched_binding(
+            &self,
+            work: QbindBlock,
+            bound_ref: &QbindBlock,
+        ) -> ProdSubmitOutcome {
+            let mut inner = self.gate.inner.lock().unwrap();
+            if inner.closed || inner.sender.is_none() {
+                return ProdSubmitOutcome::ShuttingDown(work);
+            }
+            if inner.admissions_used >= 1 {
+                return ProdSubmitOutcome::LifetimeExhausted(work);
+            }
+            let bound = OccurrenceBinding {
+                generation: self.gate.generation,
+                encoding: occurrence_encoding(bound_ref),
+            };
+            let task = ExecTask { block: work, submitted_at: Instant::now() };
+            match inner.sender.as_ref().unwrap().try_send(task) {
+                Ok(()) => {
+                    inner.admissions_used += 1;
+                    inner.occurrence = Some(bound);
+                    ProdSubmitOutcome::Admitted
+                }
+                Err(TrySendError::Full(t)) => ProdSubmitOutcome::QueueFull(t.block),
+                Err(TrySendError::Disconnected(t)) => ProdSubmitOutcome::ShuttingDown(t.block),
+            }
+        }
+    }
+
+    #[cfg(test)]
+    struct ProdEnds {
+        reached_rx: crossbeam_channel::Receiver<u64>,
+        decision_release_tx: crossbeam_channel::Sender<()>,
+        dequeue_body_rx: crossbeam_channel::Receiver<(u64, bool)>,
+        grant_ack_rx: crossbeam_channel::Receiver<u64>,
+        denial_rx: crossbeam_channel::Receiver<u64>,
+        pre_effect_rx: crossbeam_channel::Receiver<u64>,
+        pre_effect_release_tx: crossbeam_channel::Sender<()>,
+        fault_witness_rx: crossbeam_channel::Receiver<u64>,
+        executor_entered_rx: crossbeam_channel::Receiver<u64>,
+        result_rx: crossbeam_channel::Receiver<(u64, u64, u64, u64)>,
+        state_probe_rx: crossbeam_channel::Receiver<(u64, u64, u64)>,
+        raw_class_rx: crossbeam_channel::Receiver<DecisionClass>,
+    }
+    /// R199: `occurrence_id` is DERIVED from `expected_body` (the real bound work), not supplied by
+    /// the caller — so every witness is keyed to the actual occurrence binding.
+    #[cfg(test)]
+    fn new_prod_harness(probe_sender: [u8; 32], expected_body: QbindBlock) -> (Arc<ProdHarness>, ProdEnds) {
+        let occurrence_id = witness_id(&expected_body);
+        let (reached_tx, reached_rx) = crossbeam_channel::unbounded::<u64>();
+        let (decision_release_tx, decision_release_rx) = crossbeam_channel::unbounded::<()>();
+        let (dequeue_body_tx, dequeue_body_rx) = crossbeam_channel::unbounded::<(u64, bool)>();
+        let (grant_ack_tx, grant_ack_rx) = crossbeam_channel::unbounded::<u64>();
+        let (denial_tx, denial_rx) = crossbeam_channel::unbounded::<u64>();
+        let (pre_effect_tx, pre_effect_rx) = crossbeam_channel::unbounded::<u64>();
+        let (pre_effect_release_tx, pre_effect_release_rx) = crossbeam_channel::unbounded::<()>();
+        let (fault_witness_tx, fault_witness_rx) = crossbeam_channel::unbounded::<u64>();
+        let (executor_entered_tx, executor_entered_rx) = crossbeam_channel::unbounded::<u64>();
+        let (result_tx, result_rx) = crossbeam_channel::unbounded::<(u64, u64, u64, u64)>();
+        let (state_probe_tx, state_probe_rx) = crossbeam_channel::unbounded::<(u64, u64, u64)>();
+        let (raw_class_tx, raw_class_rx) = crossbeam_channel::unbounded::<DecisionClass>();
+        let h = Arc::new(ProdHarness {
+            occurrence_id,
+            checked_key: AtomicU64::new(0),
+            probe_sender,
+            expected_body,
+            bypass: AtomicBool::new(false),
+            fault_armed: AtomicBool::new(false),
+            reached_tx,
+            decision_release_rx,
+            dequeue_body_tx,
+            grant_ack_tx,
+            denial_tx,
+            pre_effect_tx,
+            pre_effect_release_rx,
+            fault_witness_tx,
+            executor_entered_tx,
+            result_tx,
+            state_probe_tx,
+            raw_class_tx,
+        });
+        let ends = ProdEnds {
+            reached_rx,
+            decision_release_tx,
+            dequeue_body_rx,
+            grant_ack_rx,
+            denial_rx,
+            pre_effect_rx,
+            pre_effect_release_tx,
+            fault_witness_rx,
+            executor_entered_rx,
+            result_rx,
+            state_probe_rx,
+            raw_class_rx,
+        };
+        (h, ends)
+    }
+    #[cfg(test)]
+    fn spawn_prod_gated(
+        config: &SingleThreadExecutionServiceConfig,
+        harness: Arc<ProdHarness>,
+    ) -> Result<(ProdOwner, ProdSubmitView), ProdInitError> {
+        spawn_prod_core(config, AuthoritySpec::Bound, move || install_prod_harness(harness))
+    }
+    /// Like `spawn_prod_gated` but installs an authority bound to a WRONG generation, so the
+    /// production decision fails closed on the inconsistent-occurrence check.
+    #[cfg(test)]
+    fn spawn_prod_gated_wrong_generation(
+        config: &SingleThreadExecutionServiceConfig,
+        harness: Arc<ProdHarness>,
+    ) -> Result<(ProdOwner, ProdSubmitView), ProdInitError> {
+        spawn_prod_core(config, AuthoritySpec::Generation(u64::MAX), move || {
+            install_prod_harness(harness)
+        })
+    }
+    /// R199: candidate mode entered but NO authority installed — the decision must fail closed (Deny),
+    /// NOT fall back to legacy execution. Distinct from a dead `Weak`.
+    #[cfg(test)]
+    fn spawn_prod_gated_absent_authority(
+        config: &SingleThreadExecutionServiceConfig,
+        harness: Arc<ProdHarness>,
+    ) -> Result<(ProdOwner, ProdSubmitView), ProdInitError> {
+        spawn_prod_core(config, AuthoritySpec::Absent, move || install_prod_harness(harness))
+    }
+    #[cfg(test)]
+    fn r198_config() -> SingleThreadExecutionServiceConfig {
+        // Default is memory-only NonceOnly (state_dir None).
+        SingleThreadExecutionServiceConfig::default()
+    }
+
+    // ------------------------------------------------------------------------
+    // Acceptance controls (test-only). Each exercises the REAL production
+    // `prod_start_decision` compiled in this build. R202: the decision records
+    // its RAW branch classification (DecisionClass) at the actual source branch
+    // BEFORE any enforcement-bypass rewrite — so matched cutoff, the several
+    // missing/unavailable-authority branches, and invalid-binding branches are
+    // distinct, and the real outcome survives a synthetic bypass. Grant/
+    // execution witnesses carry the validated generation checked key; diagnostic
+    // body labels stay distinct from it.
+    // ------------------------------------------------------------------------
+
+    /// P0 — zero admission: no submit; the distinct owner cutoff closes admission; readiness + join.
+    #[cfg(test)]
+    #[test]
+    fn r198_p0_zero_admission_close_then_join() {
+        let (gate_h, _ends) = new_prod_harness([0xE0u8; 32], state_changing_body(3, 0xE0));
+        let (mut owner, _view) = spawn_prod_gated(&r198_config(), gate_h).expect("spawn");
+        assert!(owner.sender_present() && !owner.is_closed() && owner.admissions_used() == 0);
+        assert_eq!(owner.close_admission(), ProdCloseOutcome::Closed);
+        assert!(owner.is_closed() && !owner.sender_present());
+        assert_eq!(owner.observe_ready(FAILSAFE), ProdReadiness::ReadyToJoin);
+        assert_eq!(owner.join(), ProdJoin::Terminated(ProdTerm::Normal));
+    }
+
+    /// P1 — denied post-cutoff + R202 Row-2: the SAME schedule carries the RAW cutoff denial AND the
+    /// synthetic bypass execution. Schedule 1 (no bypass): real decision denies on committed cutoff
+    /// (`DecisionClass::CommittedCutoff`), zero effect, ordered `(0,0)→(0,0)`. Schedule 2 (bypass): the
+    /// real decision ALSO classifies `CommittedCutoff` (recorded before the rewrite), while the
+    /// synthetic grant/execution observations carry the synthetic checked key `0` and a real effect
+    /// `(7,1)`. The two identical-body workers (`occ == occ2`) occupy distinct generations.
+    #[cfg(test)]
+    #[test]
+    fn r198_p1_denied_post_cutoff_no_effect() {
+        let canonical = state_changing_body(7, 0xA1);
+        assert_eq!(canonical.block_id, [7u8; 32]);
+        let occ = witness_id(&canonical);
+        let (h, ends) = new_prod_harness([0xA1u8; 32], canonical.clone());
+        let (mut owner, view) = spawn_prod_gated(&r198_config(), h).expect("spawn");
+        let gen1 = owner.gate_generation();
+        assert!(matches!(view.submit(canonical.clone()), ProdSubmitOutcome::Admitted));
+        assert_eq!(owner.admissions_used(), 1);
+        assert_eq!(ends.reached_rx.recv_timeout(FAILSAFE).expect("dequeue reached"), occ);
+        assert_eq!(ends.dequeue_body_rx.recv_timeout(FAILSAFE).expect("body match"), (occ, true));
+        assert_eq!(owner.close_admission(), ProdCloseOutcome::Closed);
+        assert!(!owner.sender_present());
+        ends.decision_release_tx.send(()).expect("release decision");
+        assert_eq!(ends.denial_rx.recv_timeout(FAILSAFE).expect("worker Deny"), occ);
+        let rc1 = ends.raw_class_rx.recv_timeout(FAILSAFE).expect("raw class");
+        println!("[R203-TRACE] cutoff(sched1) raw_class={:?} checked_grant=none effect=none", rc1);
+        assert_eq!(rc1, DecisionClass::CommittedCutoff, "sched1 raw decision = matched cutoff");
+        assert_eq!(owner.observe_ready(FAILSAFE), ProdReadiness::ReadyToJoin);
+        assert_eq!(owner.join(), ProdJoin::Terminated(ProdTerm::Normal));
+        assert!(ends.executor_entered_rx.try_recv().is_err(), "zero executor entry");
+        assert!(ends.result_rx.try_recv().is_err(), "zero effect");
+        assert!(ends.grant_ack_rx.try_recv().is_err(), "no grant");
+        let probes = drain_state_probes(&ends.state_probe_rx);
+        assert!(ordered_snapshots(&probes[..1], occ).is_none(), "baseline-only rejected");
+        let (init, fin) = ordered_snapshots(&probes, occ).expect("ordered snapshots");
+        assert_eq!((init, fin), ((0, 0), (0, 0)), "denied: baseline and final both unchanged");
+
+        // Schedule 2: identical body + cutoff-first, enforcement bypassed. Row 2 — the raw decision
+        // still classifies CommittedCutoff (recorded before the rewrite), the bypass grant/execution
+        // carry the synthetic checked key 0, and the effect is real.
+        let body2 = state_changing_body(7, 0xA1);
+        let occ2 = witness_id(&body2);
+        assert_eq!(occ, occ2, "identical bodies share the diagnostic fold");
+        let (h2, ends2) = new_prod_harness([0xA1u8; 32], body2.clone());
+        h2.bypass.store(true, Ordering::SeqCst);
+        let (mut owner2, view2) = spawn_prod_gated(&r198_config(), h2).expect("spawn");
+        let gen2 = owner2.gate_generation();
+        assert_ne!(gen1, gen2, "identical bodies occupy DISTINCT generations");
+        assert!(matches!(view2.submit(body2.clone()), ProdSubmitOutcome::Admitted));
+        assert_eq!(ends2.reached_rx.recv_timeout(FAILSAFE).expect("reached"), occ2);
+        assert_eq!(ends2.dequeue_body_rx.recv_timeout(FAILSAFE).expect("body"), (occ2, true));
+        assert_eq!(owner2.close_admission(), ProdCloseOutcome::Closed);
+        ends2.decision_release_tx.send(()).expect("release");
+        let key2 = ends2.grant_ack_rx.recv_timeout(FAILSAFE).expect("bypass grants");
+        let rc2 = ends2.raw_class_rx.recv_timeout(FAILSAFE).expect("raw class");
+        assert_eq!(key2, 0, "synthetic (no checked key)");
+        assert_eq!(rc2, DecisionClass::CommittedCutoff, "sched2 RAW decision = matched cutoff (survives the bypass rewrite)");
+        assert_eq!(ends2.pre_effect_rx.recv_timeout(FAILSAFE).expect("held"), 0);
+        ends2.pre_effect_release_tx.send(()).expect("release pre-effect");
+        assert_eq!(ends2.executor_entered_rx.recv_timeout(FAILSAFE).expect("entered"), 0);
+        let (ro, s, e, ht) = ends2.result_rx.recv_timeout(FAILSAFE).expect("effect");
+        println!("[R203-TRACE] cutoff+bypass(sched2) raw_class={:?} synthetic_grant_key={} effect=(nonce={},height={})", rc2, key2, s, ht);
+        assert_eq!((ro, s, e, ht), (0, 1, 0, 7), "synthetic key, real effect");
+        assert_eq!(owner2.observe_ready(FAILSAFE), ProdReadiness::ReadyToJoin);
+        assert_eq!(owner2.join(), ProdJoin::Terminated(ProdTerm::Normal));
+        let probes2 = drain_state_probes(&ends2.state_probe_rx);
+        let (i2, f2) = ordered_snapshots(&probes2, occ2).expect("ordered");
+        assert_eq!((i2, f2), ((0, 0), (7, 1)), "bypass: baseline unchanged, final real nonce/height");
+    }
+
+    /// P2 — grant before cutoff: REAL grant (`DecisionClass::Grant`); grant/execution witnesses carry
+    /// the validated checked key (`== gate_generation()`, `!= occ`); executes after cutoff, `(2,1)`.
+    #[cfg(test)]
+    #[test]
+    fn r198_p2_grant_before_cutoff_executes_after_cutoff() {
+        let canonical = state_changing_body(2, 0xB2);
+        let occ = witness_id(&canonical);
+        let (h, ends) = new_prod_harness([0xB2u8; 32], canonical.clone());
+        let (mut owner, view) = spawn_prod_gated(&r198_config(), h).expect("spawn");
+        let gen = owner.gate_generation();
+        assert_ne!(gen, occ, "checked key (generation) differs from the diagnostic body fold");
+        assert!(matches!(view.submit(canonical.clone()), ProdSubmitOutcome::Admitted));
+        assert_eq!(ends.reached_rx.recv_timeout(FAILSAFE).expect("reached"), occ);
+        assert_eq!(ends.dequeue_body_rx.recv_timeout(FAILSAFE).expect("body"), (occ, true));
+        ends.decision_release_tx.send(()).expect("release decision pre-cutoff");
+        assert_eq!(ends.grant_ack_rx.recv_timeout(FAILSAFE).expect("granted on checked key"), gen);
+        assert_eq!(ends.raw_class_rx.recv_timeout(FAILSAFE).expect("raw class"), DecisionClass::Grant);
+        assert_eq!(ends.pre_effect_rx.recv_timeout(FAILSAFE).expect("held"), gen);
+        assert_eq!(owner.close_admission(), ProdCloseOutcome::Closed);
+        assert!(!owner.sender_present());
+        ends.pre_effect_release_tx.send(()).expect("release pre-effect");
+        assert_eq!(ends.executor_entered_rx.recv_timeout(FAILSAFE).expect("entered after cutoff"), gen);
+        let (ro, s, e, ht) = ends.result_rx.recv_timeout(FAILSAFE).expect("effect");
+        assert_eq!((ro, s, e, ht), (gen, 1, 0, 2));
+        assert_eq!(owner.observe_ready(FAILSAFE), ProdReadiness::ReadyToJoin);
+        assert_eq!(owner.join(), ProdJoin::Terminated(ProdTerm::Normal));
+        let probes = drain_state_probes(&ends.state_probe_rx);
+        let (i, f) = ordered_snapshots(&probes, occ).expect("ordered");
+        assert_eq!((i, f), ((0, 0), (2, 1)));
+    }
+
+    /// P3 — fresh submit after the owner cutoff is refused (`ShuttingDown`), no second dequeue; the raw
+    /// decision of the admitted occurrence is matched cutoff. Separately-keyed FULL-equality custody.
+    #[cfg(test)]
+    #[test]
+    fn r198_p3_late_submit_after_cutoff_refused() {
+        let canonical = state_changing_body(5, 0xC3);
+        let occ = witness_id(&canonical);
+        let (h, ends) = new_prod_harness([0xC3u8; 32], canonical.clone());
+        let (mut owner, view) = spawn_prod_gated(&r198_config(), h).expect("spawn");
+        assert!(matches!(view.submit(canonical.clone()), ProdSubmitOutcome::Admitted));
+        assert_eq!(ends.reached_rx.recv_timeout(FAILSAFE).expect("reached"), occ);
+        assert_eq!(owner.close_admission(), ProdCloseOutcome::Closed);
+        let reference = state_changing_body(5, 0xC3);
+        let cust = bind_refusal(R200_ATTEMPT_CUTOFF, reference.clone(), view.submit(reference.clone()));
+        assert_eq!(cust.attempt_id, R200_ATTEMPT_CUTOFF);
+        assert_ne!(cust.attempt_id, occ, "attempt id distinct from the admitted occurrence");
+        assert_eq!(cust.disposition, RefusalDisposition::Cutoff);
+        assert!(bodies_fully_equal(&cust.returned, &cust.reference), "returned == retained reference (full decoded equality)");
+        assert!(bodies_fully_equal(&cust.returned, &reference));
+        assert_ne!(cust.committed_id, cust.returned.block_id, "committed id distinct from block id");
+        ends.decision_release_tx.send(()).expect("release");
+        assert_eq!(ends.denial_rx.recv_timeout(FAILSAFE).expect("Deny"), occ);
+        assert_eq!(ends.raw_class_rx.recv_timeout(FAILSAFE).expect("raw class"), DecisionClass::CommittedCutoff);
+        assert_eq!(owner.observe_ready(FAILSAFE), ProdReadiness::ReadyToJoin);
+        assert_eq!(owner.join(), ProdJoin::Terminated(ProdTerm::Normal));
+        assert!(ends.reached_rx.try_recv().is_err(), "no second dequeue");
+        assert!(ends.grant_ack_rx.try_recv().is_err(), "no checked grant");
+    }
+
+    /// P4 — explicit lifetime admission limit: second OPEN submit → `LifetimeExhausted` (full-equality
+    /// custody); the first occurrence grants (`DecisionClass::Grant`) and executes on the checked key.
+    #[cfg(test)]
+    #[test]
+    fn r198_p4_lifetime_admission_limit_after_dequeue() {
+        let canonical = state_changing_body(4, 0xD4);
+        let occ = witness_id(&canonical);
+        let (h, ends) = new_prod_harness([0xD4u8; 32], canonical.clone());
+        let (mut owner, view) = spawn_prod_gated(&r198_config(), h).expect("spawn");
+        let gen = owner.gate_generation();
+        assert!(matches!(view.submit(canonical.clone()), ProdSubmitOutcome::Admitted));
+        assert_eq!(ends.reached_rx.recv_timeout(FAILSAFE).expect("reached"), occ);
+        assert!(!owner.is_closed(), "admission still open");
+        assert_eq!(owner.sender_present(), true);
+        let reference = state_changing_body(4, 0xD4);
+        let cust = bind_refusal(R200_ATTEMPT_LIFETIME, reference.clone(), view.submit(reference.clone()));
+        assert_eq!(cust.attempt_id, R200_ATTEMPT_LIFETIME);
+        assert_ne!(cust.attempt_id, occ, "attempt id distinct from the admitted occurrence");
+        assert_eq!(cust.disposition, RefusalDisposition::LifetimeExhausted);
+        assert!(bodies_fully_equal(&cust.returned, &cust.reference), "returned == retained reference (full decoded equality)");
+        assert_ne!(cust.committed_id, cust.returned.block_id, "committed id distinct from block id");
+        assert_eq!(owner.admissions_used(), 1);
+        ends.decision_release_tx.send(()).expect("release");
+        assert_eq!(ends.grant_ack_rx.recv_timeout(FAILSAFE).expect("granted"), gen);
+        assert_eq!(ends.raw_class_rx.recv_timeout(FAILSAFE).expect("raw class"), DecisionClass::Grant);
+        assert_eq!(ends.pre_effect_rx.recv_timeout(FAILSAFE).expect("held"), gen);
+        assert_eq!(owner.close_admission(), ProdCloseOutcome::Closed);
+        ends.pre_effect_release_tx.send(()).expect("release pre-effect");
+        let (ro, s, _e, ht) = ends.result_rx.recv_timeout(FAILSAFE).expect("effect");
+        assert_eq!((ro, s, ht), (gen, 1, 4));
+        assert_eq!(owner.observe_ready(FAILSAFE), ProdReadiness::ReadyToJoin);
+        assert_eq!(owner.join(), ProdJoin::Terminated(ProdTerm::Normal));
+    }
+
+    /// P5 — idle disconnect WITHOUT the owner cutoff → disconnect → real join.
+    #[cfg(test)]
+    #[test]
+    fn r198_p5_idle_disconnect_without_close() {
+        let (h, _ends) = new_prod_harness([0xD5u8; 32], state_changing_body(5, 0xD5));
+        let (mut owner, view) = spawn_prod_gated(&r198_config(), h).expect("spawn");
+        let ready_probe = Arc::clone(&owner.ready);
+        let handle = owner.handle.take().expect("handle");
+        assert!(owner.sender_present());
+        drop(owner);
+        drop(view);
+        assert!(ready_probe.wait(FAILSAFE), "idle disconnect wakes the parked worker");
+        assert!(handle.join().is_ok(), "real normal join");
+    }
+
+    /// P6 — bounded wait + termination class on granted work. Normal + panic: both are REAL grants
+    /// (`DecisionClass::Grant`); grant/execution/fault witnesses carry the checked key.
+    #[cfg(test)]
+    #[test]
+    fn r198_p6_bounded_wait_then_termination_normal_and_panic() {
+        // Normal.
+        {
+            let canonical = state_changing_body(5, 0xA4);
+            let occ = witness_id(&canonical);
+            let (h, ends) = new_prod_harness([0xA4u8; 32], canonical.clone());
+            let (mut owner, view) = spawn_prod_gated(&r198_config(), h).expect("spawn");
+            let gen = owner.gate_generation();
+            assert!(matches!(view.submit(canonical.clone()), ProdSubmitOutcome::Admitted));
+            assert_eq!(ends.reached_rx.recv_timeout(FAILSAFE).expect("reached"), occ);
+            ends.decision_release_tx.send(()).expect("release");
+            assert_eq!(ends.grant_ack_rx.recv_timeout(FAILSAFE).expect("granted"), gen);
+            assert_eq!(ends.raw_class_rx.recv_timeout(FAILSAFE).expect("raw class"), DecisionClass::Grant);
+            assert_eq!(ends.pre_effect_rx.recv_timeout(FAILSAFE).expect("held"), gen);
+            assert_eq!(owner.observe_ready(Duration::from_millis(100)), ProdReadiness::Pending);
+            assert!(owner.handle.is_some(), "original handle retained");
+            assert_eq!(owner.close_admission(), ProdCloseOutcome::Closed);
+            ends.pre_effect_release_tx.send(()).expect("release pre-effect");
+            assert_eq!(ends.executor_entered_rx.recv_timeout(FAILSAFE).expect("entered"), gen);
+            let (ro, s, _e, ht) = ends.result_rx.recv_timeout(FAILSAFE).expect("effect");
+            assert_eq!((ro, s, ht), (gen, 1, 5));
+            assert_eq!(owner.observe_ready(FAILSAFE), ProdReadiness::ReadyToJoin);
+            assert_eq!(owner.join(), ProdJoin::Terminated(ProdTerm::Normal));
+        }
+        // Panic (opt-in guarded fault).
+        {
+            let canonical = state_changing_body(6, 0xA5);
+            let occ = witness_id(&canonical);
+            let (h, ends) = new_prod_harness([0xA5u8; 32], canonical.clone());
+            h.fault_armed.store(true, Ordering::SeqCst);
+            let (mut owner, view) = spawn_prod_gated(&r198_config(), h).expect("spawn");
+            let gen = owner.gate_generation();
+            assert!(matches!(view.submit(canonical.clone()), ProdSubmitOutcome::Admitted));
+            assert_eq!(ends.reached_rx.recv_timeout(FAILSAFE).expect("reached"), occ);
+            ends.decision_release_tx.send(()).expect("release");
+            assert_eq!(ends.grant_ack_rx.recv_timeout(FAILSAFE).expect("granted"), gen);
+            assert_eq!(ends.raw_class_rx.recv_timeout(FAILSAFE).expect("raw class"), DecisionClass::Grant);
+            assert_eq!(ends.pre_effect_rx.recv_timeout(FAILSAFE).expect("held"), gen);
+            assert_eq!(owner.close_admission(), ProdCloseOutcome::Closed);
+            ends.pre_effect_release_tx.send(()).expect("release pre-effect");
+            assert_eq!(ends.fault_witness_rx.recv_timeout(FAILSAFE).expect("fault fired"), gen);
+            assert_eq!(owner.observe_ready(FAILSAFE), ProdReadiness::ReadyToJoin);
+            assert_eq!(owner.join(), ProdJoin::Terminated(ProdTerm::Panic));
+            assert!(ends.executor_entered_rx.try_recv().is_err(), "no executor entry");
+            assert!(ends.result_rx.try_recv().is_err(), "no effect");
+            assert_eq!(owner.join(), ProdJoin::AlreadyJoined);
+        }
+    }
+
+    /// P7 — fail-closed outcomes with R202 DISTINCT classifications: (a) wrong generation →
+    /// `WrongGeneration`; (b) dead `Weak` → `DeadGate`; (c) candidate mode, authority NOT installed →
+    /// `MissingAuthority`. Each: Deny, no entry/effect, NO checked grant.
+    #[cfg(test)]
+    #[test]
+    fn r198_p7_fail_closed_missing_and_inconsistent() {
+        // (a) inconsistent occurrence (wrong generation).
+        {
+            let canonical = state_changing_body(7, 0xF7);
+            let occ = witness_id(&canonical);
+            let (h, ends) = new_prod_harness([0xF7u8; 32], canonical.clone());
+            let (mut owner, view) = spawn_prod_gated_wrong_generation(&r198_config(), h).expect("spawn");
+            assert!(matches!(view.submit(canonical.clone()), ProdSubmitOutcome::Admitted));
+            assert_eq!(ends.reached_rx.recv_timeout(FAILSAFE).expect("reached"), occ);
+            ends.decision_release_tx.send(()).expect("release");
+            assert_eq!(ends.denial_rx.recv_timeout(FAILSAFE).expect("Deny (wrong generation)"), occ);
+            assert_eq!(ends.raw_class_rx.recv_timeout(FAILSAFE).expect("raw class"), DecisionClass::WrongGeneration);
+            assert_eq!(owner.close_admission(), ProdCloseOutcome::Closed);
+            assert_eq!(owner.observe_ready(FAILSAFE), ProdReadiness::ReadyToJoin);
+            assert_eq!(owner.join(), ProdJoin::Terminated(ProdTerm::Normal));
+            assert!(ends.executor_entered_rx.try_recv().is_err(), "no entry");
+            assert!(ends.result_rx.try_recv().is_err(), "no effect");
+            assert!(ends.grant_ack_rx.try_recv().is_err(), "no checked grant");
+        }
+        // (b) dead Weak (gate dropped before the decision reads it).
+        {
+            let canonical = state_changing_body(7, 0xF8);
+            let occ = witness_id(&canonical);
+            let (h, ends) = new_prod_harness([0xF8u8; 32], canonical.clone());
+            let (mut owner, view) = spawn_prod_gated(&r198_config(), h).expect("spawn");
+            let ready_probe = Arc::clone(&owner.ready);
+            let handle = owner.handle.take().expect("handle");
+            assert!(matches!(view.submit(canonical.clone()), ProdSubmitOutcome::Admitted));
+            assert_eq!(ends.reached_rx.recv_timeout(FAILSAFE).expect("reached"), occ);
+            drop(owner);
+            drop(view);
+            ends.decision_release_tx.send(()).expect("release");
+            assert_eq!(ends.denial_rx.recv_timeout(FAILSAFE).expect("Deny (dead Weak)"), occ);
+            assert_eq!(ends.raw_class_rx.recv_timeout(FAILSAFE).expect("raw class"), DecisionClass::DeadGate);
+            assert!(ready_probe.wait(FAILSAFE), "worker exits after fail-closed deny");
+            assert!(handle.join().is_ok(), "real normal join");
+            assert!(ends.executor_entered_rx.try_recv().is_err(), "no entry");
+            assert!(ends.result_rx.try_recv().is_err(), "no effect");
+            assert!(ends.grant_ack_rx.try_recv().is_err(), "no checked grant");
+        }
+        // (c) candidate mode, authority NOT installed → MissingAuthority (never legacy fallback).
+        {
+            let canonical = state_changing_body(7, 0xF9);
+            let occ = witness_id(&canonical);
+            let (h, ends) = new_prod_harness([0xF9u8; 32], canonical.clone());
+            let (mut owner, view) = spawn_prod_gated_absent_authority(&r198_config(), h).expect("spawn");
+            assert!(matches!(view.submit(canonical.clone()), ProdSubmitOutcome::Admitted));
+            assert_eq!(ends.reached_rx.recv_timeout(FAILSAFE).expect("reached"), occ);
+            ends.decision_release_tx.send(()).expect("release");
+            assert_eq!(ends.denial_rx.recv_timeout(FAILSAFE).expect("Deny (absent authority)"), occ);
+            let rc = ends.raw_class_rx.recv_timeout(FAILSAFE).expect("raw class");
+            let checked = ends.grant_ack_rx.try_recv().ok();
+            println!("[R203-TRACE] missing-authority raw_class={:?} checked_grant={:?} effect=none", rc, checked);
+            assert_eq!(rc, DecisionClass::MissingAuthority);
+            assert_eq!(owner.close_admission(), ProdCloseOutcome::Closed);
+            assert_eq!(owner.observe_ready(FAILSAFE), ProdReadiness::ReadyToJoin);
+            assert_eq!(owner.join(), ProdJoin::Terminated(ProdTerm::Normal));
+            assert!(ends.executor_entered_rx.try_recv().is_err(), "no entry");
+            assert!(ends.result_rx.try_recv().is_err(), "no effect");
+            assert!(checked.is_none(), "no checked grant");
+        }
+    }
+
+    /// P8 — occurrence binding mismatch (generic): valid gate, binding tamper-forced to (a) a different
+    /// encoding → `OccurrenceMismatch`, and (b) `None` → `NoOccurrence`. Each Deny, no entry/effect,
+    /// no checked grant.
+    #[cfg(test)]
+    #[test]
+    fn r198_p8_occurrence_binding_mismatch_denied() {
+        // (a) mismatched occurrence encoding.
+        {
+            let canonical = state_changing_body(8, 0xE8);
+            let occ = witness_id(&canonical);
+            let (h, ends) = new_prod_harness([0xE8u8; 32], canonical.clone());
+            let (mut owner, view) = spawn_prod_gated(&r198_config(), h).expect("spawn");
+            assert!(matches!(view.submit(canonical.clone()), ProdSubmitOutcome::Admitted));
+            assert_eq!(ends.reached_rx.recv_timeout(FAILSAFE).expect("reached"), occ);
+            assert_eq!(ends.dequeue_body_rx.recv_timeout(FAILSAFE).expect("body"), (occ, true));
+            owner.test_force_occurrence(Some(OccurrenceBinding {
+                generation: owner.gate_generation(),
+                encoding: vec![0xAAu8; 8],
+            }));
+            ends.decision_release_tx.send(()).expect("release");
+            assert_eq!(ends.denial_rx.recv_timeout(FAILSAFE).expect("Deny (mismatched encoding)"), occ);
+            assert_eq!(ends.raw_class_rx.recv_timeout(FAILSAFE).expect("raw class"), DecisionClass::OccurrenceMismatch);
+            assert_eq!(owner.close_admission(), ProdCloseOutcome::Closed);
+            assert_eq!(owner.observe_ready(FAILSAFE), ProdReadiness::ReadyToJoin);
+            assert_eq!(owner.join(), ProdJoin::Terminated(ProdTerm::Normal));
+            assert!(ends.executor_entered_rx.try_recv().is_err(), "no entry");
+            assert!(ends.result_rx.try_recv().is_err(), "no effect");
+            assert!(ends.grant_ack_rx.try_recv().is_err(), "no checked grant");
+        }
+        // (b) missing work evidence (binding forced to None) with a valid gate.
+        {
+            let canonical = state_changing_body(8, 0xE7);
+            let occ = witness_id(&canonical);
+            let (h, ends) = new_prod_harness([0xE7u8; 32], canonical.clone());
+            let (mut owner, view) = spawn_prod_gated(&r198_config(), h).expect("spawn");
+            assert!(matches!(view.submit(canonical.clone()), ProdSubmitOutcome::Admitted));
+            assert_eq!(ends.reached_rx.recv_timeout(FAILSAFE).expect("reached"), occ);
+            owner.test_force_occurrence(None);
+            ends.decision_release_tx.send(()).expect("release");
+            assert_eq!(ends.denial_rx.recv_timeout(FAILSAFE).expect("Deny (missing work evidence)"), occ);
+            assert_eq!(ends.raw_class_rx.recv_timeout(FAILSAFE).expect("raw class"), DecisionClass::NoOccurrence);
+            assert_eq!(owner.close_admission(), ProdCloseOutcome::Closed);
+            assert_eq!(owner.observe_ready(FAILSAFE), ProdReadiness::ReadyToJoin);
+            assert_eq!(owner.join(), ProdJoin::Terminated(ProdTerm::Normal));
+            assert!(ends.executor_entered_rx.try_recv().is_err(), "no entry");
+            assert!(ends.grant_ack_rx.try_recv().is_err(), "no checked grant");
+        }
+    }
+
+    /// P9 — genuine poison → production decision poison arm (`DecisionClass::Poisoned`) → Deny, safe
+    /// teardown + observed join; typed `Poisoned` owner cutoff + submit; custody full-equal.
+    #[cfg(test)]
+    #[test]
+    fn r198_p9_poison_fail_closed_and_typed_refusals() {
+        let canonical = state_changing_body(9, 0xE9);
+        let occ = witness_id(&canonical);
+        let (h, ends) = new_prod_harness([0xE9u8; 32], canonical.clone());
+        let (mut owner, view) = spawn_prod_gated(&r198_config(), h).expect("spawn");
+        let gate = owner.gate_arc();
+        let ready_probe = Arc::clone(&owner.ready);
+        let handle = owner.handle.take().expect("handle");
+        assert!(matches!(view.submit(canonical.clone()), ProdSubmitOutcome::Admitted));
+        assert_eq!(ends.reached_rx.recv_timeout(FAILSAFE).expect("reached"), occ);
+        let gate_poison = Arc::clone(&gate);
+        let _ = std::thread::spawn(move || {
+            let _g = gate_poison.inner.lock().unwrap();
+            panic!("R199-INTENTIONAL-GATE-POISON");
+        })
+        .join();
+        assert_eq!(owner.close_admission(), ProdCloseOutcome::Poisoned);
+        let reference = state_changing_body(9, 0xE9);
+        let cust = bind_refusal(R200_ATTEMPT_POISON, reference.clone(), view.submit(reference.clone()));
+        assert_eq!(cust.attempt_id, R200_ATTEMPT_POISON);
+        assert_ne!(cust.attempt_id, occ, "attempt id distinct from the admitted occurrence");
+        assert_eq!(cust.disposition, RefusalDisposition::Poisoned);
+        assert!(bodies_fully_equal(&cust.returned, &cust.reference), "returned == retained reference (full decoded equality)");
+        assert_ne!(cust.committed_id, cust.returned.block_id, "committed id distinct from block id");
+        ends.decision_release_tx.send(()).expect("release");
+        assert_eq!(ends.denial_rx.recv_timeout(FAILSAFE).expect("Deny (poison)"), occ);
+        assert_eq!(ends.raw_class_rx.recv_timeout(FAILSAFE).expect("raw class"), DecisionClass::Poisoned);
+        drop(view);
+        drop(gate);
+        drop(owner);
+        assert!(ready_probe.wait(FAILSAFE), "worker exits after fail-closed poison deny");
+        assert!(handle.join().is_ok(), "observed normal join");
+        assert!(ends.executor_entered_rx.try_recv().is_err(), "no entry");
+        assert!(ends.result_rx.try_recv().is_err(), "no effect");
+        assert!(ends.grant_ack_rx.try_recv().is_err(), "no checked grant");
+    }
+
+    /// P10 — same-self-id / different-execution-input denial: valid authority + open gate; the raw
+    /// decision classifies `OccurrenceMismatch` (invalid binding, NOT a matched cutoff / missing
+    /// authority), B emits NO checked grant, zero entry/result, baseline+final `(0,0)`.
+    #[cfg(test)]
+    #[test]
+    fn r200_p10_same_self_id_different_input_denied() {
+        let admitted_ref = state_changing_body(8, 0xC1); // bound reference A
+        let work = state_changing_body(8, 0xC2); // dequeued work B
+        assert_eq!(admitted_ref.block_id, [8u8; 32]);
+        assert_eq!(work.block_id, admitted_ref.block_id, "SAME block self-id");
+        assert_ne!(
+            occurrence_encoding(&admitted_ref),
+            occurrence_encoding(&work),
+            "DIFFERENT ordered execution input"
+        );
+        let occ = witness_id(&work);
+        let (h, ends) = new_prod_harness([0xC2u8; 32], work.clone());
+        let (mut owner, view) = spawn_prod_gated(&r198_config(), h).expect("spawn");
+        assert!(matches!(
+            view.test_admit_with_mismatched_binding(work.clone(), &admitted_ref),
+            ProdSubmitOutcome::Admitted
+        ));
+        assert_eq!(ends.reached_rx.recv_timeout(FAILSAFE).expect("reached"), occ);
+        assert_eq!(ends.dequeue_body_rx.recv_timeout(FAILSAFE).expect("body"), (occ, true));
+        assert!(!owner.is_closed(), "gate still open");
+        assert_eq!(owner.sender_present(), true);
+        ends.decision_release_tx.send(()).expect("release");
+        assert_eq!(
+            ends.denial_rx.recv_timeout(FAILSAFE).expect("Deny (same self-id, different input)"),
+            occ
+        );
+        let rc = ends.raw_class_rx.recv_timeout(FAILSAFE).expect("raw class");
+        let checked = ends.grant_ack_rx.try_recv().ok();
+        println!("[R203-TRACE] mismatch raw_class={:?} checked_grant={:?} effect=none", rc, checked);
+        assert_eq!(rc, DecisionClass::OccurrenceMismatch, "invalid binding, not a matched cutoff / missing authority");
+        assert_eq!(owner.close_admission(), ProdCloseOutcome::Closed);
+        assert_eq!(owner.observe_ready(FAILSAFE), ProdReadiness::ReadyToJoin);
+        assert_eq!(owner.join(), ProdJoin::Terminated(ProdTerm::Normal));
+        assert!(ends.executor_entered_rx.try_recv().is_err(), "zero executor entry");
+        assert!(ends.result_rx.try_recv().is_err(), "zero effect");
+        assert!(checked.is_none(), "B never emits a checked grant");
+        let probes = drain_state_probes(&ends.state_probe_rx);
+        let (init, fin) = ordered_snapshots(&probes, occ).expect("ordered snapshots");
+        assert_eq!((init, fin), ((0, 0), (0, 0)), "denied: baseline and final nonce/height unchanged");
+    }
+
+    /// P11 — R201 refusal-custody full-equality sensitivity (decoded signature + suite id) with the raw
+    /// proposal unchanged, and a real cutoff refusal returning the exact signature-variant body.
+    #[cfg(test)]
+    #[test]
+    fn r201_p11_refusal_custody_full_decoded_equality() {
+        let base = state_changing_body(11, 0xB1);
+        let sig_variant = with_decoded_signature(&base, vec![0x5Au8, 0xA5u8]);
+        let suite_variant = with_decoded_suite(&base, base.txs[0].suite_id ^ 0x1);
+        assert_eq!(sig_variant.block_id, base.block_id);
+        assert_eq!(suite_variant.block_id, base.block_id);
+        assert!(*base.proposal == *sig_variant.proposal, "raw proposal unchanged (sig variant)");
+        assert!(*base.proposal == *suite_variant.proposal, "raw proposal unchanged (suite variant)");
+        assert!(bodies_identical(&base, &sig_variant), "bodies_identical is blind to a decoded signature difference");
+        assert!(!bodies_fully_equal(&base, &sig_variant), "bodies_fully_equal catches the decoded signature difference");
+        assert!(bodies_identical(&base, &suite_variant), "bodies_identical is blind to a decoded suite difference");
+        assert!(!bodies_fully_equal(&base, &suite_variant), "bodies_fully_equal catches the decoded suite difference");
+
+        let (h, ends) = new_prod_harness([0xB1u8; 32], base.clone());
+        let (mut owner, view) = spawn_prod_gated(&r198_config(), h).expect("spawn");
+        let handle = owner.handle.take().expect("handle");
+        let ready_probe = Arc::clone(&owner.ready);
+        assert_eq!(owner.close_admission(), ProdCloseOutcome::Closed);
+        let cust = bind_refusal(0xA77E_51A0u64, sig_variant.clone(), view.submit(sig_variant.clone()));
+        assert_eq!(cust.disposition, RefusalDisposition::Cutoff);
+        assert_ne!(cust.attempt_id, witness_id(&base), "attempt id distinct from the body fold");
+        assert!(bodies_fully_equal(&cust.returned, &cust.reference), "returned == retained variant reference (full)");
+        assert!(bodies_fully_equal(&cust.returned, &sig_variant));
+        assert!(!bodies_fully_equal(&cust.returned, &base), "returned is NOT the base: decoded signature preserved");
+        assert!(bodies_identical(&cust.returned, &base), "self-id/proposal/decoded-core still match the base");
+        assert_ne!(cust.committed_id, cust.returned.block_id, "committed id distinct from block id");
+        drop(view);
+        assert!(ready_probe.wait(FAILSAFE), "idle disconnect wakes the worker");
+        assert!(handle.join().is_ok(), "real normal join");
+        assert!(ends.reached_rx.try_recv().is_err(), "no dequeue");
+        assert!(ends.grant_ack_rx.try_recv().is_err(), "no checked grant");
+    }
+
+    /// P12 — R202 Row-1: two INDEPENDENT candidate workers given the SAME EXACT body both reach a real
+    /// Grant; each emitted checked key equals its own validated worker generation, the two keys DIFFER
+    /// (even though the bodies — and the diagnostic fold `occ` — are identical), and each real effect
+    /// carries its own worker's key. This is the distinguishable-checked-observation evidence R201 left
+    /// open (R201's P1 produced a denial + a synthetic bypass, not two real grants).
+    #[cfg(test)]
+    #[test]
+    fn r202_p12_equal_bodies_distinct_checked_grants() {
+        let body = state_changing_body(12, 0xC2);
+        let occ = witness_id(&body);
+        // Worker A.
+        let (ha, ends_a) = new_prod_harness([0xC2u8; 32], body.clone());
+        let (mut owner_a, view_a) = spawn_prod_gated(&r198_config(), ha).expect("spawn A");
+        let gen_a = owner_a.gate_generation();
+        // Worker B (same exact body).
+        let (hb, ends_b) = new_prod_harness([0xC2u8; 32], body.clone());
+        let (mut owner_b, view_b) = spawn_prod_gated(&r198_config(), hb).expect("spawn B");
+        let gen_b = owner_b.gate_generation();
+        assert_ne!(gen_a, gen_b, "two workers occupy distinct generations");
+        // Both admit the SAME exact body.
+        assert!(matches!(view_a.submit(body.clone()), ProdSubmitOutcome::Admitted));
+        assert!(matches!(view_b.submit(body.clone()), ProdSubmitOutcome::Admitted));
+        assert_eq!(ends_a.reached_rx.recv_timeout(FAILSAFE).expect("A reached"), occ);
+        assert_eq!(ends_b.reached_rx.recv_timeout(FAILSAFE).expect("B reached"), occ);
+        assert_eq!(ends_a.dequeue_body_rx.recv_timeout(FAILSAFE).expect("A body"), (occ, true));
+        assert_eq!(ends_b.dequeue_body_rx.recv_timeout(FAILSAFE).expect("B body"), (occ, true));
+        // Release both decisions on an OPEN gate → two REAL grants.
+        ends_a.decision_release_tx.send(()).expect("release A");
+        ends_b.decision_release_tx.send(()).expect("release B");
+        let key_a = ends_a.grant_ack_rx.recv_timeout(FAILSAFE).expect("A grants");
+        let key_b = ends_b.grant_ack_rx.recv_timeout(FAILSAFE).expect("B grants");
+        assert_eq!(key_a, gen_a, "A's checked key == A's validated generation");
+        assert_eq!(key_b, gen_b, "B's checked key == B's validated generation");
+        assert_ne!(key_a, key_b, "equal bodies yield DISTINGUISHABLE checked observations");
+        assert_eq!(ends_a.raw_class_rx.recv_timeout(FAILSAFE).expect("A raw"), DecisionClass::Grant);
+        assert_eq!(ends_b.raw_class_rx.recv_timeout(FAILSAFE).expect("B raw"), DecisionClass::Grant);
+        assert_eq!(ends_a.pre_effect_rx.recv_timeout(FAILSAFE).expect("A held"), gen_a);
+        assert_eq!(ends_b.pre_effect_rx.recv_timeout(FAILSAFE).expect("B held"), gen_b);
+        // Let each execute; each effect corresponds to its own key.
+        ends_a.pre_effect_release_tx.send(()).expect("release A pre-effect");
+        ends_b.pre_effect_release_tx.send(()).expect("release B pre-effect");
+        assert_eq!(ends_a.executor_entered_rx.recv_timeout(FAILSAFE).expect("A entered"), gen_a);
+        assert_eq!(ends_b.executor_entered_rx.recv_timeout(FAILSAFE).expect("B entered"), gen_b);
+        let (ra, sa, _ea, hta) = ends_a.result_rx.recv_timeout(FAILSAFE).expect("A effect");
+        let (rb, sb, _eb, htb) = ends_b.result_rx.recv_timeout(FAILSAFE).expect("B effect");
+        println!(
+            "[R203-TRACE] equal-body-grant A raw_class=Grant checked_key={} effect=(nonce={},height={}) | B raw_class=Grant checked_key={} effect=(nonce={},height={}) | keys_distinct={}",
+            key_a, sa, hta, key_b, sb, htb, key_a != key_b
+        );
+        assert_eq!((ra, sa, hta), (gen_a, 1, 12), "A effect carries A's key");
+        assert_eq!((rb, sb, htb), (gen_b, 1, 12), "B effect carries B's key");
+        assert_eq!(owner_a.close_admission(), ProdCloseOutcome::Closed);
+        assert_eq!(owner_b.close_admission(), ProdCloseOutcome::Closed);
+        assert_eq!(owner_a.observe_ready(FAILSAFE), ProdReadiness::ReadyToJoin);
+        assert_eq!(owner_b.observe_ready(FAILSAFE), ProdReadiness::ReadyToJoin);
+        assert_eq!(owner_a.join(), ProdJoin::Terminated(ProdTerm::Normal));
+        assert_eq!(owner_b.join(), ProdJoin::Terminated(ProdTerm::Normal));
     }
 }
